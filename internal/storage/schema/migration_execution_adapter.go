@@ -30,7 +30,7 @@ type migration0059NodeState struct {
 
 type migration0059Dependency struct {
 	source   migration0059Node
-	target   migration0059Node
+	targets  []migration0059Node
 	typeName string
 	gate     string
 }
@@ -255,18 +255,19 @@ func loadMigration0059Dependencies(ctx context.Context, db DBConn, table, source
 		if !issueID.Valid || !typeName.Valid {
 			continue
 		}
-		target := migration0059Node{}
-		switch {
-		case issueTarget.Valid:
-			target = migration0059Node{kind: migration0059IssueKind, id: issueTarget.String}
-		case wispTarget.Valid:
-			target = migration0059Node{kind: migration0059WispKind, id: wispTarget.String}
-		default:
+		targets := make([]migration0059Node, 0, 2)
+		if issueTarget.Valid {
+			targets = append(targets, migration0059Node{kind: migration0059IssueKind, id: issueTarget.String})
+		}
+		if wispTarget.Valid {
+			targets = append(targets, migration0059Node{kind: migration0059WispKind, id: wispTarget.String})
+		}
+		if len(targets) == 0 {
 			continue
 		}
 		dependencies = append(dependencies, migration0059Dependency{
 			source:   migration0059Node{kind: sourceKind, id: issueID.String},
-			target:   target,
+			targets:  targets,
 			typeName: typeName.String,
 			gate:     migration0059Gate(metadata),
 		})
@@ -301,7 +302,9 @@ func migration0059BlockedClosure(graph migration0059Graph) map[migration0059Node
 	children := make(map[migration0059Node][]migration0059Node)
 	for _, dependency := range graph.dependencies {
 		if dependency.typeName == "parent-child" {
-			children[dependency.target] = append(children[dependency.target], dependency.source)
+			for _, target := range dependency.targets {
+				children[target] = append(children[target], dependency.source)
+			}
 		}
 	}
 
@@ -315,17 +318,24 @@ func migration0059BlockedClosure(graph migration0059Graph) map[migration0059Node
 		isDirect := false
 		switch dependency.typeName {
 		case "blocks", "conditional-blocks":
-			target, exists := graph.nodes[dependency.target]
-			isDirect = exists && migration0059NodeOpen(target.status)
+			for _, targetNode := range dependency.targets {
+				target, exists := graph.nodes[targetNode]
+				if exists && migration0059NodeOpen(target.status) {
+					isDirect = true
+					break
+				}
+			}
 		case "waits-for":
 			var hasOpen, hasClosed bool
-			for _, child := range children[dependency.target] {
-				childState, exists := graph.nodes[child]
-				if !exists {
-					continue
+			for _, target := range dependency.targets {
+				for _, child := range children[target] {
+					childState, exists := graph.nodes[child]
+					if !exists {
+						continue
+					}
+					hasOpen = hasOpen || migration0059NodeOpen(childState.status)
+					hasClosed = hasClosed || migration0059NodeClosed(childState.status)
 				}
-				hasOpen = hasOpen || migration0059NodeOpen(childState.status)
-				hasClosed = hasClosed || migration0059NodeClosed(childState.status)
 			}
 			isDirect = hasOpen && !(dependency.gate == "any-children" && hasClosed)
 		}

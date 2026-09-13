@@ -40,13 +40,13 @@ func TestMigration0059BlockedClosureProductionShape(t *testing.T) {
 	}
 	graph.dependencies = append(graph.dependencies, migration0059Dependency{
 		source:   migration0059Node{kind: migration0059WispKind, id: "wisp-00000"},
-		target:   migration0059Node{kind: migration0059IssueKind, id: "issue-000"},
+		targets:  []migration0059Node{{kind: migration0059IssueKind, id: "issue-000"}},
 		typeName: "blocks",
 	})
 	for i := 1; i < 11654; i++ {
 		graph.dependencies = append(graph.dependencies, migration0059Dependency{
 			source:   migration0059Node{kind: migration0059WispKind, id: fmt.Sprintf("wisp-%05d", i)},
-			target:   migration0059Node{kind: migration0059WispKind, id: fmt.Sprintf("wisp-%05d", i-1)},
+			targets:  []migration0059Node{{kind: migration0059WispKind, id: fmt.Sprintf("wisp-%05d", i-1)}},
 			typeName: "parent-child",
 		})
 	}
@@ -54,7 +54,7 @@ func TestMigration0059BlockedClosureProductionShape(t *testing.T) {
 		i := len(graph.dependencies) % 285
 		graph.dependencies = append(graph.dependencies, migration0059Dependency{
 			source:   migration0059Node{kind: migration0059IssueKind, id: fmt.Sprintf("issue-%03d", i)},
-			target:   migration0059Node{kind: migration0059IssueKind, id: fmt.Sprintf("issue-%03d", (i+1)%285)},
+			targets:  []migration0059Node{{kind: migration0059IssueKind, id: fmt.Sprintf("issue-%03d", (i+1)%285)}},
 			typeName: "relates-to",
 		})
 	}
@@ -65,6 +65,59 @@ func TestMigration0059BlockedClosureProductionShape(t *testing.T) {
 	}
 	if !blocked[migration0059Node{kind: migration0059WispKind, id: "wisp-11653"}] {
 		t.Fatal("deepest production-shaped descendant is not blocked")
+	}
+}
+
+func TestMigration0059BlockedClosurePreservesDualTargetRowSemantics(t *testing.T) {
+	open := sql.NullString{String: "open", Valid: true}
+	closed := sql.NullString{String: "closed", Valid: true}
+	node := func(kind, id string) migration0059Node { return migration0059Node{kind: kind, id: id} }
+
+	dualBlocker := node(migration0059IssueKind, "dual-blocker")
+	dualAnyWaiter := node(migration0059IssueKind, "dual-any-waiter")
+	root := node(migration0059IssueKind, "root")
+	dualChild := node(migration0059IssueKind, "dual-child")
+	closedIssueTarget := node(migration0059IssueKind, "closed-issue-target")
+	openWispTarget := node(migration0059WispKind, "open-wisp-target")
+	issueParent := node(migration0059IssueKind, "issue-parent")
+	wispParent := node(migration0059WispKind, "wisp-parent")
+	openChild := node(migration0059IssueKind, "open-child")
+	closedChild := node(migration0059WispKind, "closed-child")
+	openRootTarget := node(migration0059IssueKind, "open-root-target")
+
+	graph := migration0059Graph{
+		nodes: map[migration0059Node]migration0059NodeState{
+			dualBlocker:       {status: open},
+			dualAnyWaiter:     {status: open},
+			root:              {status: open},
+			dualChild:         {status: open},
+			closedIssueTarget: {status: closed},
+			openWispTarget:    {status: open},
+			issueParent:       {status: open},
+			wispParent:        {status: open},
+			openChild:         {status: open},
+			closedChild:       {status: closed},
+			openRootTarget:    {status: open},
+		},
+		dependencies: []migration0059Dependency{
+			{source: dualBlocker, targets: []migration0059Node{closedIssueTarget, openWispTarget}, typeName: "blocks"},
+			{source: openChild, targets: []migration0059Node{issueParent}, typeName: "parent-child"},
+			{source: closedChild, targets: []migration0059Node{wispParent}, typeName: "parent-child"},
+			{source: dualAnyWaiter, targets: []migration0059Node{issueParent, wispParent}, typeName: "waits-for", gate: "any-children"},
+			{source: root, targets: []migration0059Node{openRootTarget}, typeName: "blocks"},
+			{source: dualChild, targets: []migration0059Node{root, issueParent}, typeName: "parent-child"},
+		},
+	}
+
+	blocked := migration0059BlockedClosure(graph)
+	if !blocked[dualBlocker] {
+		t.Fatal("dual-target blocker is clear despite an open wisp target")
+	}
+	if blocked[dualAnyWaiter] {
+		t.Fatal("dual-target any-children waiter is blocked despite a closed child in the combined target set")
+	}
+	if !blocked[dualChild] {
+		t.Fatal("dual-target parent-child row did not propagate blocked state from either parent")
 	}
 }
 

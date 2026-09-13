@@ -54,7 +54,7 @@ func TestEmbeddedMigration0059IndexedExecutionMatchesFrozenSemantics(t *testing.
 	for _, id := range []string{
 		"m59-root-issue", "m59-child-from-issue", "m59-child-from-wisp",
 		"m59-wisp-child-target-issue", "m59-all-waiter", "m59-grandchild",
-		"m59-cycle-a", "m59-cycle-b",
+		"m59-cycle-a", "m59-cycle-b", "m59-dual-target",
 	} {
 		if got[id] != 1 {
 			t.Errorf("%s is_blocked = %d, want 1", id, got[id])
@@ -134,6 +134,7 @@ func TestEmbeddedMigration0059MidStepFailureRollsBackAndRetries(t *testing.T) {
 	dataDir := seedMainSchemaAt(t, ctx, 58)
 	conn, closeConn := openPinnedConn(t, ctx, dataDir)
 	seedMigration0059Graph(t, ctx, conn)
+	before := migration0059Outcomes(t, ctx, conn)
 
 	injected := errors.New("injected migration 0059 failure after apply")
 	restore := schema.SetMigration0059FaultHookForTest(func(stage string) error {
@@ -155,6 +156,9 @@ func TestEmbeddedMigration0059MidStepFailureRollsBackAndRetries(t *testing.T) {
 	if got := scalarInt(t, ctx, retry, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"); got != 58 {
 		t.Fatalf("cursor after rolled-back mid-step failure = %d, want 58", got)
 	}
+	if got := migration0059Outcomes(t, ctx, retry); !reflect.DeepEqual(got, before) {
+		t.Fatalf("blocked state leaked across rolled-back mid-step failure: got %#v, want original %#v", got, before)
+	}
 	assertMigration0059TemporaryTablesGone(t, ctx, retry)
 	if _, err := schema.MigrateUp(ctx, retry); err != nil {
 		t.Fatalf("plain MigrateUp retry after mid-step failure: %v", err)
@@ -171,6 +175,7 @@ func seedMigration0059Graph(t *testing.T, ctx context.Context, conn *sql.Conn) {
 		"m59-target-issue", "m59-root-issue", "m59-child-from-issue", "m59-child-from-wisp",
 		"m59-wisp-child-target-issue", "m59-any-parent", "m59-any-open", "m59-any-closed",
 		"m59-any-waiter", "m59-all-waiter", "m59-grandchild", "m59-cycle-a", "m59-cycle-b",
+		"m59-dual-target",
 	} {
 		seedIssue(t, ctx, conn, id)
 	}
@@ -213,6 +218,13 @@ VALUES
 	('00000000-0000-0000-0000-000000000598', 'm59-child-from-wisp', 'm59-root-wisp', 'parent-child', NOW(), 'tester', JSON_OBJECT()),
 	('00000000-0000-0000-0000-000000000606', 'm59-wisp-child-target-issue', 'm59-target-wisp', 'blocks', NOW(), 'tester', JSON_OBJECT())`)
 	mustExecConn(t, ctx, conn, "UPDATE issues SET status = 'closed' WHERE id = 'm59-any-closed'")
+	// Some pre-split/custom databases already had both split columns when 0041
+	// ran, so 0041 did not add ck_dep_one_target. Frozen 0059 evaluates both
+	// non-NULL targets on such a legacy row; the adapter must do the same.
+	mustExecConn(t, ctx, conn, "ALTER TABLE dependencies DROP CHECK ck_dep_one_target")
+	mustExecConn(t, ctx, conn, `
+INSERT INTO dependencies (id, issue_id, depends_on_issue_id, depends_on_wisp_id, type, created_at, created_by, metadata)
+VALUES ('00000000-0000-0000-0000-000000000611', 'm59-dual-target', 'm59-any-closed', 'm59-target-wisp', 'blocks', NOW(), 'tester', JSON_OBJECT())`)
 	mustExecConn(t, ctx, conn, "UPDATE issues SET is_blocked = 0, updated_at = updated_at WHERE id LIKE 'm59-%'")
 	// TINYINT(1) accepts noncanonical integers. The frozen migration first
 	// resets every row to literal zero, so the adapter must normalize a blocked
