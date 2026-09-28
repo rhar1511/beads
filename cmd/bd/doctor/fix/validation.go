@@ -1,12 +1,16 @@
 package fix
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/types"
 )
 
 // getDatabasePath returns the actual database directory path, respecting dolt_data_dir.
@@ -42,7 +46,7 @@ func OrphanedDependencies(path string, verbose bool) error {
 	// Find orphaned dependencies (exclude external: cross-rig tracking refs, #1593)
 	//nolint:gosec // G202: fixDependencyUnionSQL returns a fixed internal SELECT fragment.
 	query := `
-		SELECT d.dep_table, d.issue_id, d.depends_on_id
+		SELECT d.dep_table, d.issue_id, d.depends_on_id, d.type
 		FROM (` + fixDependencyUnionSQL() + `) d
 		WHERE NOT EXISTS (SELECT 1 FROM issues i WHERE i.id = d.depends_on_id)
 		  AND NOT EXISTS (SELECT 1 FROM wisps w WHERE w.id = d.depends_on_id)
@@ -58,12 +62,13 @@ func OrphanedDependencies(path string, verbose bool) error {
 		depTable    string
 		issueID     string
 		dependsOnID string
+		depType     string
 	}
 	var orphans []orphan
 
 	for rows.Next() {
 		var o orphan
-		if err := rows.Scan(&o.depTable, &o.issueID, &o.dependsOnID); err == nil {
+		if err := rows.Scan(&o.depTable, &o.issueID, &o.dependsOnID, &o.depType); err == nil {
 			orphans = append(orphans, o)
 		}
 	}
@@ -87,11 +92,12 @@ func OrphanedDependencies(path string, verbose bool) error {
 	var removed int
 	for _, o := range orphans {
 		var err error
+		var result sql.Result
 		switch o.depTable {
 		case "dependencies":
-			_, err = tx.Exec("DELETE FROM dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ?", o.issueID, o.dependsOnID)
+			result, err = tx.Exec("DELETE FROM dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ?", o.issueID, o.dependsOnID)
 		case "wisp_dependencies":
-			_, err = tx.Exec("DELETE FROM wisp_dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ?", o.issueID, o.dependsOnID)
+			result, err = tx.Exec("DELETE FROM wisp_dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ?", o.issueID, o.dependsOnID)
 		default:
 			fmt.Printf("  Warning: skipped orphaned dependency from unexpected table %s\n", o.depTable)
 			continue
@@ -99,9 +105,26 @@ func OrphanedDependencies(path string, verbose bool) error {
 		if err != nil {
 			fmt.Printf("  Warning: failed to remove %s→%s: %v\n", o.issueID, o.dependsOnID, err)
 		} else {
-			removed++
-			if showIndividual {
-				fmt.Printf("  Removed orphaned dependency: %s→%s\n", o.issueID, o.dependsOnID)
+			n, rowsErr := result.RowsAffected()
+			if rowsErr != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("check removed orphan dependency %s→%s: %w", o.issueID, o.dependsOnID, rowsErr)
+			}
+			if n > 0 {
+				if o.depTable == "dependencies" {
+					if err := bumpPermanentDependencySourceRevision(context.Background(), tx, o.issueID); err != nil {
+						_ = tx.Rollback()
+						return fmt.Errorf("fence source %s after orphan dependency removal: %w", o.issueID, err)
+					}
+				}
+				if err := recomputeBlockedAfterDependencyRepair(context.Background(), tx, o.depTable == "wisp_dependencies", o.issueID, o.dependsOnID, types.DependencyType(o.depType)); err != nil {
+					_ = tx.Rollback()
+					return fmt.Errorf("recompute blocked state after orphan dependency removal %s→%s: %w", o.issueID, o.dependsOnID, err)
+				}
+				removed++
+				if showIndividual {
+					fmt.Printf("  Removed orphaned dependency: %s→%s\n", o.issueID, o.dependsOnID)
+				}
 			}
 		}
 	}
@@ -187,11 +210,12 @@ func ChildParentDependencies(path string, verbose bool) error {
 	var removed int
 	for _, d := range badDeps {
 		var err error
+		var result sql.Result
 		switch d.depTable {
 		case "dependencies":
-			_, err = tx.Exec("DELETE FROM dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ? AND type = ?", d.issueID, d.dependsOnID, d.depType)
+			result, err = tx.Exec("DELETE FROM dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ? AND type = ?", d.issueID, d.dependsOnID, d.depType)
 		case "wisp_dependencies":
-			_, err = tx.Exec("DELETE FROM wisp_dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ? AND type = ?", d.issueID, d.dependsOnID, d.depType)
+			result, err = tx.Exec("DELETE FROM wisp_dependencies WHERE issue_id = ? AND "+fixDependencyTargetExpr+" = ? AND type = ?", d.issueID, d.dependsOnID, d.depType)
 		default:
 			fmt.Printf("  Warning: skipped child→parent dependency from unexpected table %s\n", d.depTable)
 			continue
@@ -199,9 +223,26 @@ func ChildParentDependencies(path string, verbose bool) error {
 		if err != nil {
 			fmt.Printf("  Warning: failed to remove %s→%s: %v\n", d.issueID, d.dependsOnID, err)
 		} else {
-			removed++
-			if showIndividual {
-				fmt.Printf("  Removed child→parent dependency: %s→%s\n", d.issueID, d.dependsOnID)
+			n, rowsErr := result.RowsAffected()
+			if rowsErr != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("check removed child-parent dependency %s→%s: %w", d.issueID, d.dependsOnID, rowsErr)
+			}
+			if n > 0 {
+				if d.depTable == "dependencies" {
+					if err := bumpPermanentDependencySourceRevision(context.Background(), tx, d.issueID); err != nil {
+						_ = tx.Rollback()
+						return fmt.Errorf("fence source %s after child-parent dependency removal: %w", d.issueID, err)
+					}
+				}
+				if err := recomputeBlockedAfterDependencyRepair(context.Background(), tx, d.depTable == "wisp_dependencies", d.issueID, d.dependsOnID, types.DependencyType(d.depType)); err != nil {
+					_ = tx.Rollback()
+					return fmt.Errorf("recompute blocked state after child-parent dependency removal %s→%s: %w", d.issueID, d.dependsOnID, err)
+				}
+				removed++
+				if showIndividual {
+					fmt.Printf("  Removed child→parent dependency: %s→%s\n", d.issueID, d.dependsOnID)
+				}
 			}
 		}
 	}
@@ -214,6 +255,37 @@ func ChildParentDependencies(path string, verbose bool) error {
 
 	fmt.Printf("  Fixed %d child→parent dependency anti-pattern(s)\n", removed)
 	return nil
+}
+
+// bumpPermanentDependencySourceRevision fences a source after one of the
+// doctor repairs removes an outgoing edge from the versioned dependencies
+// table. A corrupt edge whose source row is already missing has no surviving
+// work snapshot to fence.
+func bumpPermanentDependencySourceRevision(ctx context.Context, tx *sql.Tx, issueID string) error {
+	var exists int
+	err := tx.QueryRowContext(ctx, "SELECT 1 FROM issues WHERE id = ? LIMIT 1", issueID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check source issue: %w", err)
+	}
+	return issueops.BumpIssueRevisionInTx(ctx, tx, issueID, false)
+}
+
+func recomputeBlockedAfterDependencyRepair(ctx context.Context, tx *sql.Tx, sourceIsWisp bool, sourceID, targetID string, depType types.DependencyType) error {
+	var issueIDs, wispIDs []string
+	var err error
+	if sourceIsWisp {
+		issueIDs, wispIDs, err = issueops.AffectedByDepChangeForWispInTx(ctx, tx, sourceID, targetID, depType)
+	} else {
+		issueIDs, wispIDs, err = issueops.AffectedByDepChangeInTx(ctx, tx, sourceID, targetID, depType)
+	}
+	if err != nil {
+		return err
+	}
+	_, err = issueops.RecomputeIsBlockedInTxWithResult(ctx, tx, issueIDs, wispIDs)
+	return err
 }
 
 // CrossTableDuplicates removes issues-table rows whose IDs also exist in the
@@ -267,6 +339,13 @@ func CrossTableDuplicates(path string, verbose bool) error {
 
 	var removed int
 	for _, id := range dupIDs {
+		// Removing the duplicate permanent target may cascade away incoming
+		// dependency rows from other permanent sources. Fence those source
+		// snapshots in the same transaction before the FK cascade runs.
+		if err := issueops.BumpDependencySourceRevisionsForTargetsInTx(context.Background(), tx, []string{id}); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("fence dependency sources before removing duplicate issue %s: %w", id, err)
+		}
 		// Delete child rows first (FK-safe order), then the issues row.
 		for _, childTable := range []string{"labels", "events", "dependencies", "comments"} {
 			//nolint:gosec // G202: childTable is from a hardcoded list above.

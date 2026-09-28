@@ -241,6 +241,10 @@ type DependencyUseCase interface {
 	GetIssueDependencyRecords(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
 
 	GetWispDependencyRecords(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error)
+	// WispSourceIDs classifies IDs by storage plane inside the current unit of
+	// work. Revision-fenced operations use it to refuse snapshots that depend
+	// on the ignored wisp plane.
+	WispSourceIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 
 	AddWispDependency(ctx context.Context, dep *types.Dependency, actor string) error
 	RemoveWispDependency(ctx context.Context, wispID, dependsOnID, actor string) error
@@ -824,4 +828,8 @@ func (u *dependencyUseCaseImpl) GetWispDependencyRecords(ctx context.Context, wi
 		return nil, fmt.Errorf("GetWispDependencyRecords: %w", err)
 	}
 	return out, nil
+}
+
+func (u *dependencyUseCaseImpl) WispSourceIDs(ctx context.Context, ids []string) (map[string]struct{}, error) {
+	return u.depRepo.WispSourceIDs(ctx, ids)
 }

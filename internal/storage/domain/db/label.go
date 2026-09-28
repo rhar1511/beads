@@ -74,9 +74,8 @@ func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, act
 		}
 		return nil
 	}
-	issueTable := pickIssueTable(opts.UseWispsTable)
-	if err := issueops.TouchRowVersionInTx(ctx, r.runner, issueTable, issueID); err != nil {
-		return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: %w", issueID, label, err)
+	if err := issueops.BumpIssueRevisionInTx(ctx, r.runner, issueID, opts.UseWispsTable); err != nil {
+		return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: bump issue revision: %w", issueID, label, err)
 	}
 	if err := r.events.Record(ctx, domain.Event{
 		IssueID:  issueID,
@@ -114,9 +113,8 @@ func (r *labelSQLRepositoryImpl) Delete(ctx context.Context, issueID, label, act
 	if rows == 0 {
 		return nil
 	}
-	issueTable := pickIssueTable(opts.UseWispsTable)
-	if err := issueops.TouchRowVersionInTx(ctx, r.runner, issueTable, issueID); err != nil {
-		return fmt.Errorf("db: LabelSQLRepository.Delete %s/%s: %w", issueID, label, err)
+	if err := issueops.BumpIssueRevisionInTx(ctx, r.runner, issueID, opts.UseWispsTable); err != nil {
+		return fmt.Errorf("db: LabelSQLRepository.Delete %s/%s: bump issue revision: %w", issueID, label, err)
 	}
 	if err := r.events.Record(ctx, domain.Event{
 		IssueID:  issueID,
@@ -215,6 +213,18 @@ func (r *labelSQLRepositoryImpl) DeleteAllForIDs(ctx context.Context, ids []stri
 			placeholders[i] = "?"
 			args[i] = id
 		}
+		owners, err := r.labelOwnersInBatch(ctx, table, placeholders, args)
+		if err != nil {
+			if opts.UseWispsTable && dberrors.IsTableNotExist(err) {
+				return total, nil
+			}
+			return total, err
+		}
+		for _, owner := range owners {
+			if err := issueops.BumpIssueRevisionInTx(ctx, r.runner, owner, opts.UseWispsTable); err != nil {
+				return total, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs bump revision for %s: %w", owner, err)
+			}
+		}
 		//nolint:gosec // G201: table is one of two hardcoded constants; ? placeholders only.
 		res, err := r.runner.ExecContext(ctx,
 			fmt.Sprintf("DELETE FROM %s WHERE issue_id IN (%s)", table, strings.Join(placeholders, ",")),
@@ -232,6 +242,28 @@ func (r *labelSQLRepositoryImpl) DeleteAllForIDs(ctx context.Context, ids []stri
 		total += int(n)
 	}
 	return total, nil
+}
+
+func (r *labelSQLRepositoryImpl) labelOwnersInBatch(ctx context.Context, table string, placeholders []string, args []any) ([]string, error) {
+	rows, err := r.runner.QueryContext(ctx,
+		fmt.Sprintf("SELECT DISTINCT issue_id FROM %s WHERE issue_id IN (%s) ORDER BY issue_id", table, strings.Join(placeholders, ",")),
+		args...)
+	if err != nil {
+		return nil, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs owners: %w", err)
+	}
+	defer rows.Close()
+	var owners []string
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			return nil, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs scan owner: %w", err)
+		}
+		owners = append(owners, owner)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs owners: %w", err)
+	}
+	return owners, nil
 }
 
 func (r *labelSQLRepositoryImpl) CountAllForIDs(ctx context.Context, ids []string, opts domain.LabelOpts) (int, error) {

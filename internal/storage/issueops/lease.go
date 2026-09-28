@@ -58,36 +58,18 @@ func leaseTTL(ctx context.Context) time.Duration {
 // column default) so a freshly-claimed row is always distinguishable from a
 // never-touched one.
 //
-// INVARIANT: every supported write that changes the user-authored issue
-// aggregate MUST rewrite row_lock. That includes scalar and lifecycle fields,
-// labels, comments, dependency edges, compaction/restoration and rename. Exact
-// no-ops do not rewrite it. The derived is_blocked projection is deliberately
-// excluded: it is recomputed from other rows, is not authored issue state, and
-// bumping it would make an otherwise stable issue token depend on graph-cache
-// maintenance. The dependency mutation that caused a recompute still rewrites
-// its source aggregate's token. Heartbeats no
-// longer touch the issues row at all (bd-lrgn1): the lease lives in the
+// INVARIANT: every supported change to a representable issue aggregate field
+// MUST rewrite row_lock. This includes scalar and lifecycle fields, labels,
+// outgoing dependency edges, derived is_blocked state, compaction/restoration,
+// and rename. Exact no-ops do not rewrite it. Comments and metadata changes
+// also remint the token even when the current Gas City WorkDigest omits the
+// changed comment or a decision-frontier hold/receipt metadata key. Those are
+// conservative invalidations: keeping the token rule independent of metadata
+// keys avoids a caller-specific filter silently missing a real work change.
+// Heartbeats do not touch the issue row (bd-lrgn1): the lease lives in the
 // ephemeral leases table, where a racing heartbeat and reclaim contend on the
-// SAME lease row and conflict without any help. Adding a new path that sets
-// status/assignee outside updateIssueInTx without rewriting row_lock would
-// silently reintroduce the zombie-merge bug.
-//
-// The exemptions are load-bearing in the OTHER direction too (analysis
-// absorbed from gastownhall/beads#4682, Julian Knutsen): row_lock doubles as
-// the RowVersion optimistic-concurrency token (types.Issue.RowVersion), so a
-// path that reminted it WITHOUT changing the content a CAS holder cares about
-// would spuriously fail honest ExpectedVersion checks. The is_blocked
-// recompute is the canonical case: it is a denormalized aux-marker refresh
-// that already goes out of its way to preserve updated_at
-// (blocked_state.go), and bumping the token there would clobber a concurrent
-// whole-row CAS over a cell derived from OTHER rows. (The PR's second
-// exemption of this kind, the lease heartbeat, no longer arises here — since
-// bd-lrgn1 heartbeats never touch the issues row at all.) So the invariant
-// cuts both ways: status/ownership writes MUST remint, aux-marker writes MUST
-// NOT. The remint direction is enforced at build time by
-// TestAllIssueRowWritesStampRowLock (row_lock_guard_test.go), whose exemption
-// markers are the machine-readable form of this list — widen the stamping
-// policy there first, not by ad-hoc stamps.
+// same lease row. Every row writer, including derived-state recomputation, is
+// checked by TestAllIssueRowWritesStampRowLock (row_lock_guard_test.go).
 func freshRowLock() int64 {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {

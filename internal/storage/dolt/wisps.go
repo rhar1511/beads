@@ -370,7 +370,8 @@ func (s *DoltStore) deleteWisp(ctx context.Context, id string) error {
 		return err
 	}
 
-	if err := issueops.DeleteWispFromDependenciesInTx(ctx, tx, id); err != nil {
+	issueRowsChanged, err := issueops.DeleteWispFromDependenciesInTx(ctx, tx, id)
+	if err != nil {
 		return err
 	}
 
@@ -378,11 +379,18 @@ func (s *DoltStore) deleteWisp(ctx context.Context, id string) error {
 		return fmt.Errorf("delete wisp aux rows for %s: %w", id, err)
 	}
 
-	if err := issueops.RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
+	blockedResult, err := issueops.RecomputeIsBlockedInTxWithResult(ctx, tx, affectedIssues, affectedWisps)
+	if err != nil {
 		return fmt.Errorf("recompute is_blocked after wisp delete for %s: %w", id, err)
 	}
-
-	return s.commitSQLTx(ctx, "commit delete wisp", tx)
+	issueRowsChanged = issueRowsChanged || blockedResult.IssueRowsChanged
+	if err := s.commitSQLTx(ctx, "commit delete wisp", tx); err != nil {
+		return err
+	}
+	if issueRowsChanged {
+		return s.doltAddAndCommit(ctx, []string{"issues"}, "wisp delete: update dependent issue revisions "+id)
+	}
+	return nil
 }
 
 // deleteWispBatch permanently removes multiple wisps using one transaction per
@@ -471,7 +479,8 @@ func (s *DoltStore) deleteWispBatchTx(ctx context.Context, ids []string) (int, e
 		}
 	}
 
-	if err := issueops.DeleteWispsFromDependenciesInTx(ctx, tx, ids); err != nil {
+	issueRowsChanged, err := issueops.DeleteWispsFromDependenciesInTx(ctx, tx, ids)
+	if err != nil {
 		return 0, err
 	}
 
@@ -479,12 +488,19 @@ func (s *DoltStore) deleteWispBatchTx(ctx context.Context, ids []string) (int, e
 		return 0, fmt.Errorf("delete wisp aux rows: %w", err)
 	}
 
-	if err := issueops.RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
+	blockedResult, err := issueops.RecomputeIsBlockedInTxWithResult(ctx, tx, affectedIssues, affectedWisps)
+	if err != nil {
 		return 0, fmt.Errorf("recompute is_blocked after batched wisp delete: %w", err)
 	}
+	issueRowsChanged = issueRowsChanged || blockedResult.IssueRowsChanged
 
 	if err := s.commitSQLTx(ctx, "commit batch wisp delete", tx); err != nil {
 		return 0, err
+	}
+	if issueRowsChanged {
+		if err := s.doltAddAndCommit(ctx, []string{"issues"}, "wisp delete: update dependent issue revisions"); err != nil {
+			return 0, err
+		}
 	}
 
 	return int(rowsAffected), nil
@@ -695,17 +711,23 @@ func (s *DoltStore) addWispDependency(ctx context.Context, dep *types.Dependency
 	kind := issueops.ClassifyDepTarget(ctx, tx, dep, isCrossPrefix)
 	// Wisp source/event tables are dolt_ignored (committed with the SQL tx, not
 	// via selective doltAddAndCommit), so the event-written flag is not needed here.
-	if _, err := issueops.AddDependencyInTx(ctx, tx, dep, actor, issueops.AddDependencyOpts{
+	_, issueRowsChanged, err := issueops.AddDependencyWithRevisionInTx(ctx, tx, dep, actor, issueops.AddDependencyOpts{
 		SourceTable:   "wisps",
 		WriteTable:    "wisp_dependencies",
 		IsCrossPrefix: isCrossPrefix,
 		TargetKind:    &kind,
 		EmitEvent:     emitEvent,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-
-	return s.commitSQLTx(ctx, "commit add wisp dependency", tx)
+	if err := s.commitSQLTx(ctx, "commit add wisp dependency", tx); err != nil {
+		return err
+	}
+	if issueRowsChanged {
+		return s.doltAddAndCommit(ctx, []string{"issues"}, "dependency: add wisp edge "+dep.IssueID+" -> "+dep.DependsOnID)
+	}
+	return nil
 }
 
 // getWispDependencies retrieves issues that a wisp depends on.

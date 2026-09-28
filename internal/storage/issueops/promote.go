@@ -128,6 +128,12 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx DBTX, id string, actor str
 	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
 		return fmt.Errorf("recompute is_blocked after promote for %s: %w", id, err)
 	}
+	// Promotion moves outgoing edges into the durable dependency plane. Refresh
+	// the new issue row after that copy so its revision fences the newly visible
+	// aggregate dependency set.
+	if err := BumpIssueRevisionInTx(ctx, tx, id, false); err != nil {
+		return fmt.Errorf("bump promoted issue revision for %s: %w", id, err)
+	}
 
 	// The bead keeps its ID across promotion; only its plane changes. Journal
 	// one update carrying the now-durable snapshot, after derived blocked-state

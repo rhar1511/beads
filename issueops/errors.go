@@ -171,6 +171,10 @@ func (e *AlreadyIdentifiedError) Unwrap() error { return ErrAlreadyIdentified }
 // precondition from other errors.
 var ErrVersionMismatch = errors.New("version mismatch")
 
+// ErrTransitionReceiptConflict is returned when a receipt ID was already
+// committed for a different revision-transition request.
+var ErrTransitionReceiptConflict = errors.New("revision transition receipt conflict")
+
 // ErrStatusMismatch is returned by UpdateIssueChecked given an ExpectedStatus
 // that no longer matches the issue's current status. The caller's view of the
 // issue was stale; the issue is left untouched. The assignee analog is

@@ -51,6 +51,11 @@ type IssueSQLRepository interface {
 	// needs and the result does not carry — a swap can hold its precondition
 	// and write nothing (see issueops.MetadataCAS.CompareAndSetKey).
 	CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error)
+	// TransitionMetadata runs the SHARED revision-fenced transition body on this
+	// repository's transaction. The bool reports whether a durable issue and
+	// receipt write landed and therefore needs a version-control commit.
+	TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error)
+	GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error)
 	// ReleaseIssue runs the SHARED claim-release body on this repository's
 	// transaction, which is how the unit-of-work provider reaches the same
 	// function the two store backends wrap. It takes no table option: the body
@@ -332,6 +337,8 @@ type IssueUseCase interface {
 	// CompareAndSetMetadataKey is the shape issueops.MetadataCAS publishes; see
 	// IssueSQLRepository.CompareAndSetMetadataKey for what the bool carries.
 	CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error)
+	TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error)
+	GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error)
 	// ReleaseIssue is the shape issueops.Releaser publishes; see
 	// IssueSQLRepository.ReleaseIssue for what the bool carries.
 	ReleaseIssue(ctx context.Context, req publicops.ReleaseRequest) (publicops.ReleaseResult, bool, error)
@@ -496,6 +503,18 @@ func (u *issueUseCaseImpl) UpdateWisp(ctx context.Context, id string, updates ma
 // plane — are typed sentinels both front doors classify.
 func (u *issueUseCaseImpl) CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error) {
 	return u.issueRepo.CompareAndSetMetadataKey(ctx, plan)
+}
+
+// TransitionMetadata passes the validated plan to the shared transaction body
+// without changing its row-revision or receipt semantics.
+func (u *issueUseCaseImpl) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
+	return u.issueRepo.TransitionMetadata(ctx, plan)
+}
+
+// GetRevisionTransitionReceipt reads the durable receipt through this
+// unit-of-work's pinned issue repository.
+func (u *issueUseCaseImpl) GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error) {
+	return u.issueRepo.GetRevisionTransitionReceipt(ctx, receiptID)
 }
 
 // ReleaseIssue passes the request straight through.

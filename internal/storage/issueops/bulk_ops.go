@@ -191,6 +191,9 @@ func DeleteIssuesBySourceRepoInTx(ctx context.Context, tx *sql.Tx, sourceRepo st
 	if len(issueIDs) == 0 {
 		return 0, nil
 	}
+	if err := BumpDependencySourceRevisionsForTargetsInTx(ctx, tx, issueIDs); err != nil {
+		return 0, fmt.Errorf("bump dependency sources before source-repo delete: %w", err)
+	}
 
 	affectedIssues, affectedWisps, aerr := AffectedByDeletionInTx(ctx, tx, issueIDs, nil)
 	if aerr != nil {
@@ -292,12 +295,15 @@ func recordRenameInJournal(ctx context.Context, tx DBTX, oldID, newID, actor str
 }
 
 func updateIssueIDInTx(ctx context.Context, tx *sql.Tx, oldID, newID string, issue *types.Issue, actor string) error {
+	if err := BumpDependencySourceRevisionsForTargetsInTx(ctx, tx, []string{oldID}); err != nil {
+		return fmt.Errorf("bump sources before renaming issue target %s: %w", oldID, err)
+	}
 	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, `
 		UPDATE issues
 		SET id = ?, title = ?, description = ?, design = ?, acceptance_criteria = ?, notes = ?, updated_at = ?, row_lock = ?
 		WHERE id = ?
-	`, newID, issue.Title, issue.Description, issue.Design, issue.AcceptanceCriteria, issue.Notes, now, freshRowLock(), oldID)
+	`, newID, issue.Title, issue.Description, issue.Design, issue.AcceptanceCriteria, issue.Notes, now, freshRowLockDifferentThan(issue.RowVersion), oldID)
 	if err != nil {
 		return fmt.Errorf("update issue ID: %w", err)
 	}
@@ -325,12 +331,15 @@ func updateIssueIDInTx(ctx context.Context, tx *sql.Tx, oldID, newID string, iss
 }
 
 func updateWispIDInTx(ctx context.Context, tx *sql.Tx, oldID, newID string, issue *types.Issue, actor string) error {
+	if err := BumpDependencySourceRevisionsForTargetsInTx(ctx, tx, []string{oldID}); err != nil {
+		return fmt.Errorf("bump sources before renaming wisp target %s: %w", oldID, err)
+	}
 	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, `
 		UPDATE wisps
 		SET id = ?, title = ?, description = ?, design = ?, acceptance_criteria = ?, notes = ?, updated_at = ?, row_lock = ?
 		WHERE id = ?
-	`, newID, issue.Title, issue.Description, issue.Design, issue.AcceptanceCriteria, issue.Notes, now, freshRowLock(), oldID)
+	`, newID, issue.Title, issue.Description, issue.Design, issue.AcceptanceCriteria, issue.Notes, now, freshRowLockDifferentThan(issue.RowVersion), oldID)
 	if err != nil {
 		return fmt.Errorf("update wisp ID: %w", err)
 	}

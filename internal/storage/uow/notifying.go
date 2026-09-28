@@ -303,6 +303,10 @@ func (p *notifyingProvider) VersionReconciler() (publicops.VersionReconciler, er
 
 func (p *notifyingProvider) MetadataCAS() (publicops.MetadataCAS, error) { return NewMetadataCAS(p) }
 
+func (p *notifyingProvider) RevisionTransition() (publicops.RevisionTransition, error) {
+	return NewRevisionTransition(p)
+}
+
 func (p *notifyingProvider) Releaser() (publicops.Releaser, error) { return NewReleaser(p) }
 
 func (p *notifyingProvider) Memories() (memoryops.Memories, error) { return NewMemories(p) }
@@ -966,6 +970,15 @@ func (u *recordingIssueUC) CompareAndSetMetadataKey(ctx context.Context, plan st
 		return result, wrote, err
 	}
 	u.rec.record(opUpdate, u.snap.anyPlane(ctx, plan.IssueID))
+	return result, wrote, nil
+}
+
+func (u *recordingIssueUC) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
+	result, wrote, err := u.IssueUseCase.TransitionMetadata(ctx, plan)
+	if err != nil || !wrote {
+		return result, wrote, err
+	}
+	u.rec.record(opUpdate, u.snap.issue(ctx, plan.IssueID))
 	return result, wrote, nil
 }
 

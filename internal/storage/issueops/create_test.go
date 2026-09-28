@@ -13,6 +13,15 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
+func expectIssueRevisionBump(mock sqlmock.Sqlmock, issueID string) {
+	mock.ExpectQuery("SELECT row_lock FROM issues WHERE id = \\?").
+		WithArgs(issueID).
+		WillReturnRows(sqlmock.NewRows([]string{"row_lock"}).AddRow(int64(17)))
+	mock.ExpectExec("UPDATE issues SET row_lock = \\?, updated_at = updated_at WHERE id = \\?").
+		WithArgs(sqlmock.AnyArg(), issueID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
 func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *testing.T) {
 	regularA := &types.Issue{ID: "test-regular-a", IssueType: types.TypeTask}
 	regularB := &types.Issue{ID: "test-regular-b", IssueType: types.TypeTask}
@@ -176,6 +185,7 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 	mock.ExpectExec("INSERT INTO dependencies").
 		WithArgs(depid.New("source", "target"), "source", "target", types.DepRelated, "someone.else", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectIssueRevisionBump(mock, "source")
 
 	result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{target, source}, "current.user", storage.BatchCreateOptions{})
 	if err != nil {
@@ -183,6 +193,9 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 	}
 	if !result.ChangedTables["dependencies"] {
 		t.Fatalf("ChangedTables = %#v, want dependencies changed", result.ChangedTables)
+	}
+	if !result.ChangedTables["issues"] {
+		t.Fatalf("ChangedTables = %#v, want issues staged with the source revision", result.ChangedTables)
 	}
 
 	mock.ExpectRollback()
@@ -192,6 +205,100 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
 	}
+}
+
+func TestPersistDependenciesRejectsForeignSourceOwner(t *testing.T) {
+	ctx := context.Background()
+	db, mock, tx := beginMockTx(t)
+	defer db.Close()
+
+	issue := &types.Issue{
+		ID:        "created-owner",
+		IssueType: types.TypeTask,
+		Dependencies: []*types.Dependency{{
+			IssueID:     "different-owner",
+			DependsOnID: "target",
+			Type:        types.DepRelated,
+		}},
+	}
+	_, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
+	if !errors.Is(err, storage.ErrValidation) {
+		t.Fatalf("PersistDependenciesWithOptionsResult error = %v, want ErrValidation", err)
+	}
+
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations (foreign source must fail before any SQL): %v", err)
+	}
+}
+
+func TestPersistDependenciesBumpsExistingOwnerOnlyForInsertedEdge(t *testing.T) {
+	ctx := context.Background()
+	t.Run("inserted edge advances source and stages issues", func(t *testing.T) {
+		db, mock, tx := beginMockTx(t)
+		defer db.Close()
+		issue := &types.Issue{
+			ID:        "existing-source",
+			IssueType: types.TypeTask,
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "target",
+				Type:        types.DepRelated,
+			}},
+		}
+		mock.ExpectExec("INSERT INTO dependencies").
+			WithArgs(depid.New("existing-source", "target"), "existing-source", "target", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		expectIssueRevisionBump(mock, "existing-source")
+
+		result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
+		if err != nil {
+			t.Fatalf("PersistDependenciesWithOptionsResult error = %v, want nil", err)
+		}
+		if !result.ChangedTables["issues"] || !result.ChangedTables["dependencies"] {
+			t.Fatalf("ChangedTables = %#v, want issues and dependencies", result.ChangedTables)
+		}
+		mock.ExpectRollback()
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("rollback: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
+		}
+	})
+
+	t.Run("idempotent edge leaves source revision untouched", func(t *testing.T) {
+		db, mock, tx := beginMockTx(t)
+		defer db.Close()
+		issue := &types.Issue{
+			ID:        "existing-source",
+			IssueType: types.TypeTask,
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "target",
+				Type:        types.DepRelated,
+			}},
+		}
+		mock.ExpectExec("INSERT INTO dependencies").
+			WithArgs(depid.New("existing-source", "target"), "existing-source", "target", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
+			WillReturnResult(sqlmock.NewResult(0, 0))
+
+		result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
+		if err != nil {
+			t.Fatalf("PersistDependenciesWithOptionsResult error = %v, want nil", err)
+		}
+		if result.ChangedTables["issues"] || result.ChangedTables["dependencies"] {
+			t.Fatalf("ChangedTables = %#v, want no durable graph changes", result.ChangedTables)
+		}
+		mock.ExpectRollback()
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("rollback: %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatalf("unmet expectations: %v", err)
+		}
+	})
 }
 
 func TestPersistDependenciesDefaultsCreatedByToActor(t *testing.T) {
@@ -218,6 +325,7 @@ func TestPersistDependenciesDefaultsCreatedByToActor(t *testing.T) {
 	mock.ExpectExec("INSERT INTO dependencies").
 		WithArgs(depid.New("source", "target"), "source", "target", types.DepRelated, "current.user", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectIssueRevisionBump(mock, "source")
 
 	_, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{target, source}, "current.user", storage.BatchCreateOptions{})
 	if err != nil {
@@ -253,6 +361,7 @@ func TestPersistDependenciesClassifiesBareCrossPrefixTargetAsExternal(t *testing
 	mock.ExpectExec("INSERT INTO dependencies \\(id, issue_id, depends_on_external").
 		WithArgs(depid.New("sym-3su", "mkt-456"), "sym-3su", "mkt-456", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectIssueRevisionBump(mock, "sym-3su")
 
 	result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{source}, "tester", storage.BatchCreateOptions{
 		OnSkippedDependency: func(issueID, dependsOnID, reason string) {
@@ -267,6 +376,9 @@ func TestPersistDependenciesClassifiesBareCrossPrefixTargetAsExternal(t *testing
 	}
 	if !result.ChangedTables["dependencies"] {
 		t.Fatalf("ChangedTables = %#v, want dependencies changed", result.ChangedTables)
+	}
+	if !result.ChangedTables["issues"] {
+		t.Fatalf("ChangedTables = %#v, want issues staged with the source revision", result.ChangedTables)
 	}
 
 	mock.ExpectRollback()
@@ -431,6 +543,7 @@ func TestPersistDependenciesValidatesPlannedHierarchyBeforeBlocking(t *testing.T
 		mock.ExpectExec("INSERT INTO dependencies").
 			WithArgs(depid.New(pair[0], pair[1]), pair[0], pair[1], types.DepParentChild, "tester", sqlmock.AnyArg(), "{}", "").
 			WillReturnResult(sqlmock.NewResult(0, 1))
+		expectIssueRevisionBump(mock, pair[0])
 		mock.ExpectExec("REPLACE INTO local_metadata").
 			WithArgs(dependencyCoordinationKey(pair[1], dependencyCoordinationDurableTier), sqlmock.AnyArg()).
 			WillReturnResult(sqlmock.NewResult(1, 1))
@@ -480,6 +593,7 @@ func TestPersistDependenciesSkipsHierarchyValidationAcrossPrefixes(t *testing.T)
 	mock.ExpectExec("INSERT INTO dependencies \\(id, issue_id, depends_on_external").
 		WithArgs(depid.New("aa-source", "bb-target"), "aa-source", "bb-target", types.DepBlocks, "tester", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectIssueRevisionBump(mock, "aa-source")
 
 	_, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
 	if err != nil {

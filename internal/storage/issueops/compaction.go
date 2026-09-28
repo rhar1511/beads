@@ -95,7 +95,7 @@ func ApplyCompactionInTx(ctx context.Context, tx *sql.Tx, issueID string, tier i
 	if err != nil {
 		return fmt.Errorf("apply compaction: %w", err)
 	}
-	return nil
+	return BumpIssueRevisionInTx(ctx, tx, issueID, false)
 }
 
 // SnapshotIssueInTx archives an issue's current text content into
@@ -186,6 +186,9 @@ func RestoreFromSnapshotInTx(ctx context.Context, tx *sql.Tx, issueID string) (*
 	}
 	if err != nil {
 		return nil, fmt.Errorf("restore issue %s: %w", issueID, err)
+	}
+	if err := BumpIssueRevisionInTx(ctx, tx, issueID, false); err != nil {
+		return nil, fmt.Errorf("restore issue %s: bump revision: %w", issueID, err)
 	}
 	return snap, nil
 }

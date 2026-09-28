@@ -347,6 +347,20 @@ func (r *issueSQLRepositoryImpl) CompareAndSetMetadataKey(ctx context.Context, p
 	return result, write.Wrote, err
 }
 
+// TransitionMetadata runs the same transaction body used by both direct store
+// backends and reports whether it wrote durable tables for the UOW commit.
+func (r *issueSQLRepositoryImpl) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
+	result, write, err := issueops.TransitionMetadataInTx(ctx, r.runner, plan)
+	return result, write.Wrote, err
+}
+
+func (r *issueSQLRepositoryImpl) GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error) {
+	if err := storage.ValidateRevisionTransitionReceiptID(receiptID); err != nil {
+		return nil, err
+	}
+	return issueops.GetRevisionTransitionReceiptInTx(ctx, r.runner, receiptID)
+}
+
 // ReleaseIssue runs the SHARED claim-release body, unwrapped.
 //
 // It is the whole of this leg's implementation, and that is the point: the two
@@ -955,6 +969,11 @@ func (r *issueSQLRepositoryImpl) Delete(ctx context.Context, id string, opts dom
 	if opts.UseWispsTable {
 		table = "wisps"
 	}
+	if !opts.UseWispsTable {
+		if err := issueops.BumpDependencySourceRevisionsForTargetsInTx(ctx, r.runner, []string{id}); err != nil {
+			return fmt.Errorf("db: IssueSQLRepository.Delete %s: bump dependency sources: %w", id, err)
+		}
+	}
 	// Edges are journaled before the row goes, while its snapshot can still be
 	// read.
 	if err := issueops.RecordDependencyRemovalsForIssuesInTx(ctx, r.runner, []string{id}, actor); err != nil {
@@ -995,6 +1014,11 @@ func (r *issueSQLRepositoryImpl) DeleteByIDs(ctx context.Context, ids []string, 
 	actualIDs, err := issueops.ExistingIssueIDsInTableInTx(ctx, r.runner, table, ids)
 	if err != nil {
 		return 0, fmt.Errorf("db: IssueSQLRepository.DeleteByIDs resolve existing ids: %w", err)
+	}
+	if !opts.UseWispsTable {
+		if err := issueops.BumpDependencySourceRevisionsForTargetsInTx(ctx, r.runner, actualIDs); err != nil {
+			return 0, fmt.Errorf("db: IssueSQLRepository.DeleteByIDs bump dependency sources: %w", err)
+		}
 	}
 	// Edges are journaled before the rows go, while their source snapshots can
 	// still be read.

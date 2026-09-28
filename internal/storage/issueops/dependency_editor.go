@@ -163,7 +163,7 @@ func addDependencyEdgeInTx(ctx context.Context, tx *sql.Tx, request publicops.Ad
 	sourceTable, _, eventTable, depTable := WispTableRouting(sourceIsWisp)
 
 	dep := &types.Dependency{IssueID: edge.IssueID, DependsOnID: edge.DependsOnID, Type: edge.Type}
-	eventWritten, err := AddDependencyInTx(ctx, tx, dep, request.Actor, AddDependencyOpts{
+	eventWritten, issueRowsChanged, err := AddDependencyWithRevisionInTx(ctx, tx, dep, request.Actor, AddDependencyOpts{
 		SourceTable:    sourceTable,
 		WriteTable:     depTable,
 		IsCrossPrefix:  types.ExtractPrefix(edge.IssueID) != types.ExtractPrefix(edge.DependsOnID),
@@ -188,6 +188,9 @@ func addDependencyEdgeInTx(ctx context.Context, tx *sql.Tx, request publicops.Ad
 	// the aggregate row_lock is reminted with every genuine edge mutation.
 	tables := ChangedTables{}
 	tables.Add(sourceTable, depTable)
+	if issueRowsChanged {
+		tables.Add("issues")
+	}
 	if eventWritten {
 		tables.Add(eventTable)
 	}
@@ -242,7 +245,7 @@ func ExecuteRemoveDependency(ctx context.Context, tx *sql.Tx, request publicops.
 	// RemoveDependencyInTx reports whether it recorded an event, which on the
 	// explicit-verb path is exactly "an edge was there and is gone" — it
 	// returns early without emitting when no row matched.
-	eventWritten, err := RemoveDependencyInTx(ctx, tx, request.IssueID, request.DependsOnID, request.Actor, true)
+	eventWritten, issueRowsChanged, err := RemoveDependencyWithRevisionInTx(ctx, tx, request.IssueID, request.DependsOnID, request.Actor, true)
 	if err != nil {
 		return publicops.RemoveDependencyResult{}, nil, err
 	}
@@ -251,5 +254,8 @@ func ExecuteRemoveDependency(ctx context.Context, tx *sql.Tx, request publicops.
 	}
 	tables := ChangedTables{}
 	tables.Add(sourceTable, depTable, eventTable)
+	if issueRowsChanged {
+		tables.Add("issues")
+	}
 	return publicops.RemoveDependencyResult{Removed: true}, tables, nil
 }

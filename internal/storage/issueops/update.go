@@ -335,17 +335,28 @@ type UpdateResult struct {
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func UpdateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string) (*UpdateResult, error) {
-	return updateIssueInTx(ctx, tx, id, updates, actor, true)
+	return updateIssueInTx(ctx, tx, id, updates, actor, true, nil)
+}
+
+// updateIssueWithRowLockInTx applies normal update semantics while setting an
+// exact, caller-minted row_lock token. The revision-transition operation uses
+// this so it can store the value actually written in its durable receipt.
+// Ordinary updates continue to mint their own token through UpdateIssueInTx.
+func updateIssueWithRowLockInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, rowLock int64) (*UpdateResult, error) {
+	if rowLock == 0 {
+		return nil, fmt.Errorf("%w: row_lock revision must be nonzero", storage.ErrValidation)
+	}
+	return updateIssueInTx(ctx, tx, id, updates, actor, true, &rowLock)
 }
 
 // UpdateIssueWithoutEventInTx applies normal update semantics without recording
 // an intermediate event. Demotion uses this to preserve the historical event
 // stream: create/update history is copied, then a single demotion event is added.
 func UpdateIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string) (*UpdateResult, error) {
-	return updateIssueInTx(ctx, tx, id, updates, actor, false)
+	return updateIssueInTx(ctx, tx, id, updates, actor, false, nil)
 }
 
-func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool) (*UpdateResult, error) {
+func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool, exactRowLock *int64) (*UpdateResult, error) {
 	updates = cloneUpdateFields(updates)
 	// Pop the override before anything reads the map as a set of columns. It
 	// has to come out ahead of the no-op filter too: the filter keeps every key
@@ -480,7 +491,11 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	// different columns of the same row (see lease.go). This is the "every
 	// mutating path writes row_lock" invariant the lease scheme depends on.
 	setClauses = append(setClauses, "row_lock = ?")
-	args = append(args, freshRowLock())
+	if exactRowLock == nil {
+		args = append(args, freshRowLock())
+	} else {
+		args = append(args, *exactRowLock)
+	}
 
 	args = append(args, id)
 

@@ -78,7 +78,10 @@ func (s *DoltStore) addDependencyWithOptions(ctx context.Context, dep *types.Dep
 	// dependency_added event (explicit verb + genuine new edge). A structural or
 	// idempotent add writes no event, so staging events would sweep unrelated
 	// pending event rows into this dependency commit.
-	tables := []string{"issues", "dependencies"}
+	tables := []string{"dependencies"}
+	if result.IssueRowsChanged {
+		tables = append(tables, "issues")
+	}
 	if result.EventWritten {
 		tables = append(tables, "events")
 	}
@@ -107,11 +110,15 @@ func (s *DoltStore) RemoveDependencyWithOptions(ctx context.Context, issueID, de
 			defer func() { _ = tx.Rollback() }()
 			clearJournalScope := s.scopeEventsJournalTransaction(tx)
 			defer clearJournalScope()
-			if _, err := issueops.RemoveDependencyInTx(ctx, tx, issueID, dependsOnID, actor, rmOpts.EmitEvent); err != nil {
+			_, issueRowsChanged, err := issueops.RemoveDependencyWithRevisionInTx(ctx, tx, issueID, dependsOnID, actor, rmOpts.EmitEvent)
+			if err != nil {
 				return err
 			}
 			if err := s.commitSQLTx(ctx, "commit remove wisp dependency", tx); err != nil {
 				return err
+			}
+			if issueRowsChanged {
+				return s.doltAddAndCommit(ctx, []string{"issues"}, "dependency: remove wisp edge "+issueID+" -> "+dependsOnID)
 			}
 			return nil
 		}
@@ -141,7 +148,10 @@ func (s *DoltStore) RemoveDependencyWithOptions(ctx context.Context, issueID, de
 		// dependency_removed event (explicit verb + genuine edge removal). A
 		// structural or missing-edge remove writes no event, so staging events would
 		// sweep unrelated pending event rows into this dependency commit.
-		tables := []string{"issues", "dependencies"}
+		tables := []string{"dependencies"}
+		if result.IssueRowsChanged {
+			tables = append(tables, "issues")
+		}
 		if result.EventWritten {
 			tables = append(tables, "events")
 		}

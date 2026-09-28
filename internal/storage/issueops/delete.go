@@ -26,6 +26,13 @@ const maxRecursiveResults = 10000
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func DeleteIssueInTx(ctx context.Context, tx *sql.Tx, id string, actor string) error {
+	_, err := DeleteIssueInTxWithResult(ctx, tx, id, actor)
+	return err
+}
+
+// DeleteIssueInTxWithResult also reports whether deleting a wisp reminted any
+// permanent source rows whose outgoing dependencies targeted it.
+func DeleteIssueInTxWithResult(ctx context.Context, tx *sql.Tx, id string, actor string) (bool, error) {
 	isWisp := IsActiveWispInTx(ctx, tx, id)
 
 	var deletedIssues, deletedWisps []string
@@ -36,41 +43,54 @@ func DeleteIssueInTx(ctx context.Context, tx *sql.Tx, id string, actor string) e
 	}
 	affectedIssues, affectedWisps, aerr := AffectedByDeletionInTx(ctx, tx, deletedIssues, deletedWisps)
 	if aerr != nil {
-		return fmt.Errorf("affected by delete for %s: %w", id, aerr)
+		return false, fmt.Errorf("affected by delete for %s: %w", id, aerr)
 	}
 
 	// Edges are journaled before the rows go, while their source snapshots can
 	// still be read.
 	if err := RecordDependencyRemovalsForIssuesInTx(ctx, tx, []string{id}, actor); err != nil {
-		return fmt.Errorf("journal dependency removals for %s: %w", id, err)
+		return false, fmt.Errorf("journal dependency removals for %s: %w", id, err)
 	}
-	if err := deleteIssueRowInTx(ctx, tx, id, isWisp, actor); err != nil {
-		return err
-	}
-
-	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
-		return fmt.Errorf("recompute is_blocked after delete for %s: %w", id, err)
+	issueRowsChanged, err := deleteIssueRowInTxWithResult(ctx, tx, id, isWisp, actor)
+	if err != nil {
+		return false, err
 	}
 
-	return nil
+	blockedResult, err := RecomputeIsBlockedInTxWithResult(ctx, tx, affectedIssues, affectedWisps)
+	if err != nil {
+		return false, fmt.Errorf("recompute is_blocked after delete for %s: %w", id, err)
+	}
+	issueRowsChanged = issueRowsChanged || blockedResult.IssueRowsChanged
+
+	return issueRowsChanged, nil
 }
 
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func deleteIssueRowInTx(ctx context.Context, tx *sql.Tx, id string, isWisp bool, actor string) error {
+	_, err := deleteIssueRowInTxWithResult(ctx, tx, id, isWisp, actor)
+	return err
+}
+
+func deleteIssueRowInTxWithResult(ctx context.Context, tx *sql.Tx, id string, isWisp bool, actor string) (bool, error) {
 	issueTable, _, _, _ := WispTableRouting(isWisp)
+	if !isWisp {
+		if err := BumpDependencySourceRevisionsForTargetsInTx(ctx, tx, []string{id}); err != nil {
+			return false, fmt.Errorf("bump dependency sources before deleting issue %s: %w", id, err)
+		}
+	}
 	result, err := tx.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE id = ?", issueTable), id)
 	if err != nil {
-		return fmt.Errorf("delete issue from %s: %w", issueTable, err)
+		return false, fmt.Errorf("delete issue from %s: %w", issueTable, err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("get rows affected: %w", err)
+		return false, fmt.Errorf("get rows affected: %w", err)
 	}
 	if rows == 0 {
 		// Wrap the sentinel so callers can errors.Is(..., storage.ErrNotFound),
 		// matching GetIssue/UpdateIssue. The storage conformance suite asserts
 		// this parity across not-found paths.
-		return fmt.Errorf("%w: issue %s", storage.ErrNotFound, id)
+		return false, fmt.Errorf("%w: issue %s", storage.ErrNotFound, id)
 	}
 	// Journal the delete in the same transaction. This worker backs single
 	// deletes (DeleteIssueInTx) and the per-wisp branch of the bulk delete
@@ -78,17 +98,20 @@ func deleteIssueRowInTx(ctx context.Context, tx *sql.Tx, id string, isWisp bool,
 	// ids directly. The rows==0 return above is what keeps this
 	// actually-deleted-only.
 	if err := RecordDeleteInTx(ctx, tx, id, actor); err != nil {
-		return err
+		return false, err
 	}
+	issueRowsChanged := false
 	if isWisp {
-		if err := DeleteWispFromDependenciesInTx(ctx, tx, id); err != nil {
-			return err
+		var err error
+		issueRowsChanged, err = DeleteWispFromDependenciesInTx(ctx, tx, id)
+		if err != nil {
+			return false, err
 		}
 	} else if err := DeleteLeaseInTx(ctx, tx, id); err != nil {
 		// A deleted issue holds no lease.
-		return err
+		return false, err
 	}
-	return nil
+	return issueRowsChanged, nil
 }
 
 // DeletionSet is the EXACT set of rows one delete removes, split by the plane
@@ -307,6 +330,9 @@ func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dry
 	// still be read.
 	if err := RecordDependencyRemovalsForIssuesInTx(ctx, tx, set.All, actor); err != nil {
 		return nil, fmt.Errorf("journal dependency removals for batch delete: %w", err)
+	}
+	if err := BumpDependencySourceRevisionsForTargetsInTx(ctx, tx, set.RegularIDs); err != nil {
+		return nil, fmt.Errorf("bump dependency sources before deleting issues: %w", err)
 	}
 
 	for _, id := range set.WispIDs {

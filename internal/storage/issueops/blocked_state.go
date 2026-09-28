@@ -144,30 +144,41 @@ func RecomputeIsBlockedInTxWithResult(
 }
 
 func MarkIsBlockedInTx(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) error {
+	_, err := MarkIsBlockedInTxWithResult(ctx, tx, issueIDs, wispIDs)
+	return err
+}
+
+// MarkIsBlockedInTxWithResult is MarkIsBlockedInTx and reports which planes
+// had rows change. Every changed issue row receives a fresh row_lock so a
+// source revision also covers this derived work field.
+func MarkIsBlockedInTxWithResult(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) (RecomputeIsBlockedResult, error) {
+	var result RecomputeIsBlockedResult
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
-		return nil
+		return result, nil
 	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
-		return err
+		return result, err
 	}
 	for {
 		var changed int64
 
 		n, err := markIsBlockedPassForIssuesInTx(ctx, tx, issueIDs)
 		if err != nil {
-			return err
+			return result, err
 		}
 		changed += n
+		result.IssueRowsChanged = result.IssueRowsChanged || n > 0
 
 		n, err = markIsBlockedPassForWispsInTx(ctx, tx, wispIDs)
 		if err != nil {
-			return err
+			return result, err
 		}
 		changed += n
+		result.WispRowsChanged = result.WispRowsChanged || n > 0
 
 		if changed == 0 {
-			return recordBlockedJournalChanges(ctx, tx, before, issueIDs, wispIDs)
+			return result, recordBlockedJournalChanges(ctx, tx, before, issueIDs, wispIDs)
 		}
 	}
 }
@@ -205,7 +216,7 @@ func markIsBlockedPassForIssuesInTx(ctx context.Context, tx DBTX, ids []string) 
 // An explicit assignment suppresses the ON UPDATE clause.
 func markBlockedTemplateForIssues() string {
 	return fmt.Sprintf(`
-		UPDATE issues i SET i.is_blocked = 1, i.updated_at = i.updated_at
+		UPDATE issues i SET i.is_blocked = 1, i.row_lock = ?, i.updated_at = i.updated_at
 		WHERE i.id IN (%%s)
 		  AND i.is_blocked = 0
 		  AND i.status <> 'closed' AND i.status <> 'pinned'
@@ -249,7 +260,7 @@ func markBlockedTemplateForIssues() string {
 
 func unmarkBlockedTemplateForIssues() string {
 	return fmt.Sprintf(`
-		UPDATE issues i SET i.is_blocked = 0, i.updated_at = i.updated_at
+		UPDATE issues i SET i.is_blocked = 0, i.row_lock = ?, i.updated_at = i.updated_at
 		WHERE i.id IN (%%s)
 		  AND i.is_blocked = 1
 		  AND (
@@ -311,7 +322,7 @@ func markIsBlockedPassForWispsInTx(ctx context.Context, tx DBTX, ids []string) (
 
 func markBlockedTemplateForWisps() string {
 	return fmt.Sprintf(`
-		UPDATE wisps w SET w.is_blocked = 1, w.updated_at = w.updated_at
+		UPDATE wisps w SET w.is_blocked = 1, w.row_lock = ?, w.updated_at = w.updated_at
 		WHERE w.id IN (%%s)
 		  AND w.is_blocked = 0
 		  AND w.status <> 'closed' AND w.status <> 'pinned'
@@ -355,7 +366,7 @@ func markBlockedTemplateForWisps() string {
 
 func unmarkBlockedTemplateForWisps() string {
 	return fmt.Sprintf(`
-		UPDATE wisps w SET w.is_blocked = 0, w.updated_at = w.updated_at
+		UPDATE wisps w SET w.is_blocked = 0, w.row_lock = ?, w.updated_at = w.updated_at
 		WHERE w.id IN (%%s)
 		  AND w.is_blocked = 1
 		  AND (
@@ -408,6 +419,7 @@ func runMarkUnmarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl, unmarkTmpl
 			end = len(ids)
 		}
 		placeholders, args := buildSQLInClause(ids[start:end])
+		args = append([]interface{}{freshRowLock()}, args...)
 
 		res, err := tx.ExecContext(ctx, fmt.Sprintf(markTmpl, placeholders), args...)
 		if err != nil {
@@ -419,7 +431,8 @@ func runMarkUnmarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl, unmarkTmpl
 		}
 		changed += n
 
-		res, err = tx.ExecContext(ctx, fmt.Sprintf(unmarkTmpl, placeholders), args...)
+		unmarkArgs := append([]interface{}{freshRowLock()}, args[1:]...)
+		res, err = tx.ExecContext(ctx, fmt.Sprintf(unmarkTmpl, placeholders), unmarkArgs...)
 		if err != nil {
 			return changed, fmt.Errorf("recompute is_blocked (unmark): %w", err)
 		}
@@ -441,6 +454,7 @@ func runMarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl string, ids []str
 			end = len(ids)
 		}
 		placeholders, args := buildSQLInClause(ids[start:end])
+		args = append([]interface{}{freshRowLock()}, args...)
 
 		res, err := tx.ExecContext(ctx, fmt.Sprintf(markTmpl, placeholders), args...)
 		if err != nil {

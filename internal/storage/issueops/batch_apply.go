@@ -375,7 +375,7 @@ func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx *sql.Tx, index int, 
 		Type:        item.Type,
 		Metadata:    item.Metadata,
 	}
-	eventWritten, err := AddDependencyInTx(ctx, tx, dep, r.plan.Actor, AddDependencyOpts{
+	eventWritten, issueRowsChanged, err := AddDependencyWithRevisionInTx(ctx, tx, dep, r.plan.Actor, AddDependencyOpts{
 		SourceTable:    sourceTable,
 		WriteTable:     depTable,
 		IsCrossPrefix:  types.ExtractPrefix(source) != types.ExtractPrefix(target),
@@ -390,6 +390,9 @@ func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx *sql.Tx, index int, 
 	// documents, so an idempotent re-add cannot sweep unrelated pending event
 	// rows into this commit (GH#2455).
 	r.write.Tables.Add(depTable)
+	if issueRowsChanged {
+		r.write.Tables.Add("issues")
+	}
 	// The edge row was written EITHER WAY: a new edge is an insert, and a
 	// same-type re-add rewrites that row's metadata. So the transaction has
 	// something to commit even when the caller sees no change.

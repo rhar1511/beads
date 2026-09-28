@@ -138,7 +138,7 @@ func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID,
 	if err := types.CheckFieldLen("label", label); err != nil {
 		return false, err
 	}
-	issueTable, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
+	_, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
 	if err != nil {
 		return false, err
 	}
@@ -153,8 +153,8 @@ func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID,
 	}
 	changed := rows > 0
 	if changed {
-		if err := TouchRowVersionInTx(ctx, tx, issueTable, issueID); err != nil {
-			return false, fmt.Errorf("add label: %w", err)
+		if err := BumpIssueRevisionInTx(ctx, tx, issueID, labelTable == "wisp_labels"); err != nil {
+			return false, fmt.Errorf("add label: bump issue revision: %w", err)
 		}
 	}
 	comment := "Added label: " + label
@@ -180,7 +180,7 @@ func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID,
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func RemoveLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID, label, actor string) (bool, error) {
-	issueTable, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
+	_, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
 	if err != nil {
 		return false, err
 	}
@@ -194,8 +194,8 @@ func RemoveLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issue
 	}
 	changed := rows > 0
 	if changed {
-		if err := TouchRowVersionInTx(ctx, tx, issueTable, issueID); err != nil {
-			return false, fmt.Errorf("remove label: %w", err)
+		if err := BumpIssueRevisionInTx(ctx, tx, issueID, labelTable == "wisp_labels"); err != nil {
+			return false, fmt.Errorf("remove label: bump issue revision: %w", err)
 		}
 	}
 	comment := "Removed label: " + label

@@ -809,7 +809,8 @@ func (t *doltTransaction) DeleteIssue(ctx context.Context, id string) error {
 	}
 	// storage.Tx.DeleteIssue carries no actor (it is the actorless system
 	// surface), so the journal rows record none — 0066's "system/unknown".
-	if err := issueops.DeleteIssueInTx(ctx, t.txFor(table), id, ""); err != nil {
+	issueRowsChanged, err := issueops.DeleteIssueInTxWithResult(ctx, t.txFor(table), id, "")
+	if err != nil {
 		return wrapExecError("delete issue in tx", err)
 	}
 	// Mark every table the ON DELETE CASCADE fans out to, not just the row's
@@ -817,6 +818,9 @@ func (t *doltTransaction) DeleteIssue(ctx context.Context, id string) error {
 	// staging only `issues` leaves them uncommitted in the working set.
 	for _, cascaded := range issueops.DeleteCascadeTables(isWisp) {
 		t.dirty.MarkDirty(cascaded)
+	}
+	if issueRowsChanged {
+		t.dirty.MarkDirty("issues")
 	}
 	return nil
 }
@@ -905,6 +909,9 @@ func (t *doltTransaction) AddDependencyWithOptions(ctx context.Context, dep *typ
 	}
 	t.dirty.MarkDirty(table)
 	t.dirty.MarkDirty(opts.SourceTable)
+	if result.IssueRowsChanged {
+		t.dirty.MarkDirty("issues")
+	}
 	// AddDependencyInTx records a dependency_added event on the source's event
 	// table only for a genuine emit (explicit verb + new edge); stage that table
 	// so StageAndCommit commits the event with the edge (a torn write otherwise
@@ -1072,7 +1079,7 @@ func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issue
 		return nil
 	}
 	t.dirty.MarkDirty(table)
-	if table == "dependencies" {
+	if result.IssueRowsChanged {
 		t.dirty.MarkDirty("issues")
 	}
 	// RemoveDependencyInTx records a dependency_removed event on the source's

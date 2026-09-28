@@ -75,9 +75,10 @@ type Issue struct {
 	// ===== Concurrency (generic Issue JSON/JSONL omits this field) =====
 	// RowVersion is an opaque optimistic-concurrency token for the library's own
 	// Go call sites: the issues/wisps row_lock cell, a random non-zero value the
-	// engine rewrites on every supported user-authored aggregate mutation. It is
-	// EQUALITY-ONLY — compare it, never order or interpret it — and a change
-	// signals the row was mutated since you read it. It is json:"-" on purpose:
+	// engine rewrites on every supported user-authored aggregate mutation and
+	// every change to its derived is_blocked projection. It is EQUALITY-ONLY —
+	// compare it, never order or interpret it — and a change signals the row was
+	// mutated since you read it. It is json:"-" on purpose:
 	// row_lock is random per write, so generic Issue serialization would break
 	// stable list/export round-trips. The detail-view DTO projects it explicitly
 	// as `revision` for guarded clients (IssueDetails.Revision, set by
@@ -86,12 +87,11 @@ type Issue struct {
 	// survive a JSON number in a JavaScript consumer. Go consumers read
 	// RowVersion directly and never see the string.
 	//
-	// Exact no-ops preserve the token. The derived is_blocked projection is the
-	// sole visible exception: recomputation is cache maintenance driven by other
-	// rows, not a user-authored mutation of this aggregate. The dependency edit
-	// that triggered it still remints its source token; inbound edges remain a
-	// graph query on the target.
+	// Exact no-ops preserve the token. Recomputing is_blocked remints the token
+	// only when the visible derived value changes; inbound edges remain a graph
+	// query on the target.
 	//
+	// ClaimFence is not part of this schema and is unsupported by this token.
 	// Migration 0067 (ignored/0027 for wisps) replaces legacy 0 tokens with a
 	// non-zero equality sentinel; current creates stamp a fresh random token.
 	RowVersion int64 `json:"-"`

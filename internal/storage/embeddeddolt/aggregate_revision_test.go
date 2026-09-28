@@ -112,6 +112,150 @@ func TestAggregateRevisionChangesForEveryVisibleAuxiliaryMutation(t *testing.T) 
 	}
 }
 
+func TestAggregateRevisionTargetRenamesInvalidateInboundSources(t *testing.T) {
+	skipUnlessEmbeddedDolt(t)
+	te := newTestEnv(t, "aggregate_revision_rename")
+	ctx := t.Context()
+
+	create := func(id string, wisp bool) *types.Issue {
+		t.Helper()
+		issue := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: wisp}
+		if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {
+			t.Fatalf("CreateIssue(%s): %v", id, err)
+		}
+		return issue
+	}
+	rename := func(oldID, newID string) {
+		t.Helper()
+		issue, err := te.store.GetIssue(ctx, oldID)
+		if err != nil {
+			t.Fatalf("GetIssue(%s): %v", oldID, err)
+		}
+		issue.ID = newID
+		if err := te.store.UpdateIssueID(ctx, oldID, newID, issue, "writer"); err != nil {
+			t.Fatalf("UpdateIssueID(%s -> %s): %v", oldID, newID, err)
+		}
+		if err := te.store.Commit(ctx, "test: rename dependency target"); err != nil {
+			t.Fatalf("commit rename %s -> %s: %v", oldID, newID, err)
+		}
+	}
+	assertSourceChanged := func(sourceID string, before int64) {
+		t.Helper()
+		after, err := te.store.GetIssue(ctx, sourceID)
+		if err != nil {
+			t.Fatalf("GetIssue(%s): %v", sourceID, err)
+		}
+		if after.RowVersion == 0 || after.RowVersion == before {
+			t.Fatalf("source %s RowVersion = %d after target rename, want nonzero and different from %d", sourceID, after.RowVersion, before)
+		}
+		var committedRevision int64
+		te.queryScalar(t, ctx, "SELECT row_lock FROM issues AS OF 'HEAD' WHERE id = ?", []any{sourceID}, &committedRevision)
+		if committedRevision != after.RowVersion {
+			t.Fatalf("source %s committed row_lock = %d, returned RowVersion = %d", sourceID, committedRevision, after.RowVersion)
+		}
+	}
+
+	issueSource := create("revision-rename-issue-source", false)
+	issueTarget := create("revision-rename-issue-target", false)
+	if err := te.store.AddDependency(ctx, &types.Dependency{IssueID: issueSource.ID, DependsOnID: issueTarget.ID, Type: types.DepRelated}, "writer"); err != nil {
+		t.Fatalf("AddDependency issue target: %v", err)
+	}
+	issueSourceAfterAdd, err := te.store.GetIssue(ctx, issueSource.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s): %v", issueSource.ID, err)
+	}
+	rename(issueTarget.ID, "revision-rename-issue-target-new")
+	assertSourceChanged(issueSource.ID, issueSourceAfterAdd.RowVersion)
+
+	wispSource := create("revision-rename-wisp-source", false)
+	wispTarget := create("revision-rename-wisp-target", true)
+	if err := te.store.AddDependency(ctx, &types.Dependency{IssueID: wispSource.ID, DependsOnID: wispTarget.ID, Type: types.DepRelated}, "writer"); err != nil {
+		t.Fatalf("AddDependency wisp target: %v", err)
+	}
+	wispSourceAfterAdd, err := te.store.GetIssue(ctx, wispSource.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s): %v", wispSource.ID, err)
+	}
+	rename(wispTarget.ID, "revision-rename-wisp-target-new")
+	assertSourceChanged(wispSource.ID, wispSourceAfterAdd.RowVersion)
+}
+
+func TestAggregateRevisionPromotionFencesNewDurableEdgesAndRetargetedSources(t *testing.T) {
+	skipUnlessEmbeddedDolt(t)
+	te := newTestEnv(t, "aggregate_revision_promote")
+	ctx := t.Context()
+	create := func(id string, wisp bool) *types.Issue {
+		t.Helper()
+		issue := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: wisp}
+		if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {
+			t.Fatalf("CreateIssue(%s): %v", id, err)
+		}
+		return issue
+	}
+
+	toPromote := create("revision-promote-target", true)
+	outgoingTarget := create("revision-promote-outgoing-target", false)
+	inboundSource := create("revision-promote-inbound-source", false)
+	if err := te.store.AddDependency(ctx, &types.Dependency{IssueID: toPromote.ID, DependsOnID: outgoingTarget.ID, Type: types.DepRelated}, "writer"); err != nil {
+		t.Fatalf("AddDependency wisp outgoing edge: %v", err)
+	}
+	if err := te.store.AddDependency(ctx, &types.Dependency{IssueID: inboundSource.ID, DependsOnID: toPromote.ID, Type: types.DepRelated}, "writer"); err != nil {
+		t.Fatalf("AddDependency durable inbound edge: %v", err)
+	}
+	wispBefore, err := te.store.GetIssue(ctx, toPromote.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s): %v", toPromote.ID, err)
+	}
+	inboundBefore, err := te.store.GetIssue(ctx, inboundSource.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s): %v", inboundSource.ID, err)
+	}
+	if wispBefore.RowVersion == 0 || inboundBefore.RowVersion == 0 {
+		t.Fatal("promotion fixture has zero RowVersion")
+	}
+
+	if err := te.store.PromoteFromEphemeral(ctx, toPromote.ID, "writer"); err != nil {
+		t.Fatalf("PromoteFromEphemeral: %v", err)
+	}
+	if err := te.store.Commit(ctx, "test: promote aggregate revision"); err != nil {
+		t.Fatalf("commit promotion: %v", err)
+	}
+	promoted, err := te.store.GetIssue(ctx, toPromote.ID)
+	if err != nil {
+		t.Fatalf("GetIssue promoted issue: %v", err)
+	}
+	if promoted.RowVersion == 0 || promoted.RowVersion == wispBefore.RowVersion {
+		t.Fatalf("promoted RowVersion = %d, want nonzero token different from wisp token %d", promoted.RowVersion, wispBefore.RowVersion)
+	}
+	var committedRevision int64
+	te.queryScalar(t, ctx, "SELECT row_lock FROM issues AS OF 'HEAD' WHERE id = ?", []any{toPromote.ID}, &committedRevision)
+	if committedRevision != promoted.RowVersion {
+		t.Fatalf("promoted committed row_lock = %d, returned RowVersion = %d", committedRevision, promoted.RowVersion)
+	}
+	var promotedOutgoingEdges int
+	te.queryScalar(t, ctx, "SELECT COUNT(*) FROM dependencies WHERE issue_id = ? AND depends_on_issue_id = ?", []any{toPromote.ID, outgoingTarget.ID}, &promotedOutgoingEdges)
+	if promotedOutgoingEdges != 1 {
+		t.Fatalf("promoted durable outgoing edge count = %d, want 1", promotedOutgoingEdges)
+	}
+	inboundAfter, err := te.store.GetIssue(ctx, inboundSource.ID)
+	if err != nil {
+		t.Fatalf("GetIssue(%s): %v", inboundSource.ID, err)
+	}
+	if inboundAfter.RowVersion == 0 || inboundAfter.RowVersion == inboundBefore.RowVersion {
+		t.Fatalf("inbound source RowVersion = %d after target promotion, want nonzero and different from %d", inboundAfter.RowVersion, inboundBefore.RowVersion)
+	}
+	var inboundCommittedRevision int64
+	te.queryScalar(t, ctx, "SELECT row_lock FROM issues AS OF 'HEAD' WHERE id = ?", []any{inboundSource.ID}, &inboundCommittedRevision)
+	if inboundCommittedRevision != inboundAfter.RowVersion {
+		t.Fatalf("inbound source committed row_lock = %d, returned RowVersion = %d", inboundCommittedRevision, inboundAfter.RowVersion)
+	}
+	var inboundIssueTarget int
+	te.queryScalar(t, ctx, "SELECT COUNT(*) FROM dependencies WHERE issue_id = ? AND depends_on_issue_id = ?", []any{inboundSource.ID, toPromote.ID}, &inboundIssueTarget)
+	if inboundIssueTarget != 1 {
+		t.Fatalf("retargeted durable dependency count = %d, want 1", inboundIssueTarget)
+	}
+}
+
 func TestAggregateRevisionAuxiliaryMutationInvalidatesGuard(t *testing.T) {
 	skipUnlessEmbeddedDolt(t)
 	te := newTestEnv(t, "aggregate_revision_stale")

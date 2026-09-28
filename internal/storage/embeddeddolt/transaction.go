@@ -153,7 +153,14 @@ func (t *embeddedTransaction) DeleteIssue(ctx context.Context, id string) error 
 		t.dirty.MarkDirty(cascaded)
 	}
 	// storage.Tx.DeleteIssue carries no actor, so the journal rows record none.
-	return issueops.DeleteIssueInTx(ctx, t.tx, id, "")
+	issueRowsChanged, err := issueops.DeleteIssueInTxWithResult(ctx, t.tx, id, "")
+	if err != nil {
+		return err
+	}
+	if issueRowsChanged {
+		t.dirty.MarkDirty("issues")
+	}
+	return nil
 }
 
 func (t *embeddedTransaction) GetIssue(ctx context.Context, id string) (*types.Issue, error) {

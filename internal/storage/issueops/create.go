@@ -890,6 +890,9 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			continue
 		}
 		for _, dep := range issue.Dependencies {
+			if dep.IssueID != "" && dep.IssueID != issue.ID {
+				return result, fmt.Errorf("%w: create dependency source %s must match created issue %s", storage.ErrValidation, dep.IssueID, issue.ID)
+			}
 			// Default IssueID to the owning issue when not pre-set (e.g.,
 			// markdown bulk create where the ID is auto-generated).
 			if dep.IssueID == "" {
@@ -979,6 +982,17 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			}
 			if rowsAffected > 0 {
 				result.markChanged(item.depTable)
+				if item.depTable == "dependencies" {
+					// A dependency is part of its permanent source's work snapshot.
+					// Import can merge aux data onto an existing row even when the
+					// incoming issue timestamp is tied or older, so remint the owner
+					// token only after a genuinely inserted edge. The enclosing create
+					// transaction also owns the issues table stage.
+					if err := BumpIssueRevisionInTx(ctx, tx, dep.IssueID, false); err != nil {
+						return result, fmt.Errorf("bump dependency source revision for %s: %w", dep.IssueID, err)
+					}
+					result.markChanged("issues")
+				}
 				result.persistedDependencies = append(result.persistedDependencies, persistedDependency{
 					source:     dep.IssueID,
 					target:     dep.DependsOnID,
