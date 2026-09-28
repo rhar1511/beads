@@ -10,7 +10,7 @@ import (
 	publicops "github.com/steveyegge/beads/issueops"
 )
 
-func TestApplyBatchOldParentIDsArePartOfProtectedScope(t *testing.T) {
+func TestApplyBatchOldParentIDsCollectEveryParentAcrossPlanes(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -24,10 +24,14 @@ func TestApplyBatchOldParentIDsArePartOfProtectedScope(t *testing.T) {
 	defer tx.Rollback()
 	mock.ExpectQuery(`(?s)FROM dependencies.*WHERE issue_id = \?.*type = 'parent-child'`).
 		WithArgs("child").
-		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}).AddRow("child", "old-parent"))
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}).
+			AddRow("child", "old-parent-b").
+			AddRow("child", "old-parent-a"))
 	mock.ExpectQuery(`(?s)FROM wisp_dependencies.*WHERE issue_id = \?.*type = 'parent-child'`).
 		WithArgs("child").
-		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}))
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}).
+			AddRow("child", "wisp-parent").
+			AddRow("child", "old-parent-a"))
 
 	plan := storage.ApplyBatchPlan{Items: []publicops.ApplyItem{{
 		Kind: publicops.ItemUpdate,
@@ -36,16 +40,29 @@ func TestApplyBatchOldParentIDsArePartOfProtectedScope(t *testing.T) {
 			Patch:  publicops.IssuePatch{ParentID: publicops.Field[string]{Set: true, Value: "new-parent"}},
 		},
 	}}}
-	got, err := applyBatchOldParentIDsInTx(context.Background(), tx, plan)
+	got, err := ApplyBatchOldParentIDsInTx(context.Background(), tx, plan)
 	if err != nil {
 		t.Fatalf("applyBatchOldParentIDsInTx: %v", err)
 	}
-	if len(got) != 1 || got[0] != "old-parent" {
-		t.Fatalf("old parents = %v, want [old-parent]", got)
+	want := []string{"old-parent-a", "old-parent-b", "wisp-parent"}
+	if !equalBatchParentIDs(got, want) {
+		t.Fatalf("old parents = %v, want %v", got, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func equalBatchParentIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // applyBatchCommitResult builds a result from a (kind, changed) list, which is

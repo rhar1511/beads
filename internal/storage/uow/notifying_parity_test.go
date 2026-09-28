@@ -350,6 +350,8 @@ func TestUnitOfWorkBypassesAreAccountedFor(t *testing.T) {
 			"beside the issue create. It is deliberately absent from ordinary issue hook payloads.",
 		"protectedUOWRecords": "the deletion preflight reads internal classification state from the active transaction " +
 			"and performs no domain mutation or hook-worthy write.",
+		"applyBatchOldParentIDsInUOW": "the protected batch preflight reads current parent links from the active " +
+			"transaction before authorization and performs no domain mutation or hook-worthy write.",
 	}
 
 	found := map[string]bool{}

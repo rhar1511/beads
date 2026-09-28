@@ -219,6 +219,9 @@ func TestTransitionMetadataRejectsMalformedProtectedPermit(t *testing.T) {
 		{name: "empty", value: `""`},
 		{name: "leading whitespace", value: `" permit"`},
 		{name: "control character", value: `"permit\u0000suffix"`},
+		{name: "line separator", value: `"permit\u2028suffix"`},
+		{name: "paragraph separator", value: `"permit\u2029suffix"`},
+		{name: "raw invalid UTF-8", value: `"` + string([]byte{0xff}) + `"`},
 		{name: "too long", value: `"` + strings.Repeat("x", maxProtectedMutationPermitBytes+1) + `"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

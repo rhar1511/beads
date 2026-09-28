@@ -359,6 +359,9 @@ type ApplyBatchRequest struct {
 	// A per-item refusal names its offender as `items[i].kind.member`.
 	Items []ApplyItem `json:"items"`
 
+	// ProtectedPermit A nonempty, trimmed UTF-8 opaque permit authorizing explicitly classified writes in this request. The server limits it to 65536 UTF-8 bytes; `maxLength` counts Unicode characters, so the byte limit is stricter for multibyte text. U+2028, U+2029, and Unicode control characters are rejected. The storage role verifies the permit against the exact operation, resources, and request digest, then consumes its replay identity in the same transaction as every write. If a permit is supplied, every create item must carry an explicit, trimmed `id`, including standalone creates whose key is not referenced by another item. Generated IDs are refused so the permit's exact resource set can name every created row before any write begins. Permit-free batches keep generated-ID behavior. The permit does not classify a record.
+	ProtectedPermit *string `json:"protected_permit,omitempty"`
+
 	// Provenance Labels the version-control history entry this request records, under `updateIssue`'s rule: it changes how the entry READS, never whether one is recorded. Empty composes a default naming how many items of each kind landed and no ids.
 	Provenance *string `json:"provenance,omitempty"`
 
@@ -474,6 +477,9 @@ type ApplyCreateItem struct {
 
 	// Priority 0 is P0/critical. Absent means the workspace default.
 	Priority *int `json:"priority,omitempty"`
+
+	// ProtectionClass Nonempty, trimmed UTF-8 text that explicitly classifies this newly created record as protected. The server limits it to 64 UTF-8 bytes; `maxLength` counts Unicode characters, so the byte limit is stricter for multibyte text. U+2028, U+2029, and Unicode control characters are rejected. Requires an explicit `id` and a valid request-level `protected_permit`. Classification and all batch writes are atomic. The server never infers classification from issue content or metadata, and this member cannot classify an existing record.
+	ProtectionClass *string `json:"protection_class,omitempty"`
 
 	// Sender Who sent this, for the message-shaped rows a plan creates. Stored verbatim and interpreted by nothing on this surface.
 	Sender *string `json:"sender,omitempty"`
@@ -1928,7 +1934,7 @@ type TransitionMetadataRequest struct {
 	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
 	Payload MetadataValue `json:"payload,omitempty"`
 
-	// ProtectedPermit An opaque permit for a mutation of an explicitly classified record. It does not classify the record. The storage role verifies the exact operation, resources, and request digest, then consumes replay in the write transaction. Generic receipts remain read evidence only.
+	// ProtectedPermit A nonempty, trimmed UTF-8 opaque permit for a mutation of an explicitly classified record. The server limits it to 65536 UTF-8 bytes; `maxLength` counts Unicode characters, so the byte limit is stricter for multibyte text. U+2028, U+2029, and Unicode control characters are rejected. The permit does not classify the record. The storage role verifies the exact operation, resources, and request digest, then consumes replay in the write transaction. Generic receipts remain read evidence only.
 	ProtectedPermit *string `json:"protected_permit,omitempty"`
 
 	// ReceiptId Caller-generated immutable receipt key. Keep it unchanged when retrying the exact same request or recovering after a lost response.

@@ -54,14 +54,14 @@ const (
 // disagreement cases, a patch member present is written where an absent one is
 // untouched, and a metadata member present holding `null` is a value.
 var (
-	applyBatchRequestMembers = []string{"actor", "force_id_prefix", "items", "provenance", "skip_per_edge_cycle_check"}
+	applyBatchRequestMembers = []string{"actor", "force_id_prefix", "items", "protected_permit", "provenance", "skip_per_edge_cycle_check"}
 	applyItemMembers         = []string{"close", "create", "dep_add", "kind", "update"}
 	applyRefMembers          = []string{"id", "key"}
 	applyCreateItemMembers   = []string{
 		"acceptance_criteria", "assignee", "defer_until", "description", "design",
 		"due_at", "ephemeral", "estimated_minutes", "external_ref", "id",
 		"issue_type", "key", "labels", "metadata", "metadata_refs", "no_history",
-		"notes", "owner", "priority", "sender", "status", "title",
+		"notes", "owner", "priority", "protection_class", "sender", "status", "title",
 	}
 	applyUpdateItemMembers = []string{
 		"expected_assignee", "expected_status", "expected_version",
@@ -165,6 +165,10 @@ func (s *Server) applyBatchRequest(w http.ResponseWriter, r *http.Request) (issu
 	if res != nil {
 		return refuse(res)
 	}
+	protectedPermit, res := applyProtectedPermitMember(members)
+	if res != nil {
+		return refuse(res)
+	}
 	items, res := applyItems(members)
 	if res != nil {
 		return refuse(res)
@@ -172,10 +176,35 @@ func (s *Server) applyBatchRequest(w http.ResponseWriter, r *http.Request) (issu
 	return issueops.ApplyBatchRequest{
 		Actor:                 actor,
 		Items:                 items,
+		ProtectedPermit:       protectedPermit,
 		Provenance:            provenance,
 		ForceIDPrefix:         forceIDPrefix,
 		SkipPerEdgeCycleCheck: skipPerEdge,
 	}, true
+}
+
+// applyProtectedPermitMember reads an optional opaque permit without trimming
+// or otherwise changing it. A permit is authorization input, so whitespace,
+// invalid UTF-8, controls, and overlong values are rejected at the edge.
+func applyProtectedPermitMember(raw map[string]json.RawMessage) (issueops.ProtectedMutationPermit, *Result) {
+	encoded, present := raw["protected_permit"]
+	if !present {
+		return "", nil
+	}
+	if !utf8.Valid(encoded) {
+		res := InvalidArgument("protected_permit", ReasonInvalidValue,
+			"`protected_permit` must be nonempty UTF-8 text of at most 65536 bytes")
+		return "", &res
+	}
+	var token *string
+	if err := json.Unmarshal(encoded, &token); err != nil || token == nil || *token == "" ||
+		len(*token) > maxProtectedMutationPermitBytes || !utf8.ValidString(*token) ||
+		strings.TrimSpace(*token) != *token || hasProtectedMutationControl(*token) {
+		res := InvalidArgument("protected_permit", ReasonInvalidValue,
+			"`protected_permit` must be nonempty trimmed UTF-8 text of at most 65536 bytes without control characters")
+		return "", &res
+	}
+	return issueops.ProtectedMutationPermit(*token), nil
 }
 
 // applyItems validates `items` and projects it onto the role's items, in
@@ -315,12 +344,28 @@ func applyCreateItem(prefix string, encoded json.RawMessage, raw map[string]json
 	if offender, unknown := unknownMember(raw, applyCreateItemMembers); unknown {
 		return nil, applyUnknownMember(prefix, offender, applyCreateItemMembers)
 	}
+	protectionClass := ""
+	_, hasProtectionClass := raw["protection_class"]
+	if encodedClass, present := raw["protection_class"]; present {
+		var value *string
+		if !utf8.Valid(encodedClass) || json.Unmarshal(encodedClass, &value) != nil || value == nil || *value == "" ||
+			strings.TrimSpace(*value) != *value || len(*value) > 64 ||
+			!utf8.ValidString(*value) || hasProtectedMutationControl(*value) {
+			return nil, refuse("protection_class", "`protection_class` must be nonempty trimmed UTF-8 text of at most 64 bytes without control characters")
+		}
+		protectionClass = *value
+	}
 	var wire apigen.ApplyCreateItem
 	if err := json.Unmarshal(encoded, &wire); err != nil {
 		return nil, refuse("", "a `create` member carries the wrong JSON type")
 	}
 	if strings.TrimSpace(wire.Title) == "" {
 		return nil, refuse("title", "`title` is required and must not be blank")
+	}
+	if hasProtectionClass {
+		if wire.Id == nil || *wire.Id == "" || strings.TrimSpace(*wire.Id) != *wire.Id {
+			return nil, refuse("protection_class", "an explicitly classified create requires an explicit `id`")
+		}
 	}
 	// The role validates the type, the status and the id prefix against the
 	// workspace's own configuration, which this server cannot read without a
@@ -382,7 +427,7 @@ func applyCreateItem(prefix string, encoded json.RawMessage, raw map[string]json
 		issue.NoHistory = *wire.NoHistory
 	}
 
-	item := &issueops.CreateItem{Key: derefString(wire.Key), Issue: issue}
+	item := &issueops.CreateItem{Key: derefString(wire.Key), Issue: issue, ProtectionClass: protectionClass}
 	refs, res := applyMetadataRefs(prefix, raw)
 	if res != nil {
 		return nil, res
@@ -871,9 +916,10 @@ func applyBatchResponse(result issueops.ApplyBatchResult) apigen.ApplyBatchRespo
 // the `item_*` problem members are the only place it exists. They come from
 // *issueops.ItemError, raised inside the transaction that refused.
 //
-// Nothing here quotes a role message. 4xx details on this surface reflect the
-// caller's own input back rather than server internals, and the real error goes
-// to the log with the request id.
+// Nothing here quotes a role message. Where a refusal is useful to operators,
+// its underlying error is logged with the request id. Protected-record
+// refusals are the exception: verifier detail may carry permits or record
+// classification, so that error is dropped from both response and logs.
 func (s *Server) failApplyBatch(w http.ResponseWriter, r *http.Request, request issueops.ApplyBatchRequest, err error) {
 	var (
 		refErr       *issueops.RefError
@@ -908,6 +954,12 @@ func (s *Server) failApplyBatch(w http.ResponseWriter, r *http.Request, request 
 	}
 
 	switch {
+	case errors.Is(err, issueops.ErrProtectedRecord):
+		// Verifier failures may wrap opaque permits or record-class details.
+		// Keep this refusal fixed and out of logs, even when an item wrapper
+		// carries the protected-record sentinel.
+		s.fail(w, r, ProtectedRecordRefused())
+
 	// An unresolvable ref is a *RefError and it is the one 400 that carries a
 	// discriminator: `declared_later` tells an ORDERING mistake from a typo, and
 	// it is emitted in both polarities so an absent member cannot be misread as

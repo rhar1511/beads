@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/steveyegge/beads/internal/httpapi/apigen"
@@ -230,6 +231,145 @@ func TestApplyBatchForwardsEveryLevelOfTheDocumentedBody(t *testing.T) {
 	// handler that parsed it would be a second definition of what a gate is.
 	if depAdd.Metadata != `{"gate":"any-children"}` {
 		t.Errorf("dep_add.metadata = %q, want the caller's bytes unaltered", depAdd.Metadata)
+	}
+}
+
+func TestApplyBatchForwardsExplicitProtectedCreateAndLink(t *testing.T) {
+	applier := &roleBatchApplier{result: issueops.ApplyBatchResult{Items: []issueops.ItemResult{
+		{Kind: issueops.ItemCreate, IssueID: "bd-protected", Changed: true},
+		{Kind: issueops.ItemDepAdd, IssueID: "bd-source", DependsOnID: "bd-protected", Changed: true},
+	}}}
+	ts := newApplyBatchServer(t, applier)
+
+	resp := ts.claim(t, batchApplyPath, `{
+		"actor":"alice",
+		"protected_permit":"opaque-permit",
+		"items":[
+			{"kind":"create","create":{"id":"bd-protected","key":"protected","title":"classified","protection_class":"trusted-source","metadata":{"protection_class":"payload-is-not-authority"}}},
+			{"kind":"dep_add","dep_add":{"source":{"id":"bd-source"},"target":{"key":"protected"},"type":"relates-to"}}
+		]
+	}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
+	}
+	reqs := applier.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the role was called %d times, want 1", len(reqs))
+	}
+	got := reqs[0]
+	if got.ProtectedPermit != "opaque-permit" {
+		t.Errorf("ProtectedPermit = %q, want the exact opaque token", got.ProtectedPermit)
+	}
+	if len(got.Items) != 2 || got.Items[0].Create == nil || got.Items[1].DepAdd == nil {
+		t.Fatalf("Items = %+v, want ordered create then dep_add", got.Items)
+	}
+	create := got.Items[0].Create
+	if create.Issue.ID != "bd-protected" || create.Key != "protected" || create.ProtectionClass != "trusted-source" {
+		t.Errorf("create = %+v, want the explicit id, key, and protection class", create)
+	}
+	dep := got.Items[1].DepAdd
+	if dep.Source.ID != "bd-source" || dep.Target.Key != "protected" {
+		t.Errorf("dep_add = %+v, want its source id and backward key ref to the newly created record", dep)
+	}
+}
+
+func TestApplyBatchRejectsMalformedProtectedControlsBeforeTheRole(t *testing.T) {
+	protectedCreate := func(payload string) string {
+		return `{"actor":"alice","items":[{"kind":"create","create":` + payload + `}]}`
+	}
+	protectedRequest := func(token string) string {
+		return `{"actor":"alice","protected_permit":` + token + `,"items":[{"kind":"create","create":{"id":"bd-protected","title":"classified","protection_class":"trusted-source"}}]}`
+	}
+	invalidUTF8Permit := `{"actor":"alice","protected_permit":"bad` + string([]byte{0xff}) + `token","items":[{"kind":"create","create":{"title":"ordinary"}}]}`
+	invalidUTF8Class := `{"actor":"alice","items":[{"kind":"create","create":{"id":"bd-protected","title":"x","protection_class":"bad` + string([]byte{0xff}) + `class"}}]}`
+	for _, test := range []struct {
+		name      string
+		body      string
+		wantParam string
+	}{
+		{"permit null", protectedRequest(`null`), "protected_permit"},
+		{"permit wrong type", protectedRequest(`4`), "protected_permit"},
+		{"permit empty", protectedRequest(`""`), "protected_permit"},
+		{"permit padded", protectedRequest(`" permit "`), "protected_permit"},
+		{"permit control", protectedRequest(`"bad\npermit"`), "protected_permit"},
+		{"permit line separator", protectedRequest(`"bad\u2028permit"`), "protected_permit"},
+		{"permit paragraph separator", protectedRequest(`"bad\u2029permit"`), "protected_permit"},
+		{"permit raw invalid UTF-8", invalidUTF8Permit, "protected_permit"},
+		{"permit byte limit", protectedRequest(`"` + strings.Repeat("é", maxProtectedMutationPermitBytes/2+1) + `"`), "protected_permit"},
+		{"permit too long", protectedRequest(`"` + strings.Repeat("p", maxProtectedMutationPermitBytes+1) + `"`), "protected_permit"},
+		{"class null", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":null}`), "items[0].create.protection_class"},
+		{"class wrong type", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":1}`), "items[0].create.protection_class"},
+		{"class empty", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":""}`), "items[0].create.protection_class"},
+		{"class padded", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":" trusted "}`), "items[0].create.protection_class"},
+		{"class control", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":"bad\nclass"}`), "items[0].create.protection_class"},
+		{"class line separator", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":"bad\u2028class"}`), "items[0].create.protection_class"},
+		{"class paragraph separator", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":"bad\u2029class"}`), "items[0].create.protection_class"},
+		{"class raw invalid UTF-8", invalidUTF8Class, "items[0].create.protection_class"},
+		{"class byte limit", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":"` + strings.Repeat("é", 33) + `"}`), "items[0].create.protection_class"},
+		{"class too long", protectedCreate(`{"id":"bd-protected","title":"x","protection_class":"` + strings.Repeat("c", 65) + `"}`), "items[0].create.protection_class"},
+		{"class without explicit id", protectedCreate(`{"title":"x","protection_class":"trusted-source"}`), "items[0].create.protection_class"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			applier := &roleBatchApplier{}
+			ts := newApplyBatchServer(t, applier)
+			resp := ts.claim(t, batchApplyPath, test.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, readAll(t, resp))
+			}
+			body := decodeBody(t, resp)
+			if body["param"] != test.wantParam {
+				t.Errorf("param = %v, want %q", body["param"], test.wantParam)
+			}
+			if len(applier.requests()) != 0 {
+				t.Error("the role was called for a malformed protected control")
+			}
+		})
+	}
+}
+
+func TestApplyBatchDoesNotInferProtectionFromCreateContent(t *testing.T) {
+	applier := &roleBatchApplier{}
+	ts := newApplyBatchServer(t, applier)
+
+	resp := ts.claim(t, batchApplyPath, `{"actor":"alice","items":[{"kind":"create","create":{"key":"row","title":"protected","labels":["protected"],"metadata":{"protection_class":"trusted-source"}}},{"kind":"dep_add","dep_add":{"source":{"id":"bd-source"},"target":{"key":"row"},"type":"relates-to"}}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
+	}
+	reqs := applier.requests()
+	if len(reqs) != 1 || reqs[0].ProtectedPermit != "" || reqs[0].Items[0].Create.ProtectionClass != "" {
+		t.Fatalf("request = %+v, content alone must not become a permit or classification", reqs)
+	}
+}
+
+func TestApplyBatchProtectedRefusalDoesNotExposePermitOrClassDetails(t *testing.T) {
+	const (
+		permitSecret = "opaque-permit-secret"
+		classSecret  = "internal-classification-secret"
+	)
+	wrapped := fmt.Errorf("permit %q refused for classification %q: %w", permitSecret, classSecret, issueops.ErrProtectedRecord)
+	applier := &roleBatchApplier{err: itemErr(0, issueops.ItemCreate, "protected", "bd-protected", wrapped)}
+	ts := newApplyBatchServer(t, applier)
+
+	resp := ts.claim(t, batchApplyPath, `{"actor":"alice","protected_permit":"`+permitSecret+`","items":[{"kind":"create","create":{"id":"bd-protected","title":"protected","protection_class":"`+classSecret+`"}}]}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", resp.StatusCode, readAll(t, resp))
+	}
+	body := decodeBody(t, resp)
+	if body["code"] != string(CodeProtectedRecord) {
+		t.Errorf("code = %v, want %q", body["code"], CodeProtectedRecord)
+	}
+	if body["detail"] != staticDetail[CodeProtectedRecord] {
+		t.Errorf("detail = %v, want fixed detail %q", body["detail"], staticDetail[CodeProtectedRecord])
+	}
+	responseText := fmt.Sprint(body)
+	logText := ts.stderr.String()
+	for _, secret := range []string{permitSecret, classSecret} {
+		if strings.Contains(responseText, secret) {
+			t.Errorf("response leaked protected detail %q: %s", secret, responseText)
+		}
+		if strings.Contains(logText, secret) {
+			t.Errorf("server log leaked protected detail %q: %s", secret, logText)
+		}
 	}
 }
 

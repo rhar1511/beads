@@ -59,10 +59,12 @@ var _ publicops.BatchApplier = (*batchApplier)(nil)
 // (issueops.ApplyBatchCommitMessage), and the two halves of the end gate are
 // the same repository methods the per-edge path runs.
 //
-// A BATCH THAT CHANGED NOTHING COMPOSES NO COMMIT MESSAGE, which is
-// RunTxResult's existing signal for a unit of work with nothing to version —
-// and the message is composed from what LANDED on either plane, so a wisp-only
-// batch still commits. That is the trap ApplyBatchCommitMessage documents.
+// A BATCH THAT WROTE NOTHING AND CONSUMED NO PERMIT COMPOSES NO COMMIT MESSAGE,
+// which is RunTxResult's existing signal for a unit of work with nothing to
+// version — and the message is composed from what LANDED on either plane, so
+// a wisp-only batch still commits. A protected permit-use row is also a write,
+// even when the domain items are semantic no-ops; that is the trap
+// ApplyBatchCommitMessage documents.
 func (o *batchApplier) ApplyBatch(ctx context.Context, request publicops.ApplyBatchRequest) (publicops.ApplyBatchResult, error) {
 	plan, err := storage.PlanApplyBatch(request)
 	if err != nil {
@@ -80,7 +82,13 @@ func (o *batchApplier) ApplyBatch(ctx context.Context, request publicops.ApplyBa
 		if protectedClassRequested {
 			explicitClass = "batch"
 		}
-		if err := requireProtectedUOWMutation(ctx, uw, plan.ProtectedPermit, "issue.batch_apply", storageissueops.ApplyBatchResourceIDs(plan), plan.ProtectedDigest, explicitClass); err != nil {
+		protectedIDs := storageissueops.ApplyBatchResourceIDs(plan)
+		oldParents, err := applyBatchOldParentIDsInUOW(ctx, uw, plan)
+		if err != nil {
+			return publicops.ApplyBatchResult{}, "", err
+		}
+		protectedIDs = append(protectedIDs, oldParents...)
+		if err := requireProtectedUOWMutation(ctx, uw, plan.ProtectedPermit, "issue.batch_apply", protectedIDs, plan.ProtectedDigest, explicitClass); err != nil {
 			return publicops.ApplyBatchResult{}, "", err
 		}
 		run := &uowApplyRun{
@@ -96,8 +104,24 @@ func (o *batchApplier) ApplyBatch(ctx context.Context, request publicops.ApplyBa
 		if err := run.apply(ctx); err != nil {
 			return publicops.ApplyBatchResult{}, "", err
 		}
+		run.write = run.write.WithProtectedMutationPermitUse(ctx)
 		return run.result, storageissueops.ApplyBatchCommitMessage(plan, run.result, run.write), nil
 	})
+}
+
+func applyBatchOldParentIDsInUOW(ctx context.Context, uw UnitOfWork, plan storage.ApplyBatchPlan) ([]string, error) {
+	for _, item := range plan.Items {
+		if item.Kind != publicops.ItemUpdate || item.Update == nil || !item.Update.Patch.ParentID.Set {
+			continue
+		}
+		unwrapped := unwrapUOW(uw)
+		provider, ok := unwrapped.(protectedMutationRunner)
+		if !ok {
+			return nil, fmt.Errorf("%w: unit of work has no transaction-local parent-link reads", publicops.ErrProtectedRecord)
+		}
+		return storageissueops.ApplyBatchOldParentIDsInTx(ctx, provider.protectedMutationRunner(), plan)
+	}
+	return nil, nil
 }
 
 // uowApplyRun carries the state one request accumulates on this backend. It is
@@ -113,9 +137,10 @@ type uowApplyRun struct {
 	result publicops.ApplyBatchResult
 	// write records whether this unit of work has anything to commit, on the
 	// same terms the store bodies record it: a create and an edge always write,
-	// an update and a close write when they changed something. It carries no
-	// tables — this backend stages nothing, its whole unit of work commits — so
-	// the commit message is composed from Changed alone.
+	// an update and a close write when they changed something, and a consumed
+	// protected permit writes its replay-use row. It carries no tables — this
+	// backend stages nothing, its whole unit of work commits — so the commit
+	// message is composed from Changed alone.
 	write storageissueops.BatchApplyWrite
 	// createContext is the workspace's prefix, statuses, types and infra-type
 	// set, loaded ONCE for the whole request. Nothing an item writes changes

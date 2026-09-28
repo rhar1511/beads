@@ -922,8 +922,8 @@ var operationCodes = map[string][]Code{
 	},
 	// The widest row here, and every code on it is inherited from an operation
 	// that already has it: this one performs the lifecycle's writes, the claim's
-	// assignee transfer and the graph's edge assertions inside one transaction,
-	// so it can earn any refusal any of them can.
+	// assignee transfer, the graph's edge assertions and the protected-record
+	// fence inside one transaction, so it can earn any refusal any of them can.
 	//
 	// THERE IS A CONFLICT CODE HERE, unlike the metadata compare-and-set, and
 	// that is the whole difference between the two contracts rather than a
@@ -943,7 +943,7 @@ var operationCodes = map[string][]Code{
 	OpApplyBatch: {
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodePreconditionFailed, CodeNotClosable, CodeAlreadyClaimed, CodeAlreadyExists,
-		CodeDependencyCycle, CodeDependencyExists,
+		CodeDependencyCycle, CodeDependencyExists, CodeProtectedRecord,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	// getDependencyTree's row, and it is the same shape for the same two

@@ -250,7 +250,9 @@ func protectedOperationCovers(outer, leaf string) bool {
 func batchScopeCovers(batchOperation, operation string) bool {
 	switch batchOperation {
 	case "issue.batch_apply":
-		return operation == "issue.create" || operation == "issue.update" || operation == "issue.close" || operation == "dependency.add" || operation == "issue.label_add" || operation == "issue.label_remove"
+		return operation == "issue.create" || operation == "issue.update" || operation == "issue.close" ||
+			operation == "dependency.add" || operation == "dependency.remove" ||
+			operation == "issue.label_add" || operation == "issue.label_remove" || operation == "issue.persistence_move"
 	case "issue.batch_create":
 		return operation == "issue.create" || operation == "issue.label_add"
 	case "issue.batch_close":

@@ -136,11 +136,14 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	var protectedPermit issueops.ProtectedMutationPermit
-	if _, present := members["protected_permit"]; present {
+	if encoded, present := members["protected_permit"]; present {
+		if !utf8.Valid(encoded) {
+			return bad("protected_permit", "`protected_permit` must be nonempty UTF-8 text of at most 65536 bytes")
+		}
 		token, ok := requiredStringMember(members, "protected_permit")
 		if !ok || token == "" || len(token) > maxProtectedMutationPermitBytes ||
 			!utf8.ValidString(token) || strings.TrimSpace(token) != token || hasProtectedMutationControl(token) {
-			return bad("protected_permit", "`protected_permit` must be a nonempty opaque token of at most 65536 bytes")
+			return bad("protected_permit", "`protected_permit` must be nonempty trimmed UTF-8 text of at most 65536 bytes without control characters")
 		}
 		protectedPermit = issueops.ProtectedMutationPermit(token)
 	}
@@ -181,7 +184,7 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 
 func hasProtectedMutationControl(value string) bool {
 	for _, r := range value {
-		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == '\u2028' || r == '\u2029' {
 			return true
 		}
 	}

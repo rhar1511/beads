@@ -30,6 +30,43 @@ func (f protectedMutationVerifierFunc) Verify(ctx context.Context, permit public
 	return f(ctx, permit, scope)
 }
 
+func TestBatchApplyProtectedScopeCoversReachableLeafMutations(t *testing.T) {
+	for _, test := range []struct {
+		leaf string
+		want bool
+	}{
+		{leaf: "issue.create", want: true},
+		{leaf: "issue.update", want: true},
+		{leaf: "issue.close", want: true},
+		{leaf: "dependency.add", want: true},
+		{leaf: "dependency.remove", want: true},
+		{leaf: "issue.label_add", want: true},
+		{leaf: "issue.label_remove", want: true},
+		{leaf: "issue.persistence_move", want: true},
+		// Batch UpdateItem has no Claim field, so issue.claim cannot be reached
+		// through its update path.
+		{leaf: "issue.claim", want: false},
+		{leaf: "issue.comment", want: false},
+	} {
+		t.Run(test.leaf, func(t *testing.T) {
+			if got := protectedOperationCovers("issue.batch_apply", test.leaf); got != test.want {
+				t.Fatalf("protectedOperationCovers(issue.batch_apply, %s) = %v, want %v", test.leaf, got, test.want)
+			}
+		})
+	}
+
+	config := &protectedMutationConfig{verified: []publicops.ProtectedMutationScope{{
+		Operation:   "issue.batch_apply",
+		ResourceIDs: []string{"child", "new-parent", "old-parent"},
+	}}}
+	if !protectedAuthorizationCovers(config, "dependency.remove", []string{"old-parent"}) {
+		t.Fatal("verified batch scope did not cover dependency.remove for its classified old parent")
+	}
+	if protectedAuthorizationCovers(config, "dependency.remove", []string{"outside-scope"}) {
+		t.Fatal("verified batch scope covered dependency.remove for an unlisted protected record")
+	}
+}
+
 func TestRequireProtectedMutationPassesExactScopeToVerifier(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

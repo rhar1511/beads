@@ -109,7 +109,26 @@ func PlanApplyBatch(in issueops.ApplyBatchRequest) (ApplyBatchPlan, error) {
 			return ApplyBatchPlan{}, err
 		}
 	}
+	if plan.ProtectedPermit != "" && applyBatchRequiresExplicitCreateIDs(plan) {
+		return ApplyBatchPlan{}, fmt.Errorf("%w: protected batch scope requires an explicit valid issue ID for every create item", issueops.ErrProtectedRecord)
+	}
 	return plan, nil
+}
+
+// applyBatchRequiresExplicitCreateIDs reports whether a create would receive
+// its ID only after authorization. A permit must bind every created resource
+// before any batch write begins, including creates with no key references.
+func applyBatchRequiresExplicitCreateIDs(plan ApplyBatchPlan) bool {
+	for _, item := range plan.Items {
+		if item.Kind == issueops.ItemCreate && (item.Create == nil || !hasExplicitBatchCreateID(item.Create.Issue)) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExplicitBatchCreateID(issue *issueops.Issue) bool {
+	return issue != nil && issue.ID != "" && strings.TrimSpace(issue.ID) == issue.ID
 }
 
 // planApplyBatchKeys checks every item's kind/payload agreement and collects
@@ -203,7 +222,7 @@ func planApplyBatchItem(item *issueops.ApplyItem, index int, keyIndex map[string
 // matter — see issueops.CreateItem.MetadataRefs. What it may not do is name a
 // key no item declares.
 func planApplyBatchCreate(item *issueops.CreateItem, index int, keyIndex map[string]int, touched map[string]bool) error {
-	if item.ProtectionClass != "" && (strings.TrimSpace(item.ProtectionClass) != item.ProtectionClass || len(item.ProtectionClass) > 64 || item.Issue == nil || item.Issue.ID == "" || strings.TrimSpace(item.Issue.ID) != item.Issue.ID) {
+	if item.ProtectionClass != "" && (strings.TrimSpace(item.ProtectionClass) != item.ProtectionClass || len(item.ProtectionClass) > 64 || !hasExplicitBatchCreateID(item.Issue)) {
 		return fmt.Errorf("%w: apply batch item %d protected creation requires a valid class and explicit issue ID", issueops.ErrValidation, index)
 	}
 	for metaKey, ref := range item.MetadataRefs {
