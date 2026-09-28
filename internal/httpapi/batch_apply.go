@@ -187,24 +187,7 @@ func (s *Server) applyBatchRequest(w http.ResponseWriter, r *http.Request) (issu
 // or otherwise changing it. A permit is authorization input, so whitespace,
 // invalid UTF-8, controls, and overlong values are rejected at the edge.
 func applyProtectedPermitMember(raw map[string]json.RawMessage) (issueops.ProtectedMutationPermit, *Result) {
-	encoded, present := raw["protected_permit"]
-	if !present {
-		return "", nil
-	}
-	if !utf8.Valid(encoded) {
-		res := InvalidArgument("protected_permit", ReasonInvalidValue,
-			"`protected_permit` must be nonempty UTF-8 text of at most 65536 bytes")
-		return "", &res
-	}
-	var token *string
-	if err := json.Unmarshal(encoded, &token); err != nil || token == nil || *token == "" ||
-		len(*token) > maxProtectedMutationPermitBytes || !utf8.ValidString(*token) ||
-		strings.TrimSpace(*token) != *token || hasProtectedMutationControl(*token) {
-		res := InvalidArgument("protected_permit", ReasonInvalidValue,
-			"`protected_permit` must be nonempty trimmed UTF-8 text of at most 65536 bytes without control characters")
-		return "", &res
-	}
-	return issueops.ProtectedMutationPermit(*token), nil
+	return protectedMutationPermitMember(raw)
 }
 
 // applyItems validates `items` and projects it onto the role's items, in

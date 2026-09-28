@@ -782,11 +782,14 @@ var operationCodes = map[string][]Code{
 	// request that named no row has nothing to be stale about — and ABOVE the
 	// dependents refusal, which is the role's own order and is what makes the
 	// wire's answer the same one `bd delete` gives.
+	// protected_record is the backend's separate refusal for a mutation that
+	// touches an explicitly protected record; its fixed response never carries
+	// permit or classification details.
 	//
 	// The ARITY refusal is a 400 rather than a second conflict: a token beside
 	// two distinct ids is a malformed request, not a statement about state.
 	OpDeleteIssues: {
-		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodePreconditionFailed,
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodePreconditionFailed, CodeProtectedRecord,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	OpClaimIssue: {

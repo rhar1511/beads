@@ -3766,6 +3766,8 @@ paths:
             Invalid request: an unparseable or oversized body, an unknown body
             member, an empty or over-long `ids`, a blank id, an `actor` that is
             empty after trimming or carries control characters, an
+            malformed `protected_permit` (which must be nonempty, trimmed
+            UTF-8 of at most 65536 bytes without control characters), an
             `expected_version` beside more than one distinct id — or a named
             bead with a dependent the request did not name and neither
             `cascade` nor `force` to say what to do about it, which the library
@@ -3800,7 +3802,13 @@ paths:
 
             It outranks the dependents refusal and is outranked by the `404`:
             see the operation description.
-          x-bd-codes: [precondition_failed]
+
+
+            `protected_record` is the backend refusing a mutation that touches
+            an explicitly protected record. Its `detail` is fixed as "this
+            mutation was refused" and carries no permit or classification
+            information.
+          x-bd-codes: [precondition_failed, protected_record]
           content:
             application/problem+json:
               schema:
@@ -7793,6 +7801,21 @@ components:
             member. The token spans the FULL 64-bit range, so a number would be
             rounded past 2^53 by an IEEE-754-double parser and the guard would miss a
             row nothing else touched; a string round-trips exactly in every consumer.
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          x-max-utf8-bytes: 65536
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            A nonempty, trimmed UTF-8 opaque permit for deleting an explicitly
+            protected record. The server limits it to 65536 UTF-8 bytes;
+            `maxLength` counts Unicode characters, so the byte limit is
+            stricter for multibyte text. U+2028, U+2029, and Unicode control
+            characters are rejected. The storage role verifies the permit
+            against the exact deletion operation, resolved resources, and
+            request digest, then consumes replay in the delete transaction.
+            The permit does not classify a record.
     DeleteIssuesResult:
       type: object
       required: [dry_run, deleted, dependencies, labels, events, references_updated]

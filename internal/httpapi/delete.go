@@ -22,6 +22,7 @@ const (
 	deleteCascadeMember = "cascade"
 	deleteForceMember   = "force"
 	deleteDryRunMember  = "dry_run"
+	deletePermitMember  = "protected_permit"
 )
 
 // deleteMembers is the whole vocabulary, in one place, so the unknown-member
@@ -33,6 +34,7 @@ var deleteMembers = []string{
 	deleteCascadeMember,
 	deleteForceMember,
 	deleteDryRunMember,
+	deletePermitMember,
 	expectedVersionMember,
 }
 
@@ -151,6 +153,12 @@ func (s *Server) deleteRequest(w http.ResponseWriter, r *http.Request) (issueops
 		}
 	}
 	request.IDs = *ids
+	protectedPermit, res := protectedMutationPermitMember(members)
+	if res != nil {
+		s.fail(w, r, *res)
+		return issueops.DeleteRequest{}, false
+	}
+	request.ProtectedPermit = protectedPermit
 
 	// The guard, and the arity rule that comes with it. Both are decided here,
 	// before any database work, because both are statements about the REQUEST:
@@ -262,6 +270,10 @@ func deleteMemberList() string {
 // a request that named no row has nothing to be stale about, so no branch here
 // has to arrange it.
 func (s *Server) failDeleteErr(w http.ResponseWriter, r *http.Request, request issueops.DeleteRequest, err error) {
+	if errors.Is(err, issueops.ErrProtectedRecord) {
+		s.fail(w, r, ProtectedRecordRefused())
+		return
+	}
 	if errors.Is(err, issueops.ErrVersionMismatch) {
 		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion))
 		return

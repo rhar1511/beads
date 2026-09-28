@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -11,6 +12,41 @@ import (
 )
 
 const maxProtectedMutationPermitBytes = 64 << 10
+
+// protectedMutationPermitMember reads an optional opaque permit without
+// trimming or otherwise changing it. A permit is authorization input, so
+// whitespace, invalid UTF-8, controls, and overlong values are rejected at
+// the edge. Keep this validation shared by every HTTP mutation that carries a
+// protected permit.
+func protectedMutationPermitMember(raw map[string]json.RawMessage) (issueops.ProtectedMutationPermit, *Result) {
+	encoded, present := raw["protected_permit"]
+	if !present {
+		return "", nil
+	}
+	if !utf8.Valid(encoded) {
+		res := InvalidArgument("protected_permit", ReasonInvalidValue,
+			"`protected_permit` must be nonempty UTF-8 text of at most 65536 bytes")
+		return "", &res
+	}
+	var token *string
+	if err := json.Unmarshal(encoded, &token); err != nil || token == nil || *token == "" ||
+		len(*token) > maxProtectedMutationPermitBytes || !utf8.ValidString(*token) ||
+		strings.TrimSpace(*token) != *token || hasProtectedMutationControl(*token) {
+		res := InvalidArgument("protected_permit", ReasonInvalidValue,
+			"`protected_permit` must be nonempty trimmed UTF-8 text of at most 65536 bytes without control characters")
+		return "", &res
+	}
+	return issueops.ProtectedMutationPermit(*token), nil
+}
+
+func hasProtectedMutationControl(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == '\u2028' || r == '\u2029' {
+			return true
+		}
+	}
+	return false
+}
 
 // ProtectedMutationAuthority is immutable server-startup configuration for
 // verifying protected-mutation permits. Its fields are private, and the server copies the

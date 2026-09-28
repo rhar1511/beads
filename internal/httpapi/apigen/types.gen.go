@@ -1193,6 +1193,9 @@ type DeleteIssuesRequest struct {
 	//
 	// The cap is on the REQUEST rather than on what a cascade expands to: the whole delete is one transaction, so the practical bound is the backend's write timeout and no number here can promise it.
 	Ids []string `json:"ids"`
+
+	// ProtectedPermit A nonempty, trimmed UTF-8 opaque permit for deleting an explicitly protected record. The server limits it to 65536 UTF-8 bytes; `maxLength` counts Unicode characters, so the byte limit is stricter for multibyte text. U+2028, U+2029, and Unicode control characters are rejected. The storage role verifies the permit against the exact deletion operation, resolved resources, and request digest, then consumes replay in the delete transaction. The permit does not classify a record.
+	ProtectedPermit *string `json:"protected_permit,omitempty"`
 }
 
 // DeleteIssuesResult What one delete did. Every number describes the SAME snapshot, because the guard, the deletion and the reference rewrite ran in one transaction.

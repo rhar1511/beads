@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/steveyegge/beads/internal/httpapi/apigen"
@@ -135,17 +134,10 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 			return bad("payload", "`payload` must be a JSON value")
 		}
 	}
-	var protectedPermit issueops.ProtectedMutationPermit
-	if encoded, present := members["protected_permit"]; present {
-		if !utf8.Valid(encoded) {
-			return bad("protected_permit", "`protected_permit` must be nonempty UTF-8 text of at most 65536 bytes")
-		}
-		token, ok := requiredStringMember(members, "protected_permit")
-		if !ok || token == "" || len(token) > maxProtectedMutationPermitBytes ||
-			!utf8.ValidString(token) || strings.TrimSpace(token) != token || hasProtectedMutationControl(token) {
-			return bad("protected_permit", "`protected_permit` must be nonempty trimmed UTF-8 text of at most 65536 bytes without control characters")
-		}
-		protectedPermit = issueops.ProtectedMutationPermit(token)
+	protectedPermit, permitRes := protectedMutationPermitMember(members)
+	if permitRes != nil {
+		s.fail(w, r, *permitRes)
+		return issueops.RevisionTransitionRequest{}, false
 	}
 
 	request := issueops.RevisionTransitionRequest{
@@ -180,15 +172,6 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 		Value:           plan.Value,
 		Payload:         plan.Payload,
 	}, true
-}
-
-func hasProtectedMutationControl(value string) bool {
-	for _, r := range value {
-		if r < 0x20 || (r >= 0x7f && r <= 0x9f) || r == '\u2028' || r == '\u2029' {
-			return true
-		}
-	}
-	return false
 }
 
 func requiredStringMember(members map[string]json.RawMessage, name string) (string, bool) {
