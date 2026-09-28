@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/issueops"
@@ -49,6 +50,8 @@ type ApplyBatchPlan struct {
 	SkipPerEdgeCycleCheck bool
 	ProtectedPermit       issueops.ProtectedMutationPermit
 	ProtectedDigest       string
+	ReceiptID             string
+	RequestDigest         string
 	// Items are the request's items in declaration order, with each waits-for
 	// dep_add's Metadata replaced by its normalized form. The slice is fresh,
 	// so normalization does not write through to the caller's.
@@ -72,6 +75,11 @@ func PlanApplyBatch(in issueops.ApplyBatchRequest) (ApplyBatchPlan, error) {
 	if in.Actor == "" {
 		return ApplyBatchPlan{}, fmt.Errorf("%w: apply batch requires an actor", issueops.ErrValidation)
 	}
+	if in.ReceiptID != "" {
+		if _, err := BatchApplyReceiptDigest(in); err != nil {
+			return ApplyBatchPlan{}, err
+		}
+	}
 	if len(in.Items) == 0 {
 		return ApplyBatchPlan{}, fmt.Errorf("%w: apply batch requires at least one item", issueops.ErrValidation)
 	}
@@ -91,12 +99,19 @@ func PlanApplyBatch(in issueops.ApplyBatchRequest) (ApplyBatchPlan, error) {
 		ForceIDPrefix:         in.ForceIDPrefix,
 		SkipPerEdgeCycleCheck: in.SkipPerEdgeCycleCheck,
 		ProtectedPermit:       in.ProtectedPermit,
+		ReceiptID:             in.ReceiptID,
 		Items:                 make([]issueops.ApplyItem, len(in.Items)),
 		KeyIndex:              keyIndex,
 	}
 	plan.ProtectedDigest, err = issueops.ProtectedMutationDigest(in)
 	if err != nil {
 		return ApplyBatchPlan{}, err
+	}
+	if plan.ReceiptID != "" {
+		plan.RequestDigest, err = BatchApplyReceiptDigest(in)
+		if err != nil {
+			return ApplyBatchPlan{}, err
+		}
 	}
 	copy(plan.Items, in.Items)
 
@@ -113,6 +128,32 @@ func PlanApplyBatch(in issueops.ApplyBatchRequest) (ApplyBatchPlan, error) {
 		return ApplyBatchPlan{}, fmt.Errorf("%w: protected batch scope requires an explicit valid issue ID for every create item", issueops.ErrProtectedRecord)
 	}
 	return plan, nil
+}
+
+// BatchApplyReceiptDigest validates the optional caller identity and returns
+// the canonical request digest it binds to. An omitted ID keeps the request on
+// the legacy no-receipt path.
+func BatchApplyReceiptDigest(in issueops.ApplyBatchRequest) (string, error) {
+	if in.ReceiptID == "" {
+		return "", nil
+	}
+	if err := ValidateBatchApplyReceiptID(in.ReceiptID); err != nil {
+		return "", err
+	}
+	digest, err := issueops.ApplyBatchRequestDigest(in)
+	if err != nil {
+		return "", fmt.Errorf("encode apply batch receipt request: %w", err)
+	}
+	return digest, nil
+}
+
+// ValidateBatchApplyReceiptID checks the exact text and byte bound used by the
+// durable receipt table's binary primary key.
+func ValidateBatchApplyReceiptID(id string) error {
+	if id == "" || len(id) > 191 || !utf8.ValidString(id) || strings.ContainsRune(id, '\x00') {
+		return fmt.Errorf("%w: receipt_id must be valid nonempty text of at most 191 bytes", issueops.ErrValidation)
+	}
+	return nil
 }
 
 // applyBatchRequiresExplicitCreateIDs reports whether a create would receive

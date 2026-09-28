@@ -322,6 +322,14 @@ func (p *notifyingProvider) RevisionTransitionReadiness(ctx context.Context) (sc
 	return source.RevisionTransitionReadiness(ctx)
 }
 
+func (p *notifyingProvider) BatchApplyReceiptReadiness(ctx context.Context) (schema.BatchApplyReceiptReadiness, error) {
+	source, ok := p.inner.(BatchApplyReceiptReadinessSource)
+	if !ok {
+		return schema.BatchApplyReceiptReadiness{}, &storage.ErrUnsupported{Op: "BatchApplyReceiptReadiness", Backend: "provider"}
+	}
+	return source.BatchApplyReceiptReadiness(ctx)
+}
+
 func (p *notifyingProvider) Releaser() (publicops.Releaser, error) { return NewReleaser(p) }
 
 func (p *notifyingProvider) Memories() (memoryops.Memories, error) { return NewMemories(p) }

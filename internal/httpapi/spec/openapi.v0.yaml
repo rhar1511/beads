@@ -4008,12 +4008,27 @@ paths:
 
 
         ONE HISTORY ENTRY IS RECORDED FOR THE WHOLE REQUEST, attributed to
-        `actor`, and none at all when nothing durable landed — a request made
-        entirely of ephemeral items writes only to unversioned tables.
+        `actor`. Without `receipt_id`, none is recorded when nothing durable
+        landed — a request made entirely of ephemeral items writes only to
+        unversioned tables. With `receipt_id`, the durable receipt itself is
+        versioned, even when every item is ephemeral or a semantic no-op.
         `provenance` labels that entry: it changes how the entry READS, never
         whether one is recorded, and an empty one composes a default naming how
         many items of each kind landed rather than every id, since an entry
         listing a hundred is the diff written twice.
+
+
+        Supplying `receipt_id` opts into an additional durable, versioned
+        receipt written atomically with the plan. That receipt is written even
+        when every item is an ephemeral no-op. It preserves the complete
+        original result, including the library's issue snapshots, and survives
+        later changes to those issues. Repeating the same ID and request returns
+        that result with `replayed: true`, without rerunning items or checking a
+        protected permit again. Reusing the ID for a different request returns
+        `409 batch_apply_receipt_conflict` and writes nothing. A failed plan
+        leaves no receipt. The 191-byte ID and canonical request digest bind
+        the receipt; the permit and receipt ID themselves are excluded from the
+        digest.
 
 
         EPHEMERALITY IS PER ITEM, exactly as it is for
@@ -4024,12 +4039,9 @@ paths:
         for.
 
 
-        IT IS NOT IDEMPOTENT AND CARRIES NO IDEMPOTENCY KEY. Replaying a request
-        applies it again — the creates mint new ids, the edges are idempotent,
-        the closes are no-ops. A caller that needs a replay record makes it an
-        ITEM of the batch, so the record lands or rolls back with the work it
-        describes; a key on the request would be a second, weaker mechanism for
-        the same thing.
+        Without `receipt_id`, replaying a request applies it again — creates
+        mint new IDs, edges are idempotent and closes may be no-ops. There is no
+        durable history for a receipt-less all-ephemeral or no-op batch.
 
 
         Hooks do not fire and the per-command auto-commit machinery does not
@@ -4049,7 +4061,9 @@ paths:
           description: >-
             Every item applied and the transaction committed. `items` carries
             one entry per requested item in request order, and `keys` maps every
-            key a create item named to the id it was bound to.
+            key a create item named to the id it was bound to. `replayed` is
+            true only when a durable receipt returned the immutable result of an
+            earlier successful request.
           content:
             application/json:
               schema:
@@ -4131,7 +4145,7 @@ paths:
         '409':
           description: >-
             The request is well-formed and the STATE refuses it, and NOTHING WAS
-            WRITTEN. Seven codes; each says why this well-formed plan could not
+            WRITTEN. Eight codes; each says why this well-formed plan could not
             be applied as sent. Six
             paragraphs cover them: `dependency_cycle` and `dependency_exists`
             share one, because they are the graph's own pair.
@@ -4190,10 +4204,15 @@ paths:
             `protected_record` means a mutation involving a protected record
             or a protected create was refused. Its detail is fixed and does not
             disclose record classification or permit contents.
+
+
+            `batch_apply_receipt_conflict` means this `receipt_id` is already
+            bound to a different canonical request. The response carries no
+            stored result or request details.
           x-bd-codes:
             [already_claimed, already_exists, dependency_cycle,
              dependency_exists, not_closable, precondition_failed,
-             protected_record]
+             protected_record, batch_apply_receipt_conflict]
           content:
             application/problem+json:
               schema:
@@ -4202,6 +4221,16 @@ paths:
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/Unavailable'
+        '501':
+          description: >-
+            The request carries `receipt_id`, but startup could not prove that
+            migration 0071 and the durable receipt table are ready. The body is
+            not sent to the batch role and no database work is performed.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   /v0/beads/issues:batchClose:
     post:
@@ -7559,7 +7588,7 @@ components:
             `memories.list`, `memories.get`, `memories.remember`,
             `memories.forget`, `events.list`, `events.watch`,
             `issues.casMetadata`, `issues.transitionMetadata`,
-            `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `project.enforce`,
+            `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `issues.batchApplyReceipt`, `project.enforce`,
             which announces that a `Bd-Project-Id` stamp for the wrong workspace
             is refused here rather than silently ignored, and `issues.protectedMutation`, which announces a startup-owned verifier and the durable permit-use table are ready. The list grows
             additively, and an operation never appears here unless it is fully
@@ -7574,6 +7603,8 @@ components:
             verifier, migrations 0069 and 0070, both protected-mutation tables,
             the revision-transition route, authentication, and a project
             identity are ready.
+            `issues.batchApplyReceipt` is advertised only when migration 0071,
+            the durable result receipt table, and the batchApply role are ready.
             This is how a client checks for an operation or a behavior — never
             the version string.
 
@@ -8949,6 +8980,20 @@ components:
             permit's exact resource set can name every created row before any
             write begins. Permit-free batches keep generated-ID behavior. The
             permit does not classify a record.
+        receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+          x-max-utf8-bytes: 191
+          description: >-
+            Optional caller-generated retry identity. Supplying it opts into a
+            durable versioned receipt that stores the complete original result
+            atomically with this request. An exact retry returns that original
+            result with `replayed: true`; a changed request using the same ID
+            returns `409 batch_apply_receipt_conflict`. Failed requests store no
+            receipt. The request digest excludes `receipt_id` and
+            `protected_permit`. IDs must be nonempty valid UTF-8 text of at most
+            191 bytes and may not contain NUL.
         items:
           type: array
           minItems: 1
@@ -9649,7 +9694,7 @@ components:
 
     ApplyBatchResponse:
       type: object
-      required: [keys, items]
+      required: [keys, items, replayed]
       properties:
         keys:
           type: object
@@ -9663,6 +9708,13 @@ components:
             It carries only the keys the request NAMED: an unnamed create item
             is in `items` and not here. A request whose create items named
             nothing answers with an empty object, never `null`.
+        replayed:
+          type: boolean
+          description: >-
+            True when the server returned the immutable result stored by an
+            earlier successful request with the same `receipt_id` and request
+            digest. Always false for a newly applied request or when no receipt
+            ID was supplied.
         items:
           type: array
           description: >-
@@ -11303,7 +11355,8 @@ components:
             `not_closable` (409), `not_releasable` (409),
             `dependency_cycle` (409), `dependency_exists` (409),
             `already_exists` (409), `precondition_failed` (409),
-            `transition_receipt_conflict` (409), `protected_record` (409),
+            `transition_receipt_conflict` (409),
+            `batch_apply_receipt_conflict` (409), `protected_record` (409),
             `unsupported_resource` (409),
             `not_implemented` (501),
             `events_journal_disabled` (409), `events_journal_truncated` (410),

@@ -181,6 +181,10 @@ var ErrVersionMismatch = errors.New("version mismatch")
 // committed for a different revision-transition request.
 var ErrTransitionReceiptConflict = errors.New("revision transition receipt conflict")
 
+// ErrBatchApplyReceiptConflict is returned when a durable batchApply receipt
+// ID is already bound to a different canonical request.
+var ErrBatchApplyReceiptConflict = errors.New("batch apply receipt conflict")
+
 // ErrStatusMismatch is returned by UpdateIssueChecked given an ExpectedStatus
 // that no longer matches the issue's current status. The caller's view of the
 // issue was stale; the issue is left untouched. The assignee analog is

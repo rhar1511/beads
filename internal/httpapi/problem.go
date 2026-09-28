@@ -157,6 +157,9 @@ const (
 	// different request. It is stable across retries and never includes stored
 	// receipt contents in the response.
 	CodeTransitionReceiptConflict Code = "transition_receipt_conflict"
+	// CodeBatchApplyReceiptConflict means this batch receipt ID is already
+	// bound to a different canonical request.
+	CodeBatchApplyReceiptConflict Code = "batch_apply_receipt_conflict"
 	// CodeProtectedRecord reports a mutation refused by the backend's record
 	// protection checks. It deliberately carries no permit or classification
 	// details.
@@ -268,6 +271,7 @@ var codeStatus = map[Code]int{
 	CodeDependencyExists:          http.StatusConflict,
 	CodeAlreadyExists:             http.StatusConflict,
 	CodeTransitionReceiptConflict: http.StatusConflict,
+	CodeBatchApplyReceiptConflict: http.StatusConflict,
 	CodeProtectedRecord:           http.StatusConflict,
 	CodeUnsupportedResource:       http.StatusConflict,
 	CodeNotImplemented:            http.StatusNotImplemented,
@@ -336,6 +340,7 @@ var staticDetail = map[Code]string{
 	CodeDBUnavailable:             "database temporarily unavailable; retry",
 	CodeInternal:                  "internal server error",
 	CodeTransitionReceiptConflict: "this receipt ID is already bound to a different request",
+	CodeBatchApplyReceiptConflict: "this receipt ID is already bound to a different request",
 	CodeProtectedRecord:           "this mutation was refused",
 	CodeUnsupportedResource:       "operation is not supported for this resource",
 	CodeNotImplemented:            "operation is not ready on this server",
@@ -947,6 +952,7 @@ var operationCodes = map[string][]Code{
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodePreconditionFailed, CodeNotClosable, CodeAlreadyClaimed, CodeAlreadyExists,
 		CodeDependencyCycle, CodeDependencyExists, CodeProtectedRecord,
+		CodeBatchApplyReceiptConflict, CodeNotImplemented,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	// getDependencyTree's row, and it is the same shape for the same two
@@ -1367,6 +1373,12 @@ func TransitionNotImplemented() Result {
 // SourceSnapshotNotImplemented reports that the server did not prove the
 // schema and role prerequisites needed by the source-snapshot route.
 func SourceSnapshotNotImplemented() Result {
+	return newResult(CodeNotImplemented, "")
+}
+
+// BatchApplyReceiptNotImplemented reports that the server did not prove the
+// schema readiness required for durable batchApply receipts.
+func BatchApplyReceiptNotImplemented() Result {
 	return newResult(CodeNotImplemented, "")
 }
 

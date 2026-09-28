@@ -161,14 +161,17 @@ func TestRecordingIssueUseCaseCoversItsSurface(t *testing.T) {
 			"SearchIssues":                 reads,
 			"SearchIssuesWithCounts":       reads,
 			"GetRevisionTransitionReceipt": reads,
-			"DeleteIssue":                  deletes,
-			"DeleteIssues":                 deletes,
-			"DeleteWisp":                   deletes,
-			"DeleteWisps":                  deletes,
-			"Unclaim":                      leases,
-			"UnclaimIfAssignee":            leases,
-			"Heartbeat":                    leases,
-			"ReclaimExpiredLeases":         leases,
+			"GetBatchApplyReceipt":         reads,
+			"StoreBatchApplyReceipt": "writes only the batch idempotency receipt; the batch's bead " +
+				"mutations already pass through the recording create, update, close and dependency methods",
+			"DeleteIssue":          deletes,
+			"DeleteIssues":         deletes,
+			"DeleteWisp":           deletes,
+			"DeleteWisps":          deletes,
+			"Unclaim":              leases,
+			"UnclaimIfAssignee":    leases,
+			"Heartbeat":            leases,
+			"ReclaimExpiredLeases": leases,
 			"WakeExpiredDefers": "the deferred-work sweep is a clock crossing rather than a user's " +
 				"mutation, and the DoltStorage plumbing fires nothing for it",
 			"PromoteWisp": "moves a row between planes without changing the bead; the DoltStorage " +
@@ -305,6 +308,7 @@ func TestNotifyingProviderBuildsRolesOnItself(t *testing.T) {
 		// backfill probe. It constructs no role and writes no bead, so forwarding
 		// it to the selected inner provider is the intended behavior.
 		"RevisionTransitionReadiness": true,
+		"BatchApplyReceiptReadiness":  true,
 	}
 
 	var checked int

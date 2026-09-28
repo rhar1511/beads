@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/steveyegge/beads/internal/storage/issueops"
@@ -292,6 +293,90 @@ func TestUOWProtectedBatchNoOpCommitsPermitUseAndRejectsReplay(t *testing.T) {
 	}
 	if permitUses != 1 {
 		t.Errorf("permit-use rows after replay = %d, want 1", permitUses)
+	}
+}
+
+func TestUOWProtectedBatchReceiptReplaySkipsPermitRevalidation(t *testing.T) {
+	ctx := context.Background()
+	provider := newUOWRoleFixtureProvider(t, ctx, "pbrec")
+	kit := newUOWRoleFixtureKit(provider, "pbrec")
+	applier, err := NewBatchApplier(provider)
+	if err != nil {
+		t.Fatalf("NewBatchApplier: %v", err)
+	}
+	request := publicops.ApplyBatchRequest{
+		Actor:           "trusted-caller",
+		ProtectedPermit: "permit-first",
+		ReceiptID:       "pbrec-protected-receipt",
+		Items: []publicops.ApplyItem{{
+			Kind: publicops.ItemCreate,
+			Create: &publicops.CreateItem{
+				Issue: &types.Issue{
+					ID: "pbrec-protected", Title: "protected receipt", Status: types.StatusOpen,
+					Priority: 2, IssueType: types.TypeTask,
+				},
+				ProtectionClass: "source",
+			},
+		}},
+	}
+	var verifierCalls int
+	verifier := protectedBatchVerifierFunc(func(_ context.Context, permit publicops.ProtectedMutationPermit, scope publicops.ProtectedMutationScope) (publicops.ProtectedMutationVerification, error) {
+		verifierCalls++
+		if verifierCalls != 1 {
+			return publicops.ProtectedMutationVerification{}, errors.New("receipt replay revalidated the permit")
+		}
+		if permit != request.ProtectedPermit {
+			t.Errorf("first permit = %q, want %q", permit, request.ProtectedPermit)
+		}
+		if scope.Operation != "issue.batch_apply" || scope.Audience != "test-audience" {
+			t.Errorf("protected scope = %#v, want batch apply for test-audience", scope)
+		}
+		return publicops.ProtectedMutationVerification{ReplayID: "pbrec-replay-use"}, nil
+	})
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	first, err := applier.ApplyBatch(protectedCtx, request)
+	if err != nil {
+		t.Fatalf("first receipt-bearing protected batch: %v", err)
+	}
+	if first.Replayed {
+		t.Fatal("first receipt-bearing protected batch was marked replayed")
+	}
+	var uses int
+	if err := kit.QueryScalar(ctx,
+		"SELECT COUNT(*) FROM protected_mutation_permit_uses WHERE audience = ? AND replay_id = ?",
+		[]any{"test-audience", "pbrec-replay-use"}, &uses); err != nil {
+		t.Fatalf("count first permit use: %v", err)
+	}
+	if uses != 1 {
+		t.Fatalf("first protected batch permit-use count = %d, want 1", uses)
+	}
+
+	// The permit itself is deliberately changed: it is authorization material,
+	// not part of the receipt's canonical operation digest.
+	retry := request
+	retry.ProtectedPermit = "permit-that-must-not-be-checked-again"
+	replayed, err := applier.ApplyBatch(protectedCtx, retry)
+	if err != nil {
+		t.Fatalf("receipt replay after permit consumption: %v", err)
+	}
+	if !replayed.Replayed {
+		t.Fatal("protected receipt replay was not marked replayed")
+	}
+	want := first
+	want.Replayed = true
+	if !reflect.DeepEqual(replayed, want) {
+		t.Errorf("protected replay result differs from original:\n got %#v\nwant %#v", replayed, want)
+	}
+	if verifierCalls != 1 {
+		t.Errorf("protected verifier called %d times, want once", verifierCalls)
+	}
+	if err := kit.QueryScalar(ctx,
+		"SELECT COUNT(*) FROM protected_mutation_permit_uses WHERE audience = ? AND replay_id = ?",
+		[]any{"test-audience", "pbrec-replay-use"}, &uses); err != nil {
+		t.Fatalf("recount permit uses after replay: %v", err)
+	}
+	if uses != 1 {
+		t.Errorf("permit-use count after receipt replay = %d, want 1", uses)
 	}
 }
 

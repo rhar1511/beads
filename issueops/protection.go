@@ -55,6 +55,29 @@ func ProtectedMutationDigest(value any) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
+// ApplyBatchRequestDigest returns the canonical identity digest used by durable
+// batchApply receipts. It excludes the retry identity itself and the opaque
+// protected permit, while binding every operation and request option.
+func ApplyBatchRequestDigest(request ApplyBatchRequest) (string, error) {
+	request.ReceiptID = ""
+	request.ProtectedPermit = ""
+	// Issue.SourceRepo is execution input for create items: the public create
+	// projection copies it into the persisted row. Generic Issue JSON omits it
+	// because it is local routing state, so carry it beside the ordinary JSON
+	// request. The other json:"-" Issue fields are derived output or are ignored
+	// by publicCreateIssue and therefore do not belong to request identity.
+	createSourceRepos := make([]string, len(request.Items))
+	for index, item := range request.Items {
+		if item.Create != nil && item.Create.Issue != nil {
+			createSourceRepos[index] = item.Create.Issue.SourceRepo
+		}
+	}
+	return ProtectedMutationDigest(struct {
+		Request           ApplyBatchRequest
+		CreateSourceRepos []string
+	}{Request: request, CreateSourceRepos: createSourceRepos})
+}
+
 func clearProtectedPermit(value any) any {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() {

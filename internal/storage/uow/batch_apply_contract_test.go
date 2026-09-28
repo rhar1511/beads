@@ -139,6 +139,21 @@ func TestBatchApplyContract(t *testing.T) {
 	t.Run("ReplayMintsANewSetOfRows", func(t *testing.T) {
 		conformance.RunBatchApplyReplayMintsANewSetOfRows(t, ctx, fixture)
 	})
+	t.Run("ReceiptReplaysTheImmutableOriginalResult", func(t *testing.T) {
+		conformance.RunBatchApplyReceiptReplaysTheImmutableOriginalResult(t, ctx, fixture)
+	})
+	t.Run("ReceiptMakesEphemeralAndNoOpBatchesDurable", func(t *testing.T) {
+		conformance.RunBatchApplyReceiptMakesEphemeralAndNoOpBatchesDurable(t, ctx, fixture)
+	})
+	t.Run("ConcurrentDuplicateReceiptRequestsConverge", func(t *testing.T) {
+		conformance.RunBatchApplyConcurrentDuplicateReceiptRequestsConverge(t, ctx, fixture)
+	})
+	t.Run("ConcurrentDuplicateExplicitIDReceiptRequestsConverge", func(t *testing.T) {
+		conformance.RunBatchApplyConcurrentDuplicateExplicitIDReceiptRequestsConverge(t, ctx, fixture)
+	})
+	t.Run("ReceiptRollsBackWithFailedBatch", func(t *testing.T) {
+		conformance.RunBatchApplyReceiptRollsBackWithFailedBatch(t, ctx, fixture)
+	})
 	t.Run("DoesNotMutateTheCallerRequest", func(t *testing.T) {
 		conformance.RunBatchApplyDoesNotMutateTheCallerRequest(t, ctx, fixture)
 	})

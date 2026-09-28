@@ -56,6 +56,8 @@ type IssueSQLRepository interface {
 	// receipt write landed and therefore needs a version-control commit.
 	TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error)
 	GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error)
+	GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error)
+	StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error)
 	// ReleaseIssue runs the SHARED claim-release body on this repository's
 	// transaction, which is how the unit-of-work provider reaches the same
 	// function the two store backends wrap. It takes no table option: the body
@@ -351,6 +353,8 @@ type IssueUseCase interface {
 	CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error)
 	TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error)
 	GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error)
+	GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error)
+	StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error)
 	// ReleaseIssue is the shape issueops.Releaser publishes; see
 	// IssueSQLRepository.ReleaseIssue for what the bool carries.
 	ReleaseIssue(ctx context.Context, req publicops.ReleaseRequest) (publicops.ReleaseResult, bool, error)
@@ -534,6 +538,18 @@ func (u *issueUseCaseImpl) TransitionMetadata(ctx context.Context, plan storage.
 // unit-of-work's pinned issue repository.
 func (u *issueUseCaseImpl) GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error) {
 	return u.issueRepo.GetRevisionTransitionReceipt(ctx, receiptID)
+}
+
+// GetBatchApplyReceipt reads one immutable apply-batch result through the
+// pinned issue repository for this unit of work.
+func (u *issueUseCaseImpl) GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error) {
+	return u.issueRepo.GetBatchApplyReceipt(ctx, receiptID)
+}
+
+// StoreBatchApplyReceipt records the complete original result atomically with
+// the domain writes of a receipt-bearing apply batch.
+func (u *issueUseCaseImpl) StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error) {
+	return u.issueRepo.StoreBatchApplyReceipt(ctx, plan, result)
 }
 
 // ReleaseIssue passes the request straight through.

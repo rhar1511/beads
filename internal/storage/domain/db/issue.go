@@ -377,6 +377,18 @@ func (r *issueSQLRepositoryImpl) GetRevisionTransitionReceipt(ctx context.Contex
 	return issueops.GetRevisionTransitionReceiptInTx(ctx, r.runner, receiptID)
 }
 
+func (r *issueSQLRepositoryImpl) GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error) {
+	return issueops.GetBatchApplyReceiptInTx(ctx, r.runner, receiptID)
+}
+
+func (r *issueSQLRepositoryImpl) StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error) {
+	canonical, err := issueops.StoreBatchApplyReceiptInTx(ctx, r.runner, plan, result)
+	if err != nil {
+		return publicops.ApplyBatchResult{}, false, err
+	}
+	return canonical, true, nil
+}
+
 // ReleaseIssue runs the SHARED claim-release body, unwrapped.
 //
 // It is the whole of this leg's implementation, and that is the point: the two

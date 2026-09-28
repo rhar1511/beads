@@ -3,12 +3,14 @@ package uow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
 )
@@ -20,6 +22,12 @@ type BatchApplierSource interface {
 	BatchApplier() (publicops.BatchApplier, error)
 }
 
+// BatchApplyReceiptReadinessSource reports whether this provider's selected
+// database has the durable result receipt schema.
+type BatchApplyReceiptReadinessSource interface {
+	BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+}
+
 // batchApplier applies a heterogeneous batch through one unit of work.
 type batchApplier struct {
 	provider UnitOfWorkProvider
@@ -28,6 +36,15 @@ type batchApplier struct {
 // BatchApplier returns the guarded apply-many surface for this provider.
 func (p *doltSQLProvider) BatchApplier() (publicops.BatchApplier, error) {
 	return NewBatchApplier(p)
+}
+
+// BatchApplyReceiptReadiness probes the selected database for the durable
+// apply-batch result receipt table.
+func (p *doltSQLProvider) BatchApplyReceiptReadiness(ctx context.Context) (schema.BatchApplyReceiptReadiness, error) {
+	if p == nil || p.db == nil {
+		return schema.BatchApplyReceiptReadiness{}, &storage.ErrUnsupported{Op: "BatchApplyReceiptReadiness", Backend: "nil"}
+	}
+	return schema.ProbeBatchApplyReceiptReadiness(ctx, p.db)
 }
 
 // NewBatchApplier constructs a public batch applier backed by provider.
@@ -66,11 +83,36 @@ var _ publicops.BatchApplier = (*batchApplier)(nil)
 // even when the domain items are semantic no-ops; that is the trap
 // ApplyBatchCommitMessage documents.
 func (o *batchApplier) ApplyBatch(ctx context.Context, request publicops.ApplyBatchRequest) (publicops.ApplyBatchResult, error) {
+	if request.ReceiptID != "" {
+		digest, err := storage.BatchApplyReceiptDigest(request)
+		if err != nil {
+			return publicops.ApplyBatchResult{}, err
+		}
+		var replay publicops.ApplyBatchResult
+		var found bool
+		_, err = RunTxRead(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (struct{}, error) {
+			var readErr error
+			replay, found, readErr = applyBatchReceiptReplay(ctx, uw.IssueUseCase(), request.ReceiptID, digest)
+			return struct{}{}, readErr
+		})
+		if err != nil {
+			return publicops.ApplyBatchResult{}, err
+		}
+		if found {
+			return replay, nil
+		}
+	}
 	plan, err := storage.PlanApplyBatch(request)
 	if err != nil {
 		return publicops.ApplyBatchResult{}, err
 	}
-	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.ApplyBatchResult, string, error) {
+	result, err := RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.ApplyBatchResult, string, error) {
+		if plan.ReceiptID != "" {
+			replay, found, err := applyBatchReceiptReplay(ctx, uw.IssueUseCase(), plan.ReceiptID, plan.RequestDigest)
+			if err != nil || found {
+				return replay, "", err
+			}
+		}
 		protectedClassRequested := false
 		for _, item := range plan.Items {
 			if item.Create != nil && item.Create.ProtectionClass != "" {
@@ -104,9 +146,54 @@ func (o *batchApplier) ApplyBatch(ctx context.Context, request publicops.ApplyBa
 		if err := run.apply(ctx); err != nil {
 			return publicops.ApplyBatchResult{}, "", err
 		}
+		if plan.ReceiptID != "" {
+			canonical, wrote, err := uw.IssueUseCase().StoreBatchApplyReceipt(ctx, plan, run.result)
+			if err != nil {
+				return publicops.ApplyBatchResult{}, "", err
+			}
+			run.result = canonical
+			if wrote {
+				run.write.Changed = true
+			}
+		}
 		run.write = run.write.WithProtectedMutationPermitUse(ctx)
 		return run.result, storageissueops.ApplyBatchCommitMessage(plan, run.result, run.write), nil
 	})
+	if err != nil && plan.ReceiptID != "" {
+		var winner publicops.ApplyBatchResult
+		var found bool
+		_, reconcileErr := RunTxRead(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (struct{}, error) {
+			var readErr error
+			winner, found, readErr = applyBatchReceiptReplay(ctx, uw.IssueUseCase(), plan.ReceiptID, plan.RequestDigest)
+			return struct{}{}, readErr
+		})
+		if reconcileErr != nil {
+			return publicops.ApplyBatchResult{}, reconcileErr
+		}
+		if found {
+			return winner, nil
+		}
+		if errors.Is(err, storageissueops.ErrBatchApplyReceiptRace) {
+			return publicops.ApplyBatchResult{}, fmt.Errorf("batch apply receipt %s raced but no committed winner was visible: %w", plan.ReceiptID, err)
+		}
+	}
+	return result, err
+}
+
+func applyBatchReceiptReplay(ctx context.Context, issues domain.IssueUseCase, receiptID, digest string) (publicops.ApplyBatchResult, bool, error) {
+	receipt, err := issues.GetBatchApplyReceipt(ctx, receiptID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return publicops.ApplyBatchResult{}, false, nil
+	}
+	if err != nil {
+		return publicops.ApplyBatchResult{}, false, err
+	}
+	if receipt.RequestDigest != digest {
+		return publicops.ApplyBatchResult{}, false, fmt.Errorf("%w: receipt %s is bound to another request", publicops.ErrBatchApplyReceiptConflict, receiptID)
+	}
+	result := receipt.Result
+	result.Replayed = true
+	return result, true, nil
 }
 
 func applyBatchOldParentIDsInUOW(ctx context.Context, uw UnitOfWork, plan storage.ApplyBatchPlan) ([]string, error) {

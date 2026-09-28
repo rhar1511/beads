@@ -1716,10 +1716,10 @@ func RunBatchApplyKeepsAStoredNullApartFromAnEmptyString(t *testing.T, ctx conte
 	}
 }
 
-// RunBatchApplyLandsAnIdempotencyRecordWithItsWork pins the composition
-// BatchApplier says replaces an idempotency key on the request: "an idempotency
-// RECORD is itself a write, so a caller that needs one makes it an ITEM of the
-// batch, and the record then lands or rolls back with the work it describes."
+// RunBatchApplyLandsAnIdempotencyRecordWithItsWork pins a domain-level
+// idempotency record carried as an item. It remains a useful composition even
+// though the role also offers optional request-level result receipts: the item
+// lands as application data that downstream readers can inspect.
 //
 // The claim is BOTH OR NEITHER, so it is measured both ways. The refusing half
 // is what a request-level key would have made impossible to get wrong and is
@@ -1811,10 +1811,9 @@ func RunBatchApplyBoundsTheItemCount(t *testing.T, ctx context.Context, fixture 
 	}
 }
 
-// RunBatchApplyReplayMintsANewSetOfRows pins the property BatchApplier states
-// outright and no other case would notice: "IT IS NOT IDEMPOTENT AND CARRIES NO
-// IDEMPOTENCY KEY. Replaying a request applies it again — the creates mint new
-// ids."
+// RunBatchApplyReplayMintsANewSetOfRows pins the receipt-less legacy property:
+// replaying the same request without ReceiptID applies it again and mints new
+// IDs. Receipt-bearing calls opt into the separate durable replay behavior.
 //
 // It is deliberate rather than accidental, so it is pinned rather than left to
 // be discovered: a body that grew request-level deduplication would be a
@@ -1842,6 +1841,243 @@ func RunBatchApplyReplayMintsANewSetOfRows(t *testing.T, ctx context.Context, fi
 	}
 	if firstPass.Keys["first"] == secondPass.Keys["first"] {
 		t.Errorf("both passes bound key %q to %q; a replay MINTS NEW IDS", "first", firstPass.Keys["first"])
+	}
+}
+
+// RunBatchApplyReceiptReplaysTheImmutableOriginalResult pins the receipt
+// behavior at the role boundary: a first success is durable, the same ID and
+// canonical request return the exact result even after later mutation, and a
+// changed request using that ID conflicts before it can write.
+func RunBatchApplyReceiptReplaysTheImmutableOriginalResult(t *testing.T, ctx context.Context, fixture BatchApplyFixture) {
+	t.Helper()
+	id := fixture.IssuePrefix + "-receipt-snapshot"
+	request := publicops.ApplyBatchRequest{
+		Actor:         "apply-writer",
+		ReceiptID:     fixture.IssuePrefix + "-receipt-snapshot-id",
+		ForceIDPrefix: true,
+		Items: []publicops.ApplyItem{
+			batchApplyCreate("created", batchApplyIssue(id, "snapshot before later mutation")),
+		},
+	}
+
+	first := batchApplyMust(t, ctx, fixture, request)
+	if first.Replayed {
+		t.Fatal("first successful request was marked replayed")
+	}
+	createdID := first.Keys["created"]
+	if createdID != id {
+		t.Fatalf("created ID = %q, want explicit ID %q", createdID, id)
+	}
+
+	batchApplyMust(t, ctx, fixture, publicops.ApplyBatchRequest{
+		Actor: "apply-writer",
+		Items: []publicops.ApplyItem{
+			batchApplyUpdate(publicops.Ref{ID: createdID}, publicops.IssuePatch{
+				Title: publicops.Field[string]{Set: true, Value: "changed later"},
+			}),
+		},
+	})
+
+	replayed := batchApplyMust(t, ctx, fixture, request)
+	if !replayed.Replayed {
+		t.Fatal("exact receipt replay was not marked replayed")
+	}
+	wantReplay := first
+	wantReplay.Replayed = true
+	if !reflect.DeepEqual(replayed, wantReplay) {
+		t.Errorf("replay result differs from immutable first result:\n got %#v\nwant %#v", replayed, wantReplay)
+	}
+	if got := batchApplyColumn(t, ctx, fixture, "title", createdID); got != "changed later" {
+		t.Errorf("later mutation title = %q, want changed later", got)
+	}
+	if first.Items[0].Issue == nil || first.Items[0].Issue.Title != "snapshot before later mutation" {
+		t.Fatalf("first result did not retain the original issue snapshot: %#v", first.Items[0].Issue)
+	}
+
+	conflict := request
+	conflict.Items = append([]publicops.ApplyItem(nil), request.Items...)
+	conflict.Items[0].Create = &publicops.CreateItem{Key: "created", Issue: batchApplyIssue(id, "changed canonical request")}
+	if _, err := fixture.BatchApplier.ApplyBatch(ctx, conflict); !errors.Is(err, publicops.ErrBatchApplyReceiptConflict) {
+		t.Fatalf("same receipt ID with changed request error = %v, want ErrBatchApplyReceiptConflict", err)
+	}
+	if got := batchApplyCount(t, ctx, fixture, "SELECT COUNT(*) FROM issues WHERE title = ?", []any{"changed canonical request"}); got != 0 {
+		t.Errorf("changed request wrote %d issue row(s), want none", got)
+	}
+	if got := batchApplyCount(t, ctx, fixture, "SELECT COUNT(*) FROM issue_batch_apply_receipts WHERE receipt_id = ?", []any{request.ReceiptID}); got != 1 {
+		t.Errorf("receipt rows for %q = %d, want exactly 1", request.ReceiptID, got)
+	}
+}
+
+// RunBatchApplyReceiptMakesEphemeralAndNoOpBatchesDurable pins the opt-in
+// history exception: the receipt row itself is versioned, including for an
+// all-wisp create and a semantic no-op.
+func RunBatchApplyReceiptMakesEphemeralAndNoOpBatchesDurable(t *testing.T, ctx context.Context, fixture BatchApplyFixture) {
+	t.Helper()
+	batchApplyRequireHistory(t, fixture)
+
+	wispID := fixture.IssuePrefix + "-receipt-wisp"
+	wisp := batchApplyIssue(wispID, "receipt-backed wisp")
+	wisp.Ephemeral = true
+	wispRequest := publicops.ApplyBatchRequest{
+		Actor:         "apply-writer",
+		ReceiptID:     fixture.IssuePrefix + "-receipt-wisp-id",
+		ForceIDPrefix: true,
+		Items:         []publicops.ApplyItem{batchApplyCreate("wisp", wisp)},
+	}
+	batchApplySettle(t, ctx, fixture)
+	before := batchApplyHistory(t, ctx, fixture)
+	wispResult := batchApplyMust(t, ctx, fixture, wispRequest)
+	if wispResult.Replayed || !wispResult.Items[0].Changed {
+		t.Fatalf("first all-wisp receipt result = %#v, want a new changed result", wispResult)
+	}
+	assertBatchApplyRowCount(t, ctx, fixture, "wisps", wispID, 1)
+	assertBatchApplyRowCount(t, ctx, fixture, "issues", wispID, 0)
+	if got := batchApplyHistory(t, ctx, fixture) - before; got != 1 {
+		t.Fatalf("receipt-bearing all-wisp batch recorded %d history entries, want 1", got)
+	}
+	if replay := batchApplyMust(t, ctx, fixture, wispRequest); !replay.Replayed || !reflect.DeepEqual(replay.Items, wispResult.Items) {
+		t.Errorf("all-wisp replay = %#v, want the original result marked replayed", replay)
+	}
+
+	issueID := fixture.IssuePrefix + "-receipt-noop"
+	batchApplySeedIssue(t, ctx, fixture, issueID, types.StatusOpen)
+	batchApplySettle(t, ctx, fixture)
+	noOpRequest := publicops.ApplyBatchRequest{
+		Actor:     "apply-writer",
+		ReceiptID: fixture.IssuePrefix + "-receipt-noop-id",
+		Items: []publicops.ApplyItem{
+			batchApplyUpdate(publicops.Ref{ID: issueID}, publicops.IssuePatch{
+				Title: publicops.Field[string]{Set: true, Value: issueID},
+			}),
+		},
+	}
+	before = batchApplyHistory(t, ctx, fixture)
+	noOpResult := batchApplyMust(t, ctx, fixture, noOpRequest)
+	if noOpResult.Replayed || noOpResult.Items[0].Changed {
+		t.Fatalf("first receipt-bearing no-op result = %#v, want a new unchanged result", noOpResult)
+	}
+	if got := batchApplyHistory(t, ctx, fixture) - before; got != 1 {
+		t.Errorf("receipt-bearing no-op batch recorded %d history entries, want 1", got)
+	}
+	if replay := batchApplyMust(t, ctx, fixture, noOpRequest); !replay.Replayed || !reflect.DeepEqual(replay.Items, noOpResult.Items) {
+		t.Errorf("no-op replay = %#v, want the original result marked replayed", replay)
+	}
+}
+
+// RunBatchApplyConcurrentDuplicateReceiptRequestsConverge pins the unique-key
+// race path. Both callers start together; exactly one application may land,
+// while both responses identify the same immutable winner.
+func RunBatchApplyConcurrentDuplicateReceiptRequestsConverge(t *testing.T, ctx context.Context, fixture BatchApplyFixture) {
+	t.Helper()
+	title := fixture.IssuePrefix + " concurrent receipt application"
+	request := publicops.ApplyBatchRequest{
+		Actor:     "apply-writer",
+		ReceiptID: fixture.IssuePrefix + "-receipt-concurrent-id",
+		Items: []publicops.ApplyItem{
+			batchApplyCreate("created", batchApplyMintedIssue(title)),
+		},
+	}
+	type outcome struct {
+		result publicops.ApplyBatchResult
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan outcome, 2)
+	for range 2 {
+		go func() {
+			<-start
+			result, err := fixture.BatchApplier.ApplyBatch(ctx, request)
+			results <- outcome{result: result, err: err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent receipt calls returned errors %v and %v", first.err, second.err)
+	}
+	if first.result.Replayed == second.result.Replayed {
+		t.Fatalf("concurrent results replayed flags are %t and %t, want one original and one replay", first.result.Replayed, second.result.Replayed)
+	}
+	if first.result.Keys["created"] == "" || first.result.Keys["created"] != second.result.Keys["created"] {
+		t.Fatalf("concurrent receipt keys differ: %#v and %#v", first.result.Keys, second.result.Keys)
+	}
+	if got := batchApplyCount(t, ctx, fixture, "SELECT COUNT(*) FROM issues WHERE title = ?", []any{title}); got != 1 {
+		t.Errorf("concurrent duplicate requests landed %d issue rows, want exactly 1", got)
+	}
+	if got := batchApplyCount(t, ctx, fixture, "SELECT COUNT(*) FROM issue_batch_apply_receipts WHERE receipt_id = ?", []any{request.ReceiptID}); got != 1 {
+		t.Errorf("concurrent duplicate requests stored %d receipts, want exactly 1", got)
+	}
+}
+
+// RunBatchApplyConcurrentDuplicateExplicitIDReceiptRequestsConverge exercises
+// the second duplicate race: both callers may collide on the created issue's
+// primary key before the losing transaction reaches the receipt insert. A
+// failed receipt-bearing attempt must therefore reconcile from the committed
+// receipt after any error, rather than only after a receipt-key collision.
+func RunBatchApplyConcurrentDuplicateExplicitIDReceiptRequestsConverge(t *testing.T, ctx context.Context, fixture BatchApplyFixture) {
+	t.Helper()
+	id := fixture.IssuePrefix + "-receipt-concurrent-explicit"
+	request := publicops.ApplyBatchRequest{
+		Actor:         "apply-writer",
+		ReceiptID:     fixture.IssuePrefix + "-receipt-concurrent-explicit-id",
+		ForceIDPrefix: true,
+		Items: []publicops.ApplyItem{
+			batchApplyCreate("created", batchApplyIssue(id, "concurrent explicit receipt application")),
+		},
+	}
+	type outcome struct {
+		result publicops.ApplyBatchResult
+		err    error
+	}
+	start := make(chan struct{})
+	results := make(chan outcome, 2)
+	for range 2 {
+		go func() {
+			<-start
+			result, err := fixture.BatchApplier.ApplyBatch(ctx, request)
+			results <- outcome{result: result, err: err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("concurrent explicit-ID receipt calls returned errors %v and %v", first.err, second.err)
+	}
+	if first.result.Replayed == second.result.Replayed {
+		t.Fatalf("concurrent explicit-ID results replayed flags are %t and %t, want one original and one replay", first.result.Replayed, second.result.Replayed)
+	}
+	if first.result.Keys["created"] != id || second.result.Keys["created"] != id {
+		t.Fatalf("concurrent explicit-ID receipt keys = %#v and %#v, want %q", first.result.Keys, second.result.Keys, id)
+	}
+	assertBatchApplyRowCount(t, ctx, fixture, "issues", id, 1)
+	if got := batchApplyCount(t, ctx, fixture, "SELECT COUNT(*) FROM issue_batch_apply_receipts WHERE receipt_id = ?", []any{request.ReceiptID}); got != 1 {
+		t.Errorf("concurrent explicit-ID requests stored %d receipts, want exactly 1", got)
+	}
+}
+
+// RunBatchApplyReceiptRollsBackWithFailedBatch pins the transaction boundary:
+// no receipt survives when a later item refuses and the earlier create rolls
+// back with it.
+func RunBatchApplyReceiptRollsBackWithFailedBatch(t *testing.T, ctx context.Context, fixture BatchApplyFixture) {
+	t.Helper()
+	occupied := fixture.IssuePrefix + "-receipt-rollback-occupied"
+	newID := fixture.IssuePrefix + "-receipt-rollback-new"
+	batchApplySeedIssue(t, ctx, fixture, occupied, types.StatusOpen)
+	request := publicops.ApplyBatchRequest{
+		Actor:         "apply-writer",
+		ReceiptID:     fixture.IssuePrefix + "-receipt-rollback-id",
+		ForceIDPrefix: true,
+		Items: []publicops.ApplyItem{
+			batchApplyCreate("new", batchApplyIssue(newID, "must roll back")),
+			batchApplyCreate("occupied", batchApplyIssue(occupied, "collision")),
+		},
+	}
+	if _, err := fixture.BatchApplier.ApplyBatch(ctx, request); err == nil {
+		t.Fatal("request with an occupied second create returned no error")
+	}
+	assertBatchApplyRowCount(t, ctx, fixture, "issues", newID, 0)
+	if got := batchApplyCount(t, ctx, fixture, "SELECT COUNT(*) FROM issue_batch_apply_receipts WHERE receipt_id = ?", []any{request.ReceiptID}); got != 0 {
+		t.Errorf("failed batch left %d receipt row(s), want none", got)
 	}
 }
 

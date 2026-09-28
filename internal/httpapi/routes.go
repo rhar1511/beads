@@ -43,6 +43,10 @@ const CapProjectEnforce = "project.enforce"
 // replay protection for explicitly classified mutations.
 const CapProtectedMutation = "issues.protectedMutation"
 
+// CapBatchApplyReceipt announces that durable, caller-identified batchApply
+// receipts are ready on this server.
+const CapBatchApplyReceipt = "issues.batchApplyReceipt"
+
 // customMethodTarget splits the custom method off the segment the router
 // matched, and reports the row that claims it.
 //
@@ -802,14 +806,14 @@ var behaviorCapabilities = []string{CapProjectEnforce}
 // It is useful for route/spec checks but is not a server-instance readiness
 // assertion: ContextResponse uses capability gates with startup readiness.
 func Capabilities() []string {
-	return capabilitiesForWithGates(true, true, true)
+	return capabilitiesForWithGates(true, true, true, true)
 }
 
 func capabilitiesFor(revisionTransitionReady bool) []string {
 	return capabilitiesForWithGates(revisionTransitionReady, revisionTransitionReady, false)
 }
 
-func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady, protectedMutationReady bool) []string {
+func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady, protectedMutationReady bool, batchApplyReceiptReady ...bool) []string {
 	var out []string
 	for _, rt := range routeTable {
 		gateReady := rt.capabilityGate == "" || (rt.capabilityGate == "revision-transition" && revisionTransitionReady) || (rt.capabilityGate == "source-snapshot" && sourceSnapshotReady)
@@ -820,6 +824,9 @@ func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady, prot
 	out = append(out, behaviorCapabilities...)
 	if protectedMutationReady {
 		out = append(out, CapProtectedMutation)
+	}
+	if len(batchApplyReceiptReady) != 0 && batchApplyReceiptReady[0] {
+		out = append(out, CapBatchApplyReceipt)
 	}
 	slices.Sort(out)
 	return out

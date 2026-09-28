@@ -61,6 +61,9 @@ func (o *hookBatchApplier) ApplyBatch(ctx context.Context, request issueops.Appl
 	if err != nil {
 		return result, err
 	}
+	if result.Replayed {
+		return result, nil
+	}
 	created := make(map[string]struct{}, len(result.Items))
 	for _, item := range result.Items {
 		if !item.Changed {

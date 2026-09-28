@@ -97,6 +97,18 @@ func (s *InstrumentedStorage) RevisionTransitionReadiness(ctx context.Context) (
 	return source.RevisionTransitionReadiness(ctx)
 }
 
+// BatchApplyReceiptReadiness forwards the read-only receipt migration probe to
+// the wrapped store so telemetry decoration preserves startup readiness.
+func (s *InstrumentedStorage) BatchApplyReceiptReadiness(ctx context.Context) (schema.BatchApplyReceiptReadiness, error) {
+	source, ok := s.inner.(interface {
+		BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+	})
+	if !ok {
+		return schema.BatchApplyReceiptReadiness{}, &storage.ErrUnsupported{Op: "BatchApplyReceiptReadiness", Backend: "instrumented store"}
+	}
+	return source.BatchApplyReceiptReadiness(ctx)
+}
+
 // op starts a span and records a metric for the named storage operation.
 func (s *InstrumentedStorage) op(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span, time.Time) {
 	all := append([]attribute.KeyValue{attribute.String("db.operation", name)}, attrs...)

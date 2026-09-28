@@ -3,6 +3,7 @@ package dolt
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/steveyegge/beads/internal/storage"
@@ -123,5 +124,86 @@ func TestPermitAwareMutationConsumesOnceAndContextCannotAuthorizeNextTransaction
 	}
 	if uses != 1 {
 		t.Fatalf("replay-use rows after refused transaction = %d, want exactly one", uses)
+	}
+}
+
+func TestProtectedBatchReceiptReplaySkipsPermitRevalidation(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+	ctx, cancel := testContext(t)
+	defer cancel()
+	applier, err := store.BatchApplier()
+	if err != nil {
+		t.Fatalf("BatchApplier: %v", err)
+	}
+	request := publicops.ApplyBatchRequest{
+		Actor:           "trusted-caller",
+		ProtectedPermit: "permit-first",
+		ReceiptID:       "legacy-protected-receipt",
+		ForceIDPrefix:   true,
+		Items: []publicops.ApplyItem{{
+			Kind: publicops.ItemCreate,
+			Create: &publicops.CreateItem{
+				Issue: &types.Issue{
+					ID: "legacy-protected-receipt-target", Title: "protected receipt",
+					Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+				},
+				ProtectionClass: "source",
+			},
+		}},
+	}
+	var verifierCalls int
+	verifier := protectedMutationVerifierFunc(func(_ context.Context, permit publicops.ProtectedMutationPermit, scope publicops.ProtectedMutationScope) (publicops.ProtectedMutationVerification, error) {
+		verifierCalls++
+		if verifierCalls != 1 {
+			return publicops.ProtectedMutationVerification{}, errors.New("receipt replay revalidated the permit")
+		}
+		if permit != request.ProtectedPermit || scope.Operation != "issue.batch_apply" || scope.Audience != "test-audience" {
+			t.Errorf("first permit scope = permit %q, %#v", permit, scope)
+		}
+		return publicops.ProtectedMutationVerification{ReplayID: "legacy-protected-receipt-use"}, nil
+	})
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	first, err := applier.ApplyBatch(protectedCtx, request)
+	if err != nil {
+		t.Fatalf("first receipt-bearing protected batch: %v", err)
+	}
+	if first.Replayed {
+		t.Fatal("first receipt-bearing protected batch was marked replayed")
+	}
+	var uses int
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM protected_mutation_permit_uses WHERE audience = ? AND replay_id = ?",
+		"test-audience", "legacy-protected-receipt-use").Scan(&uses); err != nil {
+		t.Fatalf("count permit uses: %v", err)
+	}
+	if uses != 1 {
+		t.Fatalf("permit-use rows = %d, want 1", uses)
+	}
+
+	retry := request
+	retry.ProtectedPermit = "permit-not-revalidated"
+	replayed, err := applier.ApplyBatch(protectedCtx, retry)
+	if err != nil {
+		t.Fatalf("receipt replay after permit consumption: %v", err)
+	}
+	if !replayed.Replayed {
+		t.Fatal("protected receipt replay was not marked replayed")
+	}
+	want := first
+	want.Replayed = true
+	if !reflect.DeepEqual(replayed, want) {
+		t.Errorf("protected replay result differs from original:\n got %#v\nwant %#v", replayed, want)
+	}
+	if verifierCalls != 1 {
+		t.Errorf("protected verifier called %d times, want once", verifierCalls)
+	}
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM protected_mutation_permit_uses WHERE audience = ? AND replay_id = ?",
+		"test-audience", "legacy-protected-receipt-use").Scan(&uses); err != nil {
+		t.Fatalf("recount permit uses: %v", err)
+	}
+	if uses != 1 {
+		t.Errorf("permit-use rows after receipt replay = %d, want 1", uses)
 	}
 }

@@ -279,6 +279,9 @@ type Config struct {
 	// TransitionReadiness is a read-only schema/data probe result. Its zero
 	// value is unready, and only the schema probe can create a positive value.
 	TransitionReadiness schema.RevisionTransitionReadiness
+	// BatchApplyReceiptReadiness is the startup-owned proof for the optional
+	// durable receipt mode on issues:batchApply. Its zero value is unready.
+	BatchApplyReceiptReadiness schema.BatchApplyReceiptReadiness
 	// ProtectedMutationAuthority is immutable server-startup authority. Its zero
 	// value leaves protected writes fail-closed and the protected capability
 	// hidden. It is never populated from request data or role credentials.
@@ -392,6 +395,7 @@ type Server struct {
 	protectedMutationReady     bool
 	issueSourceSnapshot        issueops.SourceSnapshotReader
 	sourceSnapshotReady        bool
+	batchApplyReceiptReady     bool
 	issueBatchApplier          issueops.BatchApplier
 	workspaceMemories          memoryops.Memories
 	eventsJournal              storage.EventsJournalCursor
@@ -535,6 +539,13 @@ func Listen(cfg Config) (*Server, error) {
 	transitionReady := revisionTransitionRoutesReady(cfg.TransitionReadiness, transitionRole, cfg.Auth, cfg.Workspace.ProjectID)
 	protectedMutationReady := transitionReady && cfg.ProtectedMutationAuthority.ready()
 	sourceSnapshotReady := sourceSnapshotRoutesReady(cfg.TransitionReadiness, sourceSnapshotRole, cfg.Auth, cfg.Workspace.ProjectID)
+	batchApplyReceiptReady := cfg.BatchApplyReceiptReadiness.Ready()
+	if cfg.Provider == nil {
+		batchApplyReceiptReady = batchApplyReceiptReady && !isNilBatchApplier(cfg.BatchApplier)
+	} else {
+		_, batchApplySourceReady := cfg.Provider.(uow.BatchApplierSource)
+		batchApplyReceiptReady = batchApplyReceiptReady && batchApplySourceReady
+	}
 
 	prefix, err := newIDPrefix()
 	if err != nil {
@@ -580,7 +591,7 @@ func Listen(cfg Config) (*Server, error) {
 
 		log:                        log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
 		stdout:                     cfg.Stdout,
-		ctxBody:                    contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady, protectedMutationReady)),
+		ctxBody:                    contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady, protectedMutationReady, batchApplyReceiptReady)),
 		hosts:                      newHostPolicy(ip, cfg.AllowedHosts),
 		auth:                       cfg.Auth,
 		idPrefix:                   prefix,
@@ -591,6 +602,7 @@ func Listen(cfg Config) (*Server, error) {
 		protectedMutationReady:     protectedMutationReady,
 		issueSourceSnapshot:        sourceSnapshotRole,
 		sourceSnapshotReady:        sourceSnapshotReady,
+		batchApplyReceiptReady:     batchApplyReceiptReady,
 	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
@@ -660,6 +672,19 @@ func isNilRevisionTransitionRole(role issueops.RevisionTransition) bool {
 }
 
 func isNilSourceSnapshotReader(role issueops.SourceSnapshotReader) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isNilBatchApplier(role issueops.BatchApplier) bool {
 	if role == nil {
 		return true
 	}

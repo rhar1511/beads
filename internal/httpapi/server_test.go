@@ -807,6 +807,9 @@ func TestCapabilitiesListImplementedOperationsOnly(t *testing.T) {
 	// This behavior is conditional on startup verifier and replay-table readiness,
 	// so it is not part of the always-advertised behaviorCapabilities slice.
 	advertised[CapProtectedMutation] = true
+	// This behavior is conditional on migration 0071, its result table and the
+	// batchApply role, so it is likewise absent from the static behavior slice.
+	advertised[CapBatchApplyReceipt] = true
 	for _, got := range Capabilities() {
 		if !advertised[got] {
 			t.Errorf("Capabilities() lists %q, which is neither an implemented operation nor a behavior capability", got)

@@ -54,7 +54,7 @@ const (
 // disagreement cases, a patch member present is written where an absent one is
 // untouched, and a metadata member present holding `null` is a value.
 var (
-	applyBatchRequestMembers = []string{"actor", "force_id_prefix", "items", "protected_permit", "provenance", "skip_per_edge_cycle_check"}
+	applyBatchRequestMembers = []string{"actor", "force_id_prefix", "items", "protected_permit", "provenance", "receipt_id", "skip_per_edge_cycle_check"}
 	applyItemMembers         = []string{"close", "create", "dep_add", "kind", "update"}
 	applyRefMembers          = []string{"id", "key"}
 	applyCreateItemMembers   = []string{
@@ -117,6 +117,10 @@ func (s *Server) handleApplyBatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if request.ReceiptID != "" && !s.batchApplyReceiptReady {
+		s.fail(w, r, BatchApplyReceiptNotImplemented())
+		return
+	}
 
 	applier, err := s.batchApplier(r)
 	if err != nil {
@@ -173,10 +177,25 @@ func (s *Server) applyBatchRequest(w http.ResponseWriter, r *http.Request) (issu
 	if res != nil {
 		return refuse(res)
 	}
+	receiptID, res := applyTextMember(members, "", "receipt_id")
+	if res != nil {
+		return refuse(res)
+	}
+	if _, present := members["receipt_id"]; present {
+		if receiptID == "" {
+			res := InvalidArgument("receipt_id", ReasonInvalidValue, "`receipt_id` must be nonempty when supplied")
+			return refuse(&res)
+		}
+		if err := storage.ValidateBatchApplyReceiptID(receiptID); err != nil {
+			res := InvalidArgument("receipt_id", ReasonInvalidValue, "`receipt_id` must be valid UTF-8 text of at most 191 bytes without NUL")
+			return refuse(&res)
+		}
+	}
 	return issueops.ApplyBatchRequest{
 		Actor:                 actor,
 		Items:                 items,
 		ProtectedPermit:       protectedPermit,
+		ReceiptID:             receiptID,
 		Provenance:            provenance,
 		ForceIDPrefix:         forceIDPrefix,
 		SkipPerEdgeCycleCheck: skipPerEdge,
@@ -887,7 +906,7 @@ func applyBatchResponse(result issueops.ApplyBatchResult) apigen.ApplyBatchRespo
 		}
 		items = append(items, wire)
 	}
-	return apigen.ApplyBatchResponse{Keys: keys, Items: items}
+	return apigen.ApplyBatchResponse{Keys: keys, Items: items, Replayed: result.Replayed}
 }
 
 // failApplyBatch answers a refused plan, mapping the role's TYPED refusals onto
@@ -942,6 +961,11 @@ func (s *Server) failApplyBatch(w http.ResponseWriter, r *http.Request, request 
 		// Keep this refusal fixed and out of logs, even when an item wrapper
 		// carries the protected-record sentinel.
 		s.fail(w, r, ProtectedRecordRefused())
+	case errors.Is(err, issueops.ErrBatchApplyReceiptConflict):
+		res := newResult(CodeBatchApplyReceiptConflict, "")
+		param := "receipt_id"
+		res.Problem.Param = &param
+		s.fail(w, r, res)
 
 	// An unresolvable ref is a *RefError and it is the one 400 that carries a
 	// discriminator: `declared_later` tells an ORDERING mistake from a typo, and

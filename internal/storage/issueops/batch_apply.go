@@ -58,6 +58,12 @@ import (
 // knows what to do with that; see BatchApplyWrite for why those are two facts
 // rather than one.
 func ApplyBatchInTx(ctx context.Context, tx *sql.Tx, plan storage.ApplyBatchPlan) (publicops.ApplyBatchResult, BatchApplyWrite, error) {
+	if plan.ReceiptID != "" {
+		result, found, err := PreflightBatchApplyReceiptInTx(ctx, tx, plan.ReceiptID, plan.RequestDigest)
+		if err != nil || found {
+			return result, BatchApplyWrite{}, err
+		}
+	}
 	protectedIDs := applyBatchResourceIDs(plan)
 	oldParents, err := ApplyBatchOldParentIDsInTx(ctx, tx, plan)
 	if err != nil {
@@ -86,6 +92,14 @@ func ApplyBatchInTx(ctx context.Context, tx *sql.Tx, plan storage.ApplyBatchPlan
 	}
 	if err := run.apply(ctx, tx); err != nil {
 		return publicops.ApplyBatchResult{}, BatchApplyWrite{}, err
+	}
+	if plan.ReceiptID != "" {
+		canonical, err := StoreBatchApplyReceiptInTx(ctx, tx, plan, run.result)
+		if err != nil {
+			return publicops.ApplyBatchResult{}, BatchApplyWrite{}, err
+		}
+		run.result = canonical
+		run.write.Tables.Add("issue_batch_apply_receipts")
 	}
 	run.write = run.write.WithProtectedMutationPermitUse(ctx)
 	return run.result, run.write, nil

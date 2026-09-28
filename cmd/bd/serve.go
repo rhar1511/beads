@@ -298,34 +298,35 @@ func runServe() error {
 		}
 		defer startServeEventsJournalMaintenance(info.BeadsDir, store)()
 		return serveListen(opts, httpapi.Config{
-			Reader:               roles.reader,
-			Claimer:              roles.claimer,
-			BatchCloser:          roles.batchCloser,
-			ReadyClaimer:         roles.readyClaimer,
-			Releaser:             roles.releaser,
-			Lifecycle:            roles.lifecycle,
-			Settings:             roles.settings,
-			Stats:                roles.stats,
-			CycleDetector:        roles.cycles,
-			EdgeReader:           roles.edges,
-			GraphCounter:         roles.edgeCounter,
-			Relations:            roles.relations,
-			Commenter:            roles.commenter,
-			BlockingAnnotator:    roles.blocking,
-			TreeWalker:           roles.tree,
-			ReadyCounter:         roles.readyCounter,
-			Counter:              roles.counter,
-			Querier:              roles.querier,
-			Sweeper:              roles.sweeper,
-			Deleter:              roles.deleter,
-			BatchCreator:         roles.batchCreator,
-			DependencyEditor:     roles.dependencyEditor,
-			MetadataCAS:          roles.metadataCAS,
-			RevisionTransition:   roles.revisionTransition,
-			SourceSnapshotReader: roles.sourceSnapshotReader,
-			TransitionReadiness:  roles.transitionReadiness,
-			BatchApplier:         roles.batchApplier,
-			Memories:             roles.memories,
+			Reader:                     roles.reader,
+			Claimer:                    roles.claimer,
+			BatchCloser:                roles.batchCloser,
+			ReadyClaimer:               roles.readyClaimer,
+			Releaser:                   roles.releaser,
+			Lifecycle:                  roles.lifecycle,
+			Settings:                   roles.settings,
+			Stats:                      roles.stats,
+			CycleDetector:              roles.cycles,
+			EdgeReader:                 roles.edges,
+			GraphCounter:               roles.edgeCounter,
+			Relations:                  roles.relations,
+			Commenter:                  roles.commenter,
+			BlockingAnnotator:          roles.blocking,
+			TreeWalker:                 roles.tree,
+			ReadyCounter:               roles.readyCounter,
+			Counter:                    roles.counter,
+			Querier:                    roles.querier,
+			Sweeper:                    roles.sweeper,
+			Deleter:                    roles.deleter,
+			BatchCreator:               roles.batchCreator,
+			DependencyEditor:           roles.dependencyEditor,
+			MetadataCAS:                roles.metadataCAS,
+			RevisionTransition:         roles.revisionTransition,
+			SourceSnapshotReader:       roles.sourceSnapshotReader,
+			TransitionReadiness:        roles.transitionReadiness,
+			BatchApplyReceiptReadiness: roles.batchApplyReceiptReadiness,
+			BatchApplier:               roles.batchApplier,
+			Memories:                   roles.memories,
 			// Nil when this backend has no journal seam and the workspace never
 			// asked for one; Listen requires it exactly when the flag below is
 			// set, and serveIssueRoles has already refused the enabled case.
@@ -400,8 +401,9 @@ func runServe() error {
 	defer startServeEventsJournalMaintenance(info.BeadsDir, provider)()
 
 	return serveListen(opts, httpapi.Config{
-		Provider:            provider,
-		TransitionReadiness: probeRevisionTransitionReadiness(rootCtx, provider),
+		Provider:                   provider,
+		TransitionReadiness:        probeRevisionTransitionReadiness(rootCtx, provider),
+		BatchApplyReceiptReadiness: probeBatchApplyReceiptReadiness(rootCtx, provider),
 		// No EventsJournal field on this arm: the provider carries the journal
 		// read as one of its own capability accessors, exactly as it carries
 		// every other role Listen would otherwise need spelled out. Activation
@@ -805,6 +807,15 @@ func serveIssueRoles(ctx context.Context, src serveRoleSource, journalEnabled bo
 			}
 		}
 	}
+	if roles.batchApplier != nil {
+		if source, ok := src.(interface {
+			BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+		}); ok {
+			if readiness, err := source.BatchApplyReceiptReadiness(ctx); err == nil {
+				roles.batchApplyReceiptReadiness = readiness
+			}
+		}
+	}
 	return roles, nil
 }
 
@@ -820,6 +831,22 @@ func probeRevisionTransitionReadiness(ctx context.Context, source any) schema.Re
 	readiness, err := readinessSource.RevisionTransitionReadiness(ctx)
 	if err != nil {
 		return schema.RevisionTransitionReadiness{}
+	}
+	return readiness
+}
+
+// probeBatchApplyReceiptReadiness is fail closed: a source without the
+// optional read-only receipt probe, or any probe error, yields the zero proof.
+func probeBatchApplyReceiptReadiness(ctx context.Context, source any) schema.BatchApplyReceiptReadiness {
+	readinessSource, ok := source.(interface {
+		BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+	})
+	if !ok {
+		return schema.BatchApplyReceiptReadiness{}
+	}
+	readiness, err := readinessSource.BatchApplyReceiptReadiness(ctx)
+	if err != nil {
+		return schema.BatchApplyReceiptReadiness{}
 	}
 	return readiness
 }
@@ -893,10 +920,11 @@ type serveRoles struct {
 	// metadataCAS is the conditional single-key metadata write. Its accessor
 	// recurses through the hook decorator, so the ONE peel above is what keeps
 	// this server from running the workspace's on_update script per swap.
-	metadataCAS          issueops.MetadataCAS
-	revisionTransition   issueops.RevisionTransition
-	sourceSnapshotReader issueops.SourceSnapshotReader
-	transitionReadiness  schema.RevisionTransitionReadiness
+	metadataCAS                issueops.MetadataCAS
+	revisionTransition         issueops.RevisionTransition
+	sourceSnapshotReader       issueops.SourceSnapshotReader
+	transitionReadiness        schema.RevisionTransitionReadiness
+	batchApplyReceiptReadiness schema.BatchApplyReceiptReadiness
 	// batchApplier is the role that makes the ONE peel above matter most, and
 	// the arithmetic is what makes it worth its own sentence. Its hook wrapper
 	// fires FOUR vocabularies from one call — on_create for every created item,
