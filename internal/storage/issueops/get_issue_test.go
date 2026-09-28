@@ -117,6 +117,7 @@ func TestGetIssueInTxAbsentRowIsNotFound(t *testing.T) {
 func TestUpdateIssueInTxMissingLeasesTableIsAnError(t *testing.T) {
 	_, mock, tx := beginMockTx(t)
 
+	expectNoProtectedRecords(mock, "bd-1")
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM wisps WHERE id = ? LIMIT 1")).
 		WithArgs("bd-1").
 		WillReturnError(sql.ErrNoRows)

@@ -35,6 +35,7 @@ func expectBlockedStatePass(mock sqlmock.Sqlmock, table, alias string, mark, unm
 func TestRecomputeIsBlockedInTxWithResult(t *testing.T) {
 	t.Run("issue rows changed", func(t *testing.T) {
 		mock, db := newBlockedStateResultMock(t)
+		expectNoProtectedRecords(mock, "issue-1")
 		expectBlockedStatePass(mock, "issues", "i", sqlmock.NewResult(0, 1), sqlmock.NewResult(0, 0))
 		expectBlockedStatePass(mock, "issues", "i", sqlmock.NewResult(0, 0), sqlmock.NewResult(0, 0))
 
@@ -49,6 +50,7 @@ func TestRecomputeIsBlockedInTxWithResult(t *testing.T) {
 
 	t.Run("wisp rows changed", func(t *testing.T) {
 		mock, db := newBlockedStateResultMock(t)
+		expectNoProtectedRecords(mock, "wisp-1")
 		expectBlockedStatePass(mock, "wisps", "w", sqlmock.NewResult(0, 0), sqlmock.NewResult(0, 1))
 		expectBlockedStatePass(mock, "wisps", "w", sqlmock.NewResult(0, 0), sqlmock.NewResult(0, 0))
 
@@ -63,6 +65,7 @@ func TestRecomputeIsBlockedInTxWithResult(t *testing.T) {
 
 	t.Run("no rows changed", func(t *testing.T) {
 		mock, db := newBlockedStateResultMock(t)
+		expectNoProtectedRecords(mock, "issue-1", "wisp-1")
 		expectBlockedStatePass(mock, "issues", "i", sqlmock.NewResult(0, 0), sqlmock.NewResult(0, 0))
 		expectBlockedStatePass(mock, "wisps", "w", sqlmock.NewResult(0, 0), sqlmock.NewResult(0, 0))
 

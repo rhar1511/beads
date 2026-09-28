@@ -15,6 +15,7 @@ func TestReopenIssueInTxRetriesConditionalUpdateWhenLatestStatusIsCustomDone(t *
 	defer db.Close()
 
 	const id = "bd-reopen-race"
+	expectNoProtectedRecords(mock, id)
 	emptyRows := func() *sqlmock.Rows {
 		return sqlmock.NewRows([]string{"issue_id"})
 	}
@@ -57,6 +58,7 @@ func TestReopenIssueInTxRetriesConditionalUpdateWhenLatestStatusIsCustomDone(t *
 	mock.ExpectQuery(`(?s)SELECT id FROM events`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec(`(?s)INSERT INTO events`).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectNoProtectedRecords(mock, id)
 	mock.ExpectExec(`(?s)UPDATE issues i SET`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(`(?s)UPDATE issues i SET`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
@@ -84,6 +86,7 @@ func TestReopenIssueInTxCustomNonDoneIsNotAlreadyOpen(t *testing.T) {
 	defer db.Close()
 
 	const id = "bd-reopen-custom-active"
+	expectNoProtectedRecords(mock, id)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM wisps WHERE id = ? LIMIT 1")).
 		WithArgs(id).
 		WillReturnError(sql.ErrNoRows)
@@ -114,6 +117,7 @@ func TestReopenIssueInTxConditionalMissToCustomNonDoneIsNotAlreadyOpen(t *testin
 	defer db.Close()
 
 	const id = "bd-reopen-race-active"
+	expectNoProtectedRecords(mock, id)
 	emptyRows := func() *sqlmock.Rows { return sqlmock.NewRows([]string{"issue_id"}) }
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM wisps WHERE id = ? LIMIT 1")).
 		WithArgs(id).
@@ -152,6 +156,7 @@ func TestReopenIssueInTxReportsConcurrentChangeAfterRetryExhaustion(t *testing.T
 	defer db.Close()
 
 	const id = "bd-reopen-race-exhausted"
+	expectNoProtectedRecords(mock, id)
 	emptyRows := func() *sqlmock.Rows {
 		return sqlmock.NewRows([]string{"issue_id"})
 	}

@@ -69,6 +69,20 @@ func (o *batchApplier) ApplyBatch(ctx context.Context, request publicops.ApplyBa
 		return publicops.ApplyBatchResult{}, err
 	}
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.ApplyBatchResult, string, error) {
+		protectedClassRequested := false
+		for _, item := range plan.Items {
+			if item.Create != nil && item.Create.ProtectionClass != "" {
+				protectedClassRequested = true
+				break
+			}
+		}
+		explicitClass := ""
+		if protectedClassRequested {
+			explicitClass = "batch"
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, plan.ProtectedPermit, "issue.batch_apply", storageissueops.ApplyBatchResourceIDs(plan), plan.ProtectedDigest, explicitClass); err != nil {
+			return publicops.ApplyBatchResult{}, "", err
+		}
 		run := &uowApplyRun{
 			plan:   plan,
 			uw:     uw,
@@ -187,6 +201,11 @@ func (r *uowApplyRun) applyCreate(ctx context.Context, index int, item *publicop
 	}
 	if err != nil {
 		return itemErr(storageissueops.ClassifyPublicCreateError(err))
+	}
+	if item.ProtectionClass != "" {
+		if err := classifyProtectedUOWRecord(ctx, r.uw, created.Issue.ID, item.ProtectionClass); err != nil {
+			return itemErr(err)
+		}
 	}
 	issue, err := hydrateIssueOperation(ctx, r.uw, created.Issue, false, false)
 	if err != nil {

@@ -133,6 +133,9 @@ func (r *commentSQLRepositoryImpl) InsertRecord(ctx context.Context, comment *ty
 	if copy.IssueID == "" {
 		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: issueID must not be empty")
 	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.comment", []string{copy.IssueID}); err != nil {
+		return nil, err
+	}
 
 	issueTable := pickIssueTable(opts.UseWispsTable)
 	var exists bool

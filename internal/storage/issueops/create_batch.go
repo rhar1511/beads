@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
@@ -17,10 +18,9 @@ func CloneCreateBatchRequest(request publicops.CreateBatchRequest) publicops.Cre
 	clone := request
 	clone.Items = make([]publicops.BatchCreateItem, len(request.Items))
 	for i, item := range request.Items {
-		clone.Items[i] = publicops.BatchCreateItem{
-			Issue:        clonePublicIssue(item.Issue),
-			Dependencies: append([]publicops.CreateDependency(nil), item.Dependencies...),
-		}
+		clone.Items[i] = item
+		clone.Items[i].Issue = clonePublicIssue(item.Issue)
+		clone.Items[i].Dependencies = append([]publicops.CreateDependency(nil), item.Dependencies...)
 	}
 	return clone
 }
@@ -44,6 +44,9 @@ func ValidateCreateBatchRequest(request publicops.CreateBatchRequest) error {
 		if item.Issue == nil {
 			return fmt.Errorf("%w: create batch item %d requires an issue", storage.ErrValidation, i)
 		}
+		if item.ProtectionClass != "" && (!validProtectionClass(item.ProtectionClass) || item.Issue.ID == "" || strings.TrimSpace(item.Issue.ID) != item.Issue.ID) {
+			return fmt.Errorf("%w: create batch item %d protected creation requires a valid class and explicit issue ID", storage.ErrValidation, i)
+		}
 	}
 	return nil
 }
@@ -53,10 +56,12 @@ func ValidateCreateBatchRequest(request publicops.CreateBatchRequest) error {
 // an item through it, so no item restates CreateRequest's field rules.
 func CreateBatchItemRequest(request publicops.CreateBatchRequest, item publicops.BatchCreateItem) publicops.CreateRequest {
 	return publicops.CreateRequest{
-		Actor:         request.Actor,
-		Issue:         item.Issue,
-		Dependencies:  item.Dependencies,
-		ForceIDPrefix: request.ForceIDPrefix,
+		Actor:           request.Actor,
+		ProtectedPermit: request.ProtectedPermit,
+		ProtectionClass: item.ProtectionClass,
+		Issue:           item.Issue,
+		Dependencies:    item.Dependencies,
+		ForceIDPrefix:   request.ForceIDPrefix,
 	}
 }
 
@@ -117,6 +122,28 @@ func ExecuteCreateBatch(ctx context.Context, tx *sql.Tx, request publicops.Creat
 	if err := ValidateCreateBatchRequest(attempt); err != nil {
 		return publicops.CreateBatchResult{}, nil, err
 	}
+	digest, err := publicops.ProtectedMutationDigest(attempt)
+	if err != nil {
+		return publicops.CreateBatchResult{}, nil, err
+	}
+	protectedIDs := make([]string, 0, len(attempt.Items)*2)
+	protectedClassRequested := false
+	for _, item := range attempt.Items {
+		if item.Issue.ID != "" {
+			protectedIDs = append(protectedIDs, item.Issue.ID)
+		}
+		for _, dependency := range item.Dependencies {
+			protectedIDs = append(protectedIDs, dependency.TargetID)
+		}
+		protectedClassRequested = protectedClassRequested || item.ProtectionClass != ""
+	}
+	explicitClass := ""
+	if protectedClassRequested {
+		explicitClass = "batch"
+	}
+	if err := RequireProtectedMutation(ctx, tx, attempt.ProtectedPermit, "issue.batch_create", protectedIDs, digest, explicitClass); err != nil {
+		return publicops.CreateBatchResult{}, nil, err
+	}
 	options := storage.BatchCreateOptions{
 		CreateOnly:           true,
 		SkipPrefixValidation: attempt.ForceIDPrefix,
@@ -175,6 +202,15 @@ func ExecuteCreateBatch(ctx context.Context, tx *sql.Tx, request publicops.Creat
 	// counter bookkeeping here.
 	tables := ChangedTables{}
 	tables.Merge(CreateIssuesDirtyTables(ctx, issues, created))
+	for i, item := range attempt.Items {
+		if item.ProtectionClass == "" {
+			continue
+		}
+		if err := SetProtectedRecordClassInTx(ctx, tx, issues[i].ID, item.ProtectionClass); err != nil {
+			return publicops.CreateBatchResult{}, nil, err
+		}
+		tables.Add("protected_issue_records")
+	}
 	result := publicops.CreateBatchResult{Issues: make([]*types.Issue, len(issues))}
 	for i, issue := range issues {
 		hydrated, err := HydrateIssueOperationResult(ctx, tx, issue.ID, false)

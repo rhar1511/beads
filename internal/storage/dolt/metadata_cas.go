@@ -53,15 +53,25 @@ func (m *metadataCAS) CompareAndSetKey(ctx context.Context, req issueops.Compare
 	if err != nil {
 		return issueops.CompareAndSetKeyResult{}, err
 	}
+	digest, err := issueops.ProtectedMutationDigest(req)
+	if err != nil {
+		return issueops.CompareAndSetKeyResult{}, err
+	}
 
 	var result issueops.CompareAndSetKeyResult
 	if err := m.store.withRetryTx(ctx, func(tx *sql.Tx) error {
+		if err := storeops.RequireProtectedMutation(ctx, tx, req.ProtectedPermit, "metadata.compare_and_set", []string{plan.IssueID}, digest, ""); err != nil {
+			return err
+		}
 		swap, write, err := storeops.CompareAndSetMetadataKeyInTx(ctx, tx, plan)
 		if err != nil {
 			return err
 		}
 		result = swap
 		if len(write.Tables) == 0 {
+			if storeops.ProtectedMutationPermitUseWritten(ctx) {
+				return m.store.doltAddAndCommitInTx(ctx, tx, []string{"protected_mutation_permit_uses"}, "bd: protected mutation permit use")
+			}
 			// Nothing was written, or what was written is ephemeral and lives in
 			// tables this plane ignores. Either way there is nothing to version;
 			// withRetryTx still commits the SQL transaction.

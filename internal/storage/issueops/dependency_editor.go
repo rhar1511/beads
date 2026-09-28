@@ -108,6 +108,17 @@ func RemoveDependencyCommitMessage(issueID, dependsOnID string) string {
 // tables. That is why the phase loop and the gate are over the whole request
 // and the plane is decided per edge, one level down.
 func ExecuteAddDependencies(ctx context.Context, tx *sql.Tx, request publicops.AddDependenciesRequest) (publicops.AddDependenciesResult, ChangedTables, error) {
+	digest, err := publicops.ProtectedMutationDigest(request)
+	if err != nil {
+		return publicops.AddDependenciesResult{}, nil, err
+	}
+	protectedIDs := make([]string, 0, len(request.Edges)*2)
+	for _, edge := range request.Edges {
+		protectedIDs = append(protectedIDs, edge.IssueID, edge.DependsOnID)
+	}
+	if err := RequireProtectedMutation(ctx, tx, request.ProtectedPermit, "dependency.add", protectedIDs, digest, ""); err != nil {
+		return publicops.AddDependenciesResult{}, nil, err
+	}
 	// One scoped query for the whole request instead of a probe per edge: a
 	// bulk `bd dep add --file` against a remote Dolt pays WAN latency per
 	// round-trip (GH#3414). Nothing an edge write does moves a source between
@@ -234,6 +245,13 @@ func checkAddedEdgesForCycles(ctx context.Context, tx *sql.Tx, edges []publicops
 // the graph it already had, and a history entry for it would be a commit with
 // nothing in it.
 func ExecuteRemoveDependency(ctx context.Context, tx *sql.Tx, request publicops.RemoveDependencyRequest) (publicops.RemoveDependencyResult, ChangedTables, error) {
+	digest, err := publicops.ProtectedMutationDigest(request)
+	if err != nil {
+		return publicops.RemoveDependencyResult{}, nil, err
+	}
+	if err := RequireProtectedMutation(ctx, tx, request.ProtectedPermit, "dependency.remove", []string{request.IssueID, request.DependsOnID}, digest, ""); err != nil {
+		return publicops.RemoveDependencyResult{}, nil, err
+	}
 	// Routing is READ here rather than pinned, unlike the add. A removal
 	// cannot put an edge anywhere, so pinning it would only mean failing to
 	// remove an edge the caller named — and the staging has to name the tables

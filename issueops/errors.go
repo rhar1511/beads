@@ -77,6 +77,12 @@ var ErrAssigneeMismatch = errors.New("assignee mismatch")
 // beside Releaser: both refusals answer "whose claim is this".
 var ErrNotOwner = errors.New("issue claimed by a different actor")
 
+// ErrProtectedRecord is returned when an operation touches an explicitly
+// classified record without a valid, transaction-scoped protected-mutation
+// permit. It is independent of actor strings, HTTP authentication, and row
+// version checks.
+var ErrProtectedRecord = errors.New("protected record mutation refused")
+
 // The namespace-neutral part of this vocabulary is declared by beadserrors and
 // re-exported here. These are ALIASES, so they are the same values: every
 // existing issueops.ErrX reference and every errors.Is site keeps matching the

@@ -77,6 +77,8 @@ type CreateItem struct {
 	// request creates on opposite planes is refused with everything else the
 	// request asked for.
 	Issue *Issue
+	// ProtectionClass explicitly classifies this newly created record.
+	ProtectionClass string
 	// MetadataRefs splices resolved ids into this issue's metadata: each entry
 	// writes the id its Ref resolves to as the WHOLE VALUE of one top-level
 	// metadata key.
@@ -250,7 +252,8 @@ type ApplyBatchRequest struct {
 	// Actor is the author of every item and must not be empty. It is
 	// attributed to the ONE history entry the request records, because a batch
 	// is one act by one caller.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
 	// Items are the items to apply, in the order they are to be applied. It
 	// must not be empty and must not exceed 100 entries.
 	//

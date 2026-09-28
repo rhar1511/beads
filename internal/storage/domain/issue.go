@@ -156,6 +156,18 @@ type DeleteIssuesParams struct {
 	Force                bool
 }
 
+// ResolvedDeletion describes the exact rows a delete resolved and the
+// surviving rows whose dependency state or rewritten text may change. The
+// optional hook is a transaction-local policy seam for storage adapters that
+// need to guard a deletion before the issue use case mutates anything.
+type ResolvedDeletion struct {
+	IDs         []string
+	AffectedIDs []string
+	DryRun      bool
+}
+
+type ResolvedDeletionHook func(context.Context, ResolvedDeletion) error
+
 type DeleteIssuesResult struct {
 	DeletedCount      int
 	DependenciesCount int
@@ -406,30 +418,37 @@ func NewIssueUseCase(
 	eventsRepo EventsSQLRepository,
 	labelUC LabelUseCase,
 	depUC DependencyUseCase,
+	resolvedDeletionHooks ...ResolvedDeletionHook,
 ) IssueUseCase {
+	var resolvedDeletionHook ResolvedDeletionHook
+	if len(resolvedDeletionHooks) > 0 {
+		resolvedDeletionHook = resolvedDeletionHooks[0]
+	}
 	return &issueUseCaseImpl{
-		issueRepo:   issueRepo,
-		depRepo:     depRepo,
-		labelRepo:   labelRepo,
-		counterRepo: counterRepo,
-		commentRepo: commentRepo,
-		cfgRepo:     cfgRepo,
-		eventsRepo:  eventsRepo,
-		labelUC:     labelUC,
-		depUC:       depUC,
+		issueRepo:            issueRepo,
+		depRepo:              depRepo,
+		labelRepo:            labelRepo,
+		counterRepo:          counterRepo,
+		commentRepo:          commentRepo,
+		cfgRepo:              cfgRepo,
+		eventsRepo:           eventsRepo,
+		labelUC:              labelUC,
+		depUC:                depUC,
+		resolvedDeletionHook: resolvedDeletionHook,
 	}
 }
 
 type issueUseCaseImpl struct {
-	issueRepo   IssueSQLRepository
-	depRepo     DependencySQLRepository
-	labelRepo   LabelSQLRepository
-	counterRepo ChildCounterSQLRepository
-	commentRepo CommentSQLRepository
-	cfgRepo     ConfigSQLRepository
-	eventsRepo  EventsSQLRepository
-	labelUC     LabelUseCase
-	depUC       DependencyUseCase
+	issueRepo            IssueSQLRepository
+	depRepo              DependencySQLRepository
+	labelRepo            LabelSQLRepository
+	counterRepo          ChildCounterSQLRepository
+	commentRepo          CommentSQLRepository
+	cfgRepo              ConfigSQLRepository
+	eventsRepo           EventsSQLRepository
+	labelUC              LabelUseCase
+	depUC                DependencyUseCase
+	resolvedDeletionHook ResolvedDeletionHook
 }
 
 var _ IssueUseCase = (*issueUseCaseImpl)(nil)

@@ -116,6 +116,9 @@ func RecomputeIsBlockedInTxWithResult(
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
 		return result, nil
 	}
+	if err := RefuseUnpermittedProtectedDerivedMutationInTx(ctx, tx, "issue.derived_recompute", append(append([]string(nil), issueIDs...), wispIDs...)); err != nil {
+		return result, err
+	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
 		return result, err
@@ -155,6 +158,9 @@ func MarkIsBlockedInTxWithResult(ctx context.Context, tx DBTX, issueIDs, wispIDs
 	var result RecomputeIsBlockedResult
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
 		return result, nil
+	}
+	if err := RefuseUnpermittedProtectedDerivedMutationInTx(ctx, tx, "issue.derived_recompute", append(append([]string(nil), issueIDs...), wispIDs...)); err != nil {
+		return result, err
 	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {

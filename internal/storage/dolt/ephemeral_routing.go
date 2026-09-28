@@ -238,6 +238,13 @@ func (s *DoltStore) DemoteToWisp(ctx context.Context, id string, updates map[str
 // atomic version precondition in the same transaction; DemoteToWisp's behavior
 // is unchanged.
 func (s *DoltStore) demoteToWispInTx(ctx context.Context, tx *sql.Tx, id string, updates map[string]interface{}, actor string) error {
+	resourceIDs, err := issueops.DependencyEndpointsForIDsInTx(ctx, tx, []string{id})
+	if err != nil {
+		return fmt.Errorf("resolve demotion endpoints for %s: %w", id, err)
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.demote", resourceIDs); err != nil {
+		return err
+	}
 	if _, err := issueops.UpdateIssueWithoutEventInTx(ctx, tx, id, updates, actor); err != nil {
 		return fmt.Errorf("update issue before demotion: %w", err)
 	}
@@ -363,6 +370,18 @@ func (s *DoltStore) doltAddAndCommitInTx(ctx context.Context, tx *sql.Tx, tables
 	// instead of minting one Dolt version commit per write.
 	if issueops.VersionCommitDeferred(ctx) {
 		return nil
+	}
+	if issueops.ProtectedMutationPermitUseWritten(ctx) {
+		found := false
+		for _, table := range tables {
+			if table == "protected_mutation_permit_uses" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			tables = append(tables, "protected_mutation_permit_uses")
+		}
 	}
 	for _, table := range tables {
 		if err := schema.DrainCall(ctx, tx, "CALL DOLT_ADD(?)", table); err != nil {

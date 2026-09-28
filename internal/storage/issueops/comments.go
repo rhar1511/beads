@@ -246,6 +246,9 @@ func ImportIssueCommentInTxWithResult(ctx context.Context, tx *sql.Tx, issueID, 
 
 //nolint:gosec // G201: table names come from hardcoded constants
 func addIssueCommentInTx(ctx context.Context, tx *sql.Tx, issueID, author, text string, createdAt time.Time, live bool) (*types.Comment, bool, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.comment", []string{issueID}); err != nil {
+		return nil, false, err
+	}
 	isWisp := IsActiveWispInTx(ctx, tx, issueID)
 	issueTable, _, _, _ := WispTableRouting(isWisp)
 	commentTable := "comments"
@@ -306,6 +309,9 @@ func addIssueCommentInTx(ctx context.Context, tx *sql.Tx, issueID, author, text 
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func AddCommentEventInTx(ctx context.Context, tx DBTX, issueID, actor, comment string) error {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.comment", []string{issueID}); err != nil {
+		return err
+	}
 	isWisp := IsActiveWispInTx(ctx, tx, issueID)
 	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
 

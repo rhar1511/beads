@@ -54,6 +54,10 @@ func expectClaimableRead(mock sqlmock.Sqlmock, id, assignee string, status types
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM wisps WHERE id = ? LIMIT 1")).
 		WithArgs(id).
 		WillReturnError(sql.ErrNoRows)
+	expectNoProtectedRecords(mock, id)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM wisps WHERE id = ? LIMIT 1")).
+		WithArgs(id).
+		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT " + IssueSelectColumns + " FROM issues " + sqlbuild.LeaseJoin("issues") + " WHERE id = ?")).
 		WithArgs(id).
 		WillReturnRows(claimIssueRow(id, assignee, status))

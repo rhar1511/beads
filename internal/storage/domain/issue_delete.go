@@ -140,11 +140,6 @@ func (u *issueUseCaseImpl) deleteMany(ctx context.Context, params DeleteIssuesPa
 	}
 	result.EventsCount = evIssue + evWisp
 
-	if params.DryRun {
-		result.DeletedCount = len(regularIDs) + len(wispIDs)
-		return result, nil
-	}
-
 	var connected map[string]*types.Issue
 	var connectedIsWisp map[string]bool
 	if params.UpdateTextReferences {
@@ -161,6 +156,30 @@ func (u *issueUseCaseImpl) deleteMany(ctx context.Context, params DeleteIssuesPa
 	affectedIssues, affectedWisps, err := u.issueRepo.AffectedByDeletion(ctx, regularIDs, wispIDs)
 	if err != nil {
 		return result, fmt.Errorf("delete: affected by deletion: %w", err)
+	}
+	if u.resolvedDeletionHook != nil {
+		affectedSet := make(map[string]bool, len(affectedIssues)+len(affectedWisps)+len(connected))
+		for _, id := range affectedIssues {
+			affectedSet[id] = true
+		}
+		for _, id := range affectedWisps {
+			affectedSet[id] = true
+		}
+		for id := range connected {
+			affectedSet[id] = true
+		}
+		if err := u.resolvedDeletionHook(ctx, ResolvedDeletion{
+			IDs:         append([]string(nil), allIDs...),
+			AffectedIDs: sortedStringSet(affectedSet),
+			DryRun:      params.DryRun,
+		}); err != nil {
+			return result, err
+		}
+	}
+
+	if params.DryRun {
+		result.DeletedCount = len(regularIDs) + len(wispIDs)
+		return result, nil
 	}
 
 	if _, err := u.depRepo.DeleteAllForIDs(ctx, regularIDs, DepInsertOpts{}, actor); err != nil {

@@ -21,7 +21,8 @@ type BatchCloseItem struct {
 // wrong — it is wherever the request ends.
 type CloseBatchRequest struct {
 	// Actor is the closer and must not be empty.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
 	// Items are the issues to close, in the order the caller asked for them.
 	// It must not be empty. Every item appears in Outcomes at the same index.
 	//

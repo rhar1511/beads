@@ -309,6 +309,9 @@ func RestoreLeaseOnImportInTx(ctx context.Context, tx DBTX, issue *types.Issue, 
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func HeartbeatIssueInTx(ctx context.Context, tx DBTX, id, actor string) error {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.heartbeat", []string{id}); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	// granted_node is backfilled, never overwritten: a lease row whose
 	// provenance is unknown (granted before ignored migration 0016, or before
@@ -736,6 +739,13 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 
 	if len(stale) == 0 {
 		return nil, nil
+	}
+	staleIDs := make([]string, 0, len(stale))
+	for _, candidate := range stale {
+		staleIDs = append(staleIDs, candidate.ID)
+	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.reclaim", staleIDs); err != nil {
+		return nil, err
 	}
 
 	var reclaimed []types.ReclaimedLease

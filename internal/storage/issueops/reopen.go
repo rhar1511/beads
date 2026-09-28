@@ -23,6 +23,9 @@ type ReopenResult struct {
 // ReopenIssueInTx reopens only statuses in the done category. It leaves all
 // other statuses unchanged.
 func ReopenIssueInTx(ctx context.Context, tx DBTX, id, reason, actor string) (*ReopenResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.reopen", []string{id}); err != nil {
+		return nil, err
+	}
 	return reopenIssueInTx(ctx, tx, id, reason, actor, true)
 }
 

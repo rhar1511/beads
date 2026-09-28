@@ -36,6 +36,9 @@ func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, act
 	if issueID == "" {
 		return fmt.Errorf("db: LabelSQLRepository.Insert: issueID must not be empty")
 	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.label_add", []string{issueID}); err != nil {
+		return err
+	}
 	if label == "" {
 		return fmt.Errorf("db: LabelSQLRepository.Insert: label must not be empty")
 	}
@@ -93,6 +96,9 @@ func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, act
 func (r *labelSQLRepositoryImpl) Delete(ctx context.Context, issueID, label, actor string, opts domain.LabelOpts) error {
 	if issueID == "" {
 		return fmt.Errorf("db: LabelSQLRepository.Delete: issueID must not be empty")
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.label_remove", []string{issueID}); err != nil {
+		return err
 	}
 	if label == "" {
 		return fmt.Errorf("db: LabelSQLRepository.Delete: label must not be empty")

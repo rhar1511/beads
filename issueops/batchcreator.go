@@ -30,6 +30,8 @@ type BatchCreateItem struct {
 	// written by the batch that creates both of its ends; a request that asks
 	// for one is refused with everything else it asked for.
 	Issue *Issue
+	// ProtectionClass explicitly classifies this newly created record.
+	ProtectionClass string
 	// Dependencies is the authoritative set of explicit edges created with this
 	// item, under CreateDependency's rules.
 	//
@@ -56,7 +58,8 @@ type CreateBatchRequest struct {
 	// Actor is the creator and must not be empty. It is attributed to every
 	// item, because a batch is one act by one caller: an item carrying its own
 	// actor would be a second creator inside a history entry that names one.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
 	// Items are the issues to create, in the order the caller asked for them.
 	// It must not be empty, as CloseBatchRequest.Items must not: a write batch
 	// that writes nothing is a caller bug rather than a degenerate answer,

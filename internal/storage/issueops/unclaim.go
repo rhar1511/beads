@@ -32,6 +32,9 @@ import (
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func UnclaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, force bool) error {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.unclaim", []string{id}); err != nil {
+		return err
+	}
 	// Route to the correct table (issues/wisps) automatically, matching
 	// ClaimIssueInTx — a wisp claim lives in the wisp tables, so its release
 	// must update them too rather than no-op against the permanent issues table.
@@ -151,6 +154,9 @@ func finishUnclaimInTx(ctx context.Context, tx DBTX, eventTable string, id strin
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func UnclaimIssueIfAssigneeInTx(ctx context.Context, tx DBTX, id string, actor string, expectedAssignee string) error {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.unclaim", []string{id}); err != nil {
+		return err
+	}
 	if expectedAssignee == "" {
 		return fmt.Errorf("conditional unclaim of %s: expected assignee must not be empty (use UnclaimIssueInTx for an unconditional release)", id)
 	}

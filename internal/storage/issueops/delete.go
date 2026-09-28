@@ -35,15 +35,18 @@ func DeleteIssueInTx(ctx context.Context, tx *sql.Tx, id string, actor string) e
 func DeleteIssueInTxWithResult(ctx context.Context, tx *sql.Tx, id string, actor string) (bool, error) {
 	isWisp := IsActiveWispInTx(ctx, tx, id)
 
-	var deletedIssues, deletedWisps []string
+	set := DeletionSet{All: []string{id}}
 	if isWisp {
-		deletedWisps = []string{id}
+		set.WispIDs = []string{id}
 	} else {
-		deletedIssues = []string{id}
+		set.RegularIDs = []string{id}
 	}
-	affectedIssues, affectedWisps, aerr := AffectedByDeletionInTx(ctx, tx, deletedIssues, deletedWisps)
-	if aerr != nil {
-		return false, fmt.Errorf("affected by delete for %s: %w", id, aerr)
+	protectedScope, affectedIssues, affectedWisps, err := ResolvedDeletionScopeInTx(ctx, tx, set)
+	if err != nil {
+		return false, fmt.Errorf("resolve protected scope for %s: %w", id, err)
+	}
+	if err := RefuseProtectedDeletionInTx(ctx, tx, protectedScope); err != nil {
+		return false, err
 	}
 
 	// Edges are journaled before the rows go, while their source snapshots can
@@ -111,6 +114,9 @@ func deleteIssueRowInTxWithResult(ctx context.Context, tx *sql.Tx, id string, is
 		// A deleted issue holds no lease.
 		return false, err
 	}
+	if err := DeleteProtectedClassificationsInTx(ctx, tx, []string{id}); err != nil {
+		return false, err
+	}
 	return issueRowsChanged, nil
 }
 
@@ -131,6 +137,59 @@ type DeletionSet struct {
 	// All is the whole set in one slice — what a caller scopes a neighborhood
 	// read or a citation rewrite to, and what nothing else may recompute.
 	All []string
+}
+
+// ResolvedDeletionScopeInTx returns the exact deletion set together with all
+// surviving rows whose dependency state, revision, or linked text can change.
+// It computes every read before mutation so storage adapters can authorize or
+// refuse the whole operation against one transaction snapshot.
+func ResolvedDeletionScopeInTx(ctx context.Context, tx DBTX, set DeletionSet) (scope, affectedIssues, affectedWisps []string, err error) {
+	affectedIssues, affectedWisps, err = AffectedByDeletionInTx(ctx, tx, set.RegularIDs, set.WispIDs)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("affected by deletion: %w", err)
+	}
+	neighbors, err := deleteNeighborsInTx(ctx, tx, set.All)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("delete neighbors: %w", err)
+	}
+	scope = append(scope, set.All...)
+	scope = append(scope, affectedIssues...)
+	scope = append(scope, affectedWisps...)
+	for _, neighbor := range neighbors {
+		if neighbor != nil {
+			scope = append(scope, neighbor.ID)
+		}
+	}
+	return canonicalProtectedIDs(scope), affectedIssues, affectedWisps, nil
+}
+
+// DeleteWispAuxiliaryRowsInTx removes data that belongs to deleted wisps.
+// Some deployed schemas do not enforce the corresponding foreign keys, so
+// deletion paths must clean these rows explicitly inside the same transaction.
+func DeleteWispAuxiliaryRowsInTx(ctx context.Context, tx DBTX, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	for start := 0; start < len(ids); start += deleteBatchSize {
+		end := start + deleteBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		inClause, args := buildSQLInClause(ids[start:end])
+		for _, aux := range []struct{ table, column string }{
+			{"wisp_labels", "issue_id"},
+			{"wisp_events", "issue_id"},
+			{"wisp_comments", "issue_id"},
+			{"wisp_child_counters", "parent_id"},
+		} {
+			//nolint:gosec // G201: table/column are fixed literals; inClause has only placeholders.
+			if _, err := tx.ExecContext(ctx,
+				fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", aux.table, aux.column, inClause), args...); err != nil {
+				return fmt.Errorf("delete wisp auxiliary rows from %s: %w", aux.table, err)
+			}
+		}
+	}
+	return nil
 }
 
 // ResolveDeletionSetInTx decides WHICH rows a delete removes: the named ids,
@@ -229,10 +288,42 @@ func DeleteIssuesInTx(ctx context.Context, tx *sql.Tx, ids []string, cascade boo
 // reading `”` on a cascade row would take it for a system write.
 //
 //nolint:gosec // G201: inClause contains only ? placeholders
-func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dryRun bool, actor string) (*types.DeleteIssuesResult, error) {
+type ProtectedDeleteAuthorization struct {
+	Permit      publicops.ProtectedMutationPermit
+	Digest      string
+	ResourceIDs []string
+}
+
+func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dryRun bool, actor string, authorization ...ProtectedDeleteAuthorization) (*types.DeleteIssuesResult, error) {
 	result := &types.DeleteIssuesResult{}
 	if len(set.All) == 0 {
 		return result, nil
+	}
+	var permit publicops.ProtectedMutationPermit
+	var digest string
+	if len(authorization) > 1 {
+		return nil, fmt.Errorf("delete: more than one protection authorization")
+	}
+	if len(authorization) == 1 {
+		permit = authorization[0].Permit
+		digest = authorization[0].Digest
+	}
+	protectedScope, affectedIssues, affectedWisps, err := ResolvedDeletionScopeInTx(ctx, tx, set)
+	if err != nil {
+		return nil, fmt.Errorf("resolve protected delete scope: %w", err)
+	}
+	if len(authorization) == 1 {
+		protectedScope = append(protectedScope, authorization[0].ResourceIDs...)
+	}
+	protectedScope = canonicalProtectedIDs(protectedScope)
+	if dryRun {
+		// A preview never consumes a single-use permit. Protected records remain
+		// closed to legacy and dry-run deletion surfaces.
+		if err := RefuseProtectedDeletionInTx(ctx, tx, protectedScope); err != nil {
+			return nil, err
+		}
+	} else if err := RequireProtectedMutation(ctx, tx, permit, "issue.delete", protectedScope, digest, ""); err != nil {
+		return nil, err
 	}
 
 	deletedSet := make(map[string]bool, len(set.All))
@@ -241,7 +332,6 @@ func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dry
 	}
 
 	var depsCount, labelsCount, eventsCount int
-	var err error
 	if depsCount, err = CountRowsForIssueIDsInTx(ctx, tx, "dependencies", set.RegularIDs); err != nil {
 		return nil, fmt.Errorf("count dependencies: %w", err)
 	}
@@ -313,11 +403,6 @@ func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dry
 		return result, nil
 	}
 
-	affectedIssues, affectedWisps, aerr := AffectedByDeletionInTx(ctx, tx, set.RegularIDs, set.WispIDs)
-	if aerr != nil {
-		return nil, fmt.Errorf("affected by batch delete: %w", aerr)
-	}
-
 	// Resolve WHICH regular ids this delete actually removes before the batched
 	// DELETE runs: afterwards the rows are gone, and RowsAffected reports a
 	// count, not a set. A journal record for an id that was already absent would
@@ -339,6 +424,9 @@ func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dry
 		if err := deleteIssueRowInTx(ctx, tx, id, true, actor); err != nil {
 			return nil, fmt.Errorf("delete wisp %s: %w", id, err)
 		}
+	}
+	if err := DeleteWispAuxiliaryRowsInTx(ctx, tx, set.WispIDs); err != nil {
+		return nil, err
 	}
 
 	totalRegularsDeleted := 0
@@ -365,6 +453,9 @@ func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dry
 			batchArgs...); err != nil {
 			return nil, fmt.Errorf("delete leases: %w", err)
 		}
+	}
+	if err := DeleteProtectedClassificationsInTx(ctx, tx, set.RegularIDs); err != nil {
+		return nil, err
 	}
 	result.DeletedCount = totalRegularsDeleted + len(set.WispIDs)
 

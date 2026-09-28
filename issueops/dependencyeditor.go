@@ -57,7 +57,8 @@ type AddDependenciesRequest struct {
 	// dependency_added entry each genuinely new edge records is attributed to,
 	// which is the only place a reader finds who wired an edge: the result
 	// does not carry it.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
 	// Edges are the edges to assert, in the caller's order. It must not be
 	// empty. Edges are applied parent-child first regardless of this order, so
 	// the complete planned hierarchy is visible before any blocking edge is
@@ -86,7 +87,8 @@ type RemoveDependencyRequest struct {
 	// Actor is the remover and must not be empty. It is what the
 	// dependency_removed entry a successful removal records is attributed to,
 	// the mirror of AddDependenciesRequest.Actor.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
 	// IssueID and DependsOnID name the edge exactly. Neither may be empty.
 	IssueID     string
 	DependsOnID string

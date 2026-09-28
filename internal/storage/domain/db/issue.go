@@ -56,6 +56,9 @@ func (r *issueSQLRepositoryImpl) Insert(ctx context.Context, issue *types.Issue,
 	if issue == nil {
 		return errors.New("db: Insert: issue must not be nil")
 	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.create", issueops.CreateMutationResourceIDs([]*types.Issue{issue})); err != nil {
+		return err
+	}
 
 	normalizeIssueTimestamps(issue)
 	if issue.ContentHash == "" {
@@ -97,6 +100,9 @@ func (r *issueSQLRepositoryImpl) Insert(ctx context.Context, issue *types.Issue,
 }
 
 func (r *issueSQLRepositoryImpl) InsertBatch(ctx context.Context, issues []*types.Issue, actor string, opts domain.InsertIssueOpts) error {
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.create", issueops.CreateMutationResourceIDs(issues)); err != nil {
+		return err
+	}
 	for _, issue := range issues {
 		if err := r.Insert(ctx, issue, actor, opts); err != nil {
 			return err
@@ -121,6 +127,13 @@ func (r *issueSQLRepositoryImpl) PromoteFromEphemeral(ctx context.Context, id, a
 }
 
 func (r *issueSQLRepositoryImpl) MovePersistence(ctx context.Context, id string, mode types.PersistenceMode, actor string) (bool, error) {
+	resourceIDs, err := issueops.DependencyEndpointsForIDsInTx(ctx, r.runner, []string{id})
+	if err != nil {
+		return false, fmt.Errorf("db: MovePersistence %s: resolve dependency endpoints: %w", id, err)
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.persistence_move", resourceIDs); err != nil {
+		return false, err
+	}
 	issue, err := issueops.GetIssueInTx(ctx, r.runner, id)
 	if err != nil {
 		return false, fmt.Errorf("db: MovePersistence %s: get issue: %w", id, err)
@@ -138,6 +151,9 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 	}
 	if len(updates) == 0 {
 		return nil
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.update", []string{id}); err != nil {
+		return err
 	}
 	updates = cloneUpdateFields(updates)
 	// Pop the close-policy override before anything reads the map as a set of
@@ -406,6 +422,9 @@ func coerceStatus(v any) types.Status {
 func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, opts domain.IssueTableOpts) (domain.ClaimRowResult, error) {
 	if id == "" {
 		return domain.ClaimRowResult{}, errors.New("db: Claim: id must not be empty")
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.claim", []string{id}); err != nil {
+		return domain.ClaimRowResult{}, err
 	}
 	// The CAS below writes assignee = actor. actor is user-settable (--actor /
 	// BEADS_ACTOR), so bound it against the VARCHAR(255) assignee column up front

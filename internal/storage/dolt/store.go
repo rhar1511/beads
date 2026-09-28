@@ -1154,6 +1154,7 @@ func (s *DoltStore) withRetryTx(ctx context.Context, fn func(tx *sql.Tx) error) 
 		bo.MaxElapsedTime = 15 * time.Second
 	}
 	return backoff.Retry(func() error {
+		issueops.ResetProtectedMutationAttempt(ctx)
 		err := s.withWriteTx(ctx, fn)
 		if err == nil {
 			if !circuitWriteManaged(ctx) && s.breaker != nil {
@@ -1204,6 +1205,11 @@ func (s *DoltStore) withWriteTx(ctx context.Context, fn func(tx *sql.Tx) error) 
 	if s.closed.Load() {
 		return ErrStoreClosed
 	}
+	// Authorization cache entries are valid only inside one SQL transaction.
+	// Callers may reuse a context across requests, so clear any prior success
+	// before opening a new write transaction. Retry wrappers also reset before
+	// each attempt; the duplicate reset happens before the body and is harmless.
+	issueops.ResetProtectedMutationAttempt(ctx)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin write tx: %w", err)

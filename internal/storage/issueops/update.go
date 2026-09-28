@@ -357,6 +357,9 @@ func UpdateIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, update
 }
 
 func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool, exactRowLock *int64) (*UpdateResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.update", []string{id}); err != nil {
+		return nil, err
+	}
 	updates = cloneUpdateFields(updates)
 	// Pop the override before anything reads the map as a set of columns. It
 	// has to come out ahead of the no-op filter too: the filter keeps every key

@@ -1,12 +1,52 @@
 package issueops
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/steveyegge/beads/internal/storage"
 	publicops "github.com/steveyegge/beads/issueops"
 )
+
+func TestApplyBatchOldParentIDsArePartOfProtectedScope(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	mock.ExpectQuery(`(?s)FROM dependencies.*WHERE issue_id = \?.*type = 'parent-child'`).
+		WithArgs("child").
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}).AddRow("child", "old-parent"))
+	mock.ExpectQuery(`(?s)FROM wisp_dependencies.*WHERE issue_id = \?.*type = 'parent-child'`).
+		WithArgs("child").
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}))
+
+	plan := storage.ApplyBatchPlan{Items: []publicops.ApplyItem{{
+		Kind: publicops.ItemUpdate,
+		Update: &publicops.UpdateItem{
+			Target: publicops.Ref{ID: "child"},
+			Patch:  publicops.IssuePatch{ParentID: publicops.Field[string]{Set: true, Value: "new-parent"}},
+		},
+	}}}
+	got, err := applyBatchOldParentIDsInTx(context.Background(), tx, plan)
+	if err != nil {
+		t.Fatalf("applyBatchOldParentIDsInTx: %v", err)
+	}
+	if len(got) != 1 || got[0] != "old-parent" {
+		t.Fatalf("old parents = %v, want [old-parent]", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // applyBatchCommitResult builds a result from a (kind, changed) list, which is
 // all the message rule reads.

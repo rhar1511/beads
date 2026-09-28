@@ -344,6 +344,12 @@ func TestUnitOfWorkBypassesAreAccountedFor(t *testing.T) {
 			"Import fires no hooks on the DoltStorage plumbing either — it runs the same engine " +
 			"there — so this is parity, not a gap. A hook per imported issue would be new " +
 			"behavior on both plumbings.",
+		"requireProtectedUOWMutation": "the protection guard reads classification and consumes a signed permit " +
+			"on the active transaction before a domain mutation. Those internal authority rows are not issue events.",
+		"classifyProtectedUOWRecord": "the protected classification is an internal authorization boundary written " +
+			"beside the issue create. It is deliberately absent from ordinary issue hook payloads.",
+		"protectedUOWRecords": "the deletion preflight reads internal classification state from the active transaction " +
+			"and performs no domain mutation or hook-worthy write.",
 	}
 
 	found := map[string]bool{}

@@ -168,12 +168,15 @@ func deleteInUOW(ctx context.Context, uw UnitOfWork, req publicops.DeleteRequest
 		}
 	}
 
-	deleted, err := issueUC.DeleteIssues(ctx, domain.DeleteIssuesParams{
+	deleteCtx := withResolvedDeleteAuthorization(ctx, req)
+	deleted, err := issueUC.DeleteIssues(deleteCtx, domain.DeleteIssuesParams{
 		IDs:     req.IDs,
 		Cascade: req.Cascade,
 		DryRun:  req.DryRun,
-		// A preview rewrites nothing, so it must not ask for the rewrite.
-		UpdateTextReferences: !req.DryRun,
+		// The use case only gathers surviving neighbors on a dry run. It exits
+		// before any rewrite, while the resolved-deletion hook still needs that
+		// same scope to refuse protected rows the real request would rewrite.
+		UpdateTextReferences: true,
 	}, req.Actor)
 	if err != nil {
 		return publicops.DeleteResult{}, err

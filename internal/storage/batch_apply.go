@@ -47,6 +47,8 @@ type ApplyBatchPlan struct {
 	Provenance            string
 	ForceIDPrefix         bool
 	SkipPerEdgeCycleCheck bool
+	ProtectedPermit       issueops.ProtectedMutationPermit
+	ProtectedDigest       string
 	// Items are the request's items in declaration order, with each waits-for
 	// dep_add's Metadata replaced by its normalized form. The slice is fresh,
 	// so normalization does not write through to the caller's.
@@ -88,8 +90,13 @@ func PlanApplyBatch(in issueops.ApplyBatchRequest) (ApplyBatchPlan, error) {
 		Provenance:            in.Provenance,
 		ForceIDPrefix:         in.ForceIDPrefix,
 		SkipPerEdgeCycleCheck: in.SkipPerEdgeCycleCheck,
+		ProtectedPermit:       in.ProtectedPermit,
 		Items:                 make([]issueops.ApplyItem, len(in.Items)),
 		KeyIndex:              keyIndex,
+	}
+	plan.ProtectedDigest, err = issueops.ProtectedMutationDigest(in)
+	if err != nil {
+		return ApplyBatchPlan{}, err
 	}
 	copy(plan.Items, in.Items)
 
@@ -196,6 +203,9 @@ func planApplyBatchItem(item *issueops.ApplyItem, index int, keyIndex map[string
 // matter — see issueops.CreateItem.MetadataRefs. What it may not do is name a
 // key no item declares.
 func planApplyBatchCreate(item *issueops.CreateItem, index int, keyIndex map[string]int, touched map[string]bool) error {
+	if item.ProtectionClass != "" && (strings.TrimSpace(item.ProtectionClass) != item.ProtectionClass || len(item.ProtectionClass) > 64 || item.Issue == nil || item.Issue.ID == "" || strings.TrimSpace(item.Issue.ID) != item.Issue.ID) {
+		return fmt.Errorf("%w: apply batch item %d protected creation requires a valid class and explicit issue ID", issueops.ErrValidation, index)
+	}
 	for metaKey, ref := range item.MetadataRefs {
 		if metaKey == "" {
 			return fmt.Errorf("%w: apply batch item %d has a metadata_ref with an empty key", issueops.ErrValidation, index)

@@ -224,6 +224,11 @@ func (s *EmbeddedDoltStore) withConn(ctx context.Context, commit bool, fn func(t
 		err = ErrReadOnly
 		return
 	}
+	if commit {
+		// Verified scopes belong to one SQL transaction attempt. A reused
+		// context must not authorize a later legacy store or transaction call.
+		issueops.ResetProtectedMutationAttempt(ctx)
+	}
 
 	var db *sql.DB
 	var cleanup func() error

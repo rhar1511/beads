@@ -10,6 +10,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/storage/sqlbuild"
 	"github.com/steveyegge/beads/internal/types"
+	publicops "github.com/steveyegge/beads/issueops"
 )
 
 // Wisp table routing helpers.
@@ -339,9 +340,13 @@ func (s *DoltStore) deleteWisp(ctx context.Context, id string) error {
 	clearJournalScope := s.scopeEventsJournalTransaction(tx)
 	defer clearJournalScope()
 
-	affectedIssues, affectedWisps, aerr := issueops.AffectedByDeletionInTx(ctx, tx, nil, []string{id})
-	if aerr != nil {
-		return fmt.Errorf("affected by wisp delete for %s: %w", id, aerr)
+	set := issueops.DeletionSet{WispIDs: []string{id}, All: []string{id}}
+	protectedScope, affectedIssues, affectedWisps, err := issueops.ResolvedDeletionScopeInTx(ctx, tx, set)
+	if err != nil {
+		return fmt.Errorf("resolve protected scope for wisp delete %s: %w", id, err)
+	}
+	if err := issueops.RefuseProtectedDeletionInTx(ctx, tx, protectedScope); err != nil {
+		return err
 	}
 
 	// Edges are journaled before the row goes, while their source snapshots can
@@ -393,38 +398,41 @@ func (s *DoltStore) deleteWisp(ctx context.Context, id string) error {
 	return nil
 }
 
-// deleteWispBatch permanently removes multiple wisps using one transaction per
-// batch of 200. Committing per-batch keeps each transaction short enough to
-// complete within Dolt's writeTimeout (10 s), preventing i/o timeout errors
-// when GC-ing hundreds of wisps at once (ff-tqm).
-//
-// Previously the entire set was wrapped in one mega-transaction; at 631 wisps
-// the commit exceeded the driver write timeout and failed with
-// "read tcp …: i/o timeout".
-//
-// Partial cleanup is acceptable: if one batch fails the earlier batches are
-// already committed and the next GC run will handle the remainder.
+// deleteWispBatch permanently removes the resolved set in one transaction.
+// This legacy helper shares the Deleter guard so it cannot commit early chunks
+// before a protected row or surviving endpoint later in the set is discovered.
+// deleteWispBatchTx retains its transaction-local guard for direct callers.
 func (s *DoltStore) deleteWispBatch(ctx context.Context, ids []string) (int, error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
-
-	const batchSize = 200
-	totalDeleted := 0
-
-	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		deleted, err := s.deleteWispBatchTx(ctx, ids[i:end])
+	var existingIDs []string
+	if err := s.withReadTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		existingIDs, err = issueops.ExistingIssueIDsInTableInTx(ctx, tx, "wisps", ids)
 		if err != nil {
-			return totalDeleted, err
+			return fmt.Errorf("resolve existing wisps for batch delete: %w", err)
 		}
-		totalDeleted += deleted
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	if len(existingIDs) == 0 {
+		return 0, nil
 	}
 
-	return totalDeleted, nil
+	deleter, err := s.Deleter()
+	if err != nil {
+		return 0, err
+	}
+	result, err := deleter.Delete(ctx, publicops.DeleteRequest{
+		IDs:   existingIDs,
+		Force: true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return result.Deleted, nil
 }
 
 // deleteWispBatchTx deletes one batch of wisps inside its own transaction.
@@ -440,11 +448,6 @@ func (s *DoltStore) deleteWispBatchTx(ctx context.Context, ids []string) (int, e
 	clearJournalScope := s.scopeEventsJournalTransaction(tx)
 	defer clearJournalScope()
 
-	affectedIssues, affectedWisps, aerr := issueops.AffectedByDeletionInTx(ctx, tx, nil, ids)
-	if aerr != nil {
-		return 0, fmt.Errorf("affected by batched wisp delete: %w", aerr)
-	}
-
 	// Resolve WHICH wisps this batch actually removes before the DELETE runs:
 	// afterwards they are gone, and RowsAffected reports a count, not a set.
 	// GC hands this path ids it scanned earlier, so an already-collected wisp is
@@ -453,6 +456,14 @@ func (s *DoltStore) deleteWispBatchTx(ctx context.Context, ids []string) (int, e
 	deletedIDs, err := issueops.ExistingIssueIDsInTableInTx(ctx, tx, "wisps", ids)
 	if err != nil {
 		return 0, fmt.Errorf("resolve existing wisps for batch delete: %w", err)
+	}
+	set := issueops.DeletionSet{WispIDs: deletedIDs, All: deletedIDs}
+	protectedScope, affectedIssues, affectedWisps, err := issueops.ResolvedDeletionScopeInTx(ctx, tx, set)
+	if err != nil {
+		return 0, fmt.Errorf("resolve protected scope for batched wisp delete: %w", err)
+	}
+	if err := issueops.RefuseProtectedDeletionInTx(ctx, tx, protectedScope); err != nil {
+		return 0, err
 	}
 	// Edges are journaled before the rows go, while their source snapshots can
 	// still be read.

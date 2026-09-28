@@ -3,6 +3,7 @@ package issueops
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -115,17 +116,29 @@ func closeOutcomeIsEphemeral(outcome publicops.CloseOutcome) bool {
 // claim, and so does a batch in which nothing landed — landed meaning an item
 // that CHANGED, so a batch whose items were all already closed earns no claim.
 func ExecuteCloseBatch(ctx context.Context, tx *sql.Tx, request publicops.CloseBatchRequest, claimFilter *types.WorkFilter) (publicops.CloseBatchResult, ChangedTables, error) {
+	digest, err := publicops.ProtectedMutationDigest(request)
+	if err != nil {
+		return publicops.CloseBatchResult{}, nil, err
+	}
+	ids := make([]string, 0, len(request.Items))
+	for _, item := range request.Items {
+		ids = append(ids, item.IssueID)
+	}
+	if err := RequireProtectedMutation(ctx, tx, request.ProtectedPermit, "issue.batch_close", ids, digest, ""); err != nil && !errors.Is(err, publicops.ErrProtectedRecord) {
+		return publicops.CloseBatchResult{}, nil, err
+	}
 	result := publicops.CloseBatchResult{Outcomes: make([]publicops.CloseOutcome, len(request.Items))}
 	tables := ChangedTables{}
 	landed := 0
 
 	for i, item := range request.Items {
 		closed, changedTables, err := ExecuteClose(ctx, tx, publicops.CloseRequest{
-			Actor:   request.Actor,
-			IssueID: item.IssueID,
-			Reason:  item.Reason,
-			Session: request.Session,
-			Force:   request.Force,
+			Actor:           request.Actor,
+			ProtectedPermit: request.ProtectedPermit,
+			IssueID:         item.IssueID,
+			Reason:          item.Reason,
+			Session:         request.Session,
+			Force:           request.Force,
 		})
 		if err != nil {
 			result.Outcomes[i] = publicops.CloseOutcome{IssueID: item.IssueID, Err: err}

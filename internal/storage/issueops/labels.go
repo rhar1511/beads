@@ -132,6 +132,9 @@ func getLabelsIntoFromTable(ctx context.Context, tx DBTX, labelTable string, ids
 // transaction. Automatically routes to wisp tables if the ID is an active wisp.
 // Uses INSERT IGNORE for idempotency.
 func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID, label, actor string) (bool, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.label_add", []string{issueID}); err != nil {
+		return false, err
+	}
 	// Reject an over-length label up front. The INSERT IGNORE below would
 	// otherwise silently truncate it to the VARCHAR(255) column, storing a label
 	// the caller never sent; a typed ErrFieldTooLong is the clean rejection.
@@ -180,6 +183,9 @@ func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID,
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func RemoveLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID, label, actor string) (bool, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.label_remove", []string{issueID}); err != nil {
+		return false, err
+	}
 	_, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
 	if err != nil {
 		return false, err

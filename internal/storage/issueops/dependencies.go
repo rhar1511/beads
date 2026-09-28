@@ -198,6 +198,12 @@ func AddDependencyWithRevisionInTx(ctx context.Context, tx *sql.Tx, dep *types.D
 }
 
 func addDependencyInTx(ctx context.Context, tx *sql.Tx, dep *types.Dependency, actor string, opts AddDependencyOpts, recomputeResult *RecomputeIsBlockedResult, result *DependencyWriteResult) (bool, error) {
+	if dep == nil {
+		return false, fmt.Errorf("dependency must not be nil")
+	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "dependency.add", []string{dep.IssueID, dep.DependsOnID}); err != nil {
+		return false, err
+	}
 	// Auto-detect source routing if not provided.
 	sourceTable := opts.SourceTable
 	writeTable := opts.WriteTable
@@ -1165,6 +1171,9 @@ func RemoveDependencyWithRevisionInTx(ctx context.Context, tx *sql.Tx, issueID, 
 }
 
 func removeDependencyInTx(ctx context.Context, tx *sql.Tx, issueID, dependsOnID, actor string, emitEvent bool, recomputeResult *RecomputeIsBlockedResult, result *DependencyWriteResult) (bool, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "dependency.remove", []string{issueID, dependsOnID}); err != nil {
+		return false, err
+	}
 	isWisp := IsActiveWispInTx(ctx, tx, issueID)
 	_, _, eventTable, depTable := WispTableRouting(isWisp)
 

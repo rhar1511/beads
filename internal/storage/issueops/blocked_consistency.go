@@ -281,6 +281,9 @@ func recomputeIsBlockedCounting(ctx context.Context, tx DBTX, issueIDs, wispIDs 
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
 		return 0, nil
 	}
+	if err := RefuseUnpermittedProtectedDerivedMutationInTx(ctx, tx, "issue.derived_recompute", append(append([]string(nil), issueIDs...), wispIDs...)); err != nil {
+		return 0, err
+	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
 		return 0, err

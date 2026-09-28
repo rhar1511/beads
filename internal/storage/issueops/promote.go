@@ -10,6 +10,13 @@ import (
 
 //nolint:gosec // G201: table names are hardcoded constants
 func PromoteFromEphemeralInTx(ctx context.Context, tx DBTX, id string, actor string) error {
+	resourceIDs, err := DependencyEndpointsForIDsInTx(ctx, tx, []string{id})
+	if err != nil {
+		return fmt.Errorf("resolve promote endpoints for %s: %w", id, err)
+	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.promote", resourceIDs); err != nil {
+		return err
+	}
 	if !IsActiveWispInTx(ctx, tx, id) {
 		return fmt.Errorf("wisp %s not found", id)
 	}

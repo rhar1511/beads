@@ -53,6 +53,28 @@ func (o *batchCreator) CreateBatch(ctx context.Context, request publicops.Create
 
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.CreateBatchResult, string, error) {
 		attempt := storageissueops.CloneCreateBatchRequest(snapshot)
+		digest, err := publicops.ProtectedMutationDigest(attempt)
+		if err != nil {
+			return publicops.CreateBatchResult{}, "", err
+		}
+		protectedIDs := make([]string, 0, len(attempt.Items)*2)
+		protectedClassRequested := false
+		for _, item := range attempt.Items {
+			if item.Issue != nil && item.Issue.ID != "" {
+				protectedIDs = append(protectedIDs, item.Issue.ID)
+			}
+			for _, dependency := range item.Dependencies {
+				protectedIDs = append(protectedIDs, dependency.TargetID)
+			}
+			protectedClassRequested = protectedClassRequested || item.ProtectionClass != ""
+		}
+		explicitClass := ""
+		if protectedClassRequested {
+			explicitClass = "batch"
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, attempt.ProtectedPermit, "issue.batch_create", protectedIDs, digest, explicitClass); err != nil {
+			return publicops.CreateBatchResult{}, "", err
+		}
 		createContext, err := uw.ConfigUseCase().LoadCreateContext(ctx)
 		if err != nil {
 			return publicops.CreateBatchResult{}, "", err
@@ -114,6 +136,11 @@ func createBatchItem(ctx context.Context, uw UnitOfWork, request publicops.Creat
 	}
 	if err != nil {
 		return nil, storageissueops.ClassifyPublicCreateError(err)
+	}
+	if item.ProtectionClass != "" {
+		if err := classifyProtectedUOWRecord(ctx, uw, created.Issue.ID, item.ProtectionClass); err != nil {
+			return nil, err
+		}
 	}
 	hydrated, err := hydrateIssueOperation(ctx, uw, created.Issue, false, false)
 	if err != nil {

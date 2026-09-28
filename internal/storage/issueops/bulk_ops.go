@@ -191,13 +191,18 @@ func DeleteIssuesBySourceRepoInTx(ctx context.Context, tx *sql.Tx, sourceRepo st
 	if len(issueIDs) == 0 {
 		return 0, nil
 	}
+	protectedScope, affectedIssues, affectedWisps, err := ResolvedDeletionScopeInTx(ctx, tx, DeletionSet{
+		RegularIDs: issueIDs,
+		All:        issueIDs,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("resolve source-repo deletion scope: %w", err)
+	}
+	if err := RefuseProtectedDeletionInTx(ctx, tx, protectedScope); err != nil {
+		return 0, err
+	}
 	if err := BumpDependencySourceRevisionsForTargetsInTx(ctx, tx, issueIDs); err != nil {
 		return 0, fmt.Errorf("bump dependency sources before source-repo delete: %w", err)
-	}
-
-	affectedIssues, affectedWisps, aerr := AffectedByDeletionInTx(ctx, tx, issueIDs, nil)
-	if aerr != nil {
-		return 0, fmt.Errorf("affected by source-repo delete: %w", aerr)
 	}
 
 	// Deleted issues hold no leases: clear them while the id set is still
@@ -243,6 +248,14 @@ func DeleteIssuesBySourceRepoInTx(ctx context.Context, tx *sql.Tx, sourceRepo st
 
 //nolint:gosec // G201: table names are hardcoded
 func UpdateIssueIDInTx(ctx context.Context, tx *sql.Tx, oldID, newID string, issue *types.Issue, actor string) error {
+	resourceIDs, err := DependencyEndpointsForIDsInTx(ctx, tx, []string{oldID})
+	if err != nil {
+		return fmt.Errorf("resolve rename endpoints %s -> %s: %w", oldID, newID, err)
+	}
+	resourceIDs = append(resourceIDs, newID)
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.rename", resourceIDs); err != nil {
+		return err
+	}
 	// Capture the edges under the OLD id before the rename rewrites them; they
 	// are what the journal replays as a remove/re-add pair around the identity
 	// change.

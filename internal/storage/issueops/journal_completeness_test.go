@@ -171,6 +171,7 @@ var beadDMLExemptions = map[string]string{
 	"RetargetInboundDependenciesToIssueInTx":                "rewrites dep rows during promote; PromoteFromEphemeralInTx journals it",
 	"DeleteWispFromDependenciesInTx":                        "cleans up dep rows during a delete that journals the delete",
 	"DeleteWispsFromDependenciesInTx":                       "cleans up dep rows during a delete that journals the delete",
+	"DeleteWispAuxiliaryRowsInTx":                           "constituent wisp cleanup; the calling delete entry point journals the delete",
 	"TouchRowVersionInTx":                                   "constituent aggregate-token write; the calling label/comment/dependency entry point journals the mutation",
 	"BumpIssueRevisionInTx":                                 "constituent aggregate-token invalidation; the calling graph or label mutation journals the resulting issue snapshot",
 	"BumpDependencySourceRevisionsForIDsInTx":               "constituent dependency-source invalidation; the calling graph mutation journals the affected sources",

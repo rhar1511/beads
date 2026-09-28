@@ -38,6 +38,10 @@ func (r *revisionTransition) TransitionMetadata(ctx context.Context, req issueop
 	if err != nil {
 		return issueops.RevisionTransitionResult{}, err
 	}
+	digest, err := issueops.ProtectedMutationDigest(req)
+	if err != nil {
+		return issueops.RevisionTransitionResult{}, err
+	}
 	var preflight issueops.RevisionTransitionResult
 	var preflightDone bool
 	if err := r.store.withReadTx(ctx, func(tx *sql.Tx) error {
@@ -53,12 +57,18 @@ func (r *revisionTransition) TransitionMetadata(ctx context.Context, req issueop
 	for attempt := 0; attempt < 3; attempt++ {
 		var result issueops.RevisionTransitionResult
 		err := r.store.withRetryTx(ctx, func(tx *sql.Tx) error {
+			if err := storeops.RequireProtectedMutation(ctx, tx, req.ProtectedPermit, "issue.revision_transition", []string{plan.IssueID}, digest, ""); err != nil {
+				return err
+			}
 			transition, write, err := storeops.TransitionMetadataInTx(ctx, tx, plan)
 			if err != nil {
 				return err
 			}
 			result = transition
 			if !write.Wrote {
+				if storeops.ProtectedMutationPermitUseWritten(ctx) {
+					return r.store.doltAddAndCommitInTx(ctx, tx, []string{"protected_mutation_permit_uses"}, "bd: protected mutation permit use")
+				}
 				return nil
 			}
 			return r.store.doltAddAndCommitInTx(ctx, tx,

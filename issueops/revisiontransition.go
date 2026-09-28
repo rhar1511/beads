@@ -9,6 +9,7 @@ import (
 // must be fenced by the issue's exact opaque row revision. ReceiptID is
 // caller-generated and must remain stable across retries of the same request.
 type RevisionTransitionRequest struct {
+	ProtectedPermit ProtectedMutationPermit
 	ReceiptID       string
 	IssueID         string
 	Scope           string

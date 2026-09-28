@@ -64,6 +64,9 @@ func CloseIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, reason,
 // is_blocked recomputation; exact no-ops remain stable (see the freshRowLock
 // invariant in lease.go).
 func CloseIssueCheckedInTx(ctx context.Context, tx DBTX, id, reason, actor, session string, force bool, expectedVersion *int64) (*CloseResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.close", []string{id}); err != nil {
+		return nil, err
+	}
 	if expectedVersion != nil {
 		if err := CheckVersionInTx(ctx, tx, id, *expectedVersion); err != nil {
 			return nil, err
@@ -315,6 +318,9 @@ func isClosedInTx(ctx context.Context, tx DBTX, id string) (closed bool, targetC
 
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func closeIssueInTx(ctx context.Context, tx DBTX, id string, reason, actor, session string, recordEvent bool) (*CloseResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.close", []string{id}); err != nil {
+		return nil, err
+	}
 	isWisp := IsActiveWispInTx(ctx, tx, id)
 	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
 

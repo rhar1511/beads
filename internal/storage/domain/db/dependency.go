@@ -79,6 +79,9 @@ func (r *dependencySQLRepositoryImpl) Insert(ctx context.Context, dep *types.Dep
 	if dep.DependsOnID == "" {
 		return errors.New("db: DependencySQLRepository.Insert: DependsOnID must not be empty")
 	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "dependency.add", []string{dep.IssueID, dep.DependsOnID}); err != nil {
+		return err
+	}
 	if dep.IssueID == dep.DependsOnID {
 		// Lead with the sentinel so this defensive repo-layer guard renders like
 		// every other self-dep site ("cannot add self-dependency: X cannot depend
@@ -357,6 +360,9 @@ func (r *dependencySQLRepositoryImpl) markDirectBlockedSource(ctx context.Contex
 func (r *dependencySQLRepositoryImpl) Delete(ctx context.Context, issueID, dependsOnID, actor string, opts domain.DepInsertOpts) (domain.DepDeleteResult, error) {
 	if issueID == "" || dependsOnID == "" {
 		return domain.DepDeleteResult{}, errors.New("db: DependencySQLRepository.Delete: issueID and dependsOnID must not be empty")
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "dependency.remove", []string{issueID, dependsOnID}); err != nil {
+		return domain.DepDeleteResult{}, err
 	}
 	table := pickDepTable(opts.UseWispsTable)
 

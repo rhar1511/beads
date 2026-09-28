@@ -50,6 +50,12 @@ func (t *doltTransaction) txFor(table string) *sql.Tx {
 	return t.regularTx
 }
 
+func (t *doltTransaction) refuseProtectedMutation(ctx context.Context, operation string, ids []string) error {
+	// Classifications live in the regular transaction even when the mutation
+	// itself routes to the separately pinned ignored-table session.
+	return issueops.RefuseUnpermittedProtectedMutationInTx(ctx, t.regularTx, operation, ids)
+}
+
 // isActiveWisp checks if an ID exists in the wisps table within the transaction.
 // Unlike the store-level isActiveWisp, this queries within the transaction so it
 // sees uncommitted wisps. Handles both -wisp- pattern and explicit-ID ephemerals (GH#2053).
@@ -195,6 +201,7 @@ func (s *DoltStore) runDoltTransaction(ctx context.Context, commitMsg string, fn
 	if err != nil {
 		return fmt.Errorf("failed to begin regular tx: %w", err)
 	}
+	issueops.ResetProtectedMutationAttempt(ctx)
 
 	// The journal counter and rows must commit in the SAME SQL transaction as
 	// every mutation they describe. bd_events_journal and bd_events_seq are
@@ -427,6 +434,9 @@ func (t *doltTransaction) CreateIssue(ctx context.Context, issue *types.Issue, a
 	if issue == nil {
 		return fmt.Errorf("issue must not be nil")
 	}
+	if err := t.refuseProtectedMutation(ctx, "issue.create", issueops.CreateMutationResourceIDs([]*types.Issue{issue})); err != nil {
+		return err
+	}
 
 	// Build the validation context on regularTx for both tiers: wisp rows
 	// live on the ignored session, but the validation context (config,
@@ -458,6 +468,9 @@ func (t *doltTransaction) CreateIssue(ctx context.Context, issue *types.Issue, a
 func (t *doltTransaction) CreateIssues(ctx context.Context, issues []*types.Issue, actor string) error {
 	if len(issues) == 0 {
 		return nil
+	}
+	if err := t.refuseProtectedMutation(ctx, "issue.create", issueops.CreateMutationResourceIDs(issues)); err != nil {
+		return err
 	}
 
 	// This must run before splitting regular issues from wisps: the shared
@@ -729,6 +742,9 @@ func (t *doltTransaction) hydrateSearchDependencies(ctx context.Context, depTabl
 // copies the historical event stream and appends one demotion event of its
 // own; a generic update is not that case.
 func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.update", []string{id}); err != nil {
+		return err
+	}
 	table := "issues"
 	if t.isActiveWisp(ctx, id) {
 		table = "wisps"
@@ -758,6 +774,9 @@ func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates ma
 }
 
 func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason string, actor string, session string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.close", []string{id}); err != nil {
+		return err
+	}
 	table := "issues"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, id) {
@@ -783,6 +802,9 @@ func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason stri
 // ReopenIssueWithResult reopens an issue within this transaction and reports
 // whether the lifecycle state changed.
 func (t *doltTransaction) ReopenIssueWithResult(ctx context.Context, id string, reason string, actor string) (bool, error) {
+	if err := t.refuseProtectedMutation(ctx, "issue.reopen", []string{id}); err != nil {
+		return false, err
+	}
 	table, eventTable := "issues", "events"
 	if t.isActiveWisp(ctx, id) {
 		table, eventTable = "wisps", "wisp_events"
@@ -832,6 +854,12 @@ func (t *doltTransaction) AddDependency(ctx context.Context, dep *types.Dependen
 }
 
 func (t *doltTransaction) AddDependencyWithOptions(ctx context.Context, dep *types.Dependency, actor string, addOpts storage.DependencyAddOptions) error {
+	if dep == nil {
+		return fmt.Errorf("dependency must not be nil")
+	}
+	if err := t.refuseProtectedMutation(ctx, "dependency.add", []string{dep.IssueID, dep.DependsOnID}); err != nil {
+		return err
+	}
 	table := "dependencies"
 	sourceTable := "issues"
 	eventTable := "events"
@@ -1065,6 +1093,9 @@ func (t *doltTransaction) RemoveDependency(ctx context.Context, issueID, depends
 }
 
 func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issueID, dependsOnID string, actor string, rmOpts storage.DependencyRemoveOptions) error {
+	if err := t.refuseProtectedMutation(ctx, "dependency.remove", []string{issueID, dependsOnID}); err != nil {
+		return err
+	}
 	table := "dependencies"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, issueID) {
@@ -1094,6 +1125,9 @@ func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issue
 
 // AddLabel adds a label within the transaction
 func (t *doltTransaction) AddLabel(ctx context.Context, issueID, label, actor string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.label_add", []string{issueID}); err != nil {
+		return err
+	}
 	table := "labels"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, issueID) {
@@ -1140,6 +1174,9 @@ func (t *doltTransaction) GetLabels(ctx context.Context, issueID string) ([]stri
 
 // RemoveLabel removes a label within the transaction
 func (t *doltTransaction) RemoveLabel(ctx context.Context, issueID, label, actor string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.label_remove", []string{issueID}); err != nil {
+		return err
+	}
 	table := "labels"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, issueID) {
@@ -1240,6 +1277,9 @@ func (t *doltTransaction) GetLocalMetadata(ctx context.Context, key string) (str
 }
 
 func (t *doltTransaction) ImportIssueComment(ctx context.Context, issueID, author, text string, createdAt time.Time) (*types.Comment, error) {
+	if err := t.refuseProtectedMutation(ctx, "issue.comment", []string{issueID}); err != nil {
+		return nil, err
+	}
 	_, err := t.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, err
@@ -1316,6 +1356,9 @@ func (t *doltTransaction) GetIssueComments(ctx context.Context, issueID string) 
 
 // AddComment adds a comment within the transaction
 func (t *doltTransaction) AddComment(ctx context.Context, issueID, actor, comment string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.comment", []string{issueID}); err != nil {
+		return err
+	}
 	table := "events"
 	if t.isActiveWisp(ctx, issueID) {
 		table = "wisp_events"

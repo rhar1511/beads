@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage"
@@ -95,9 +96,26 @@ func (o *issueOperations) Create(ctx context.Context, request publicops.CreateRe
 		if attempt.Issue != nil && !attempt.Issue.Ephemeral && !attempt.Issue.NoHistory && attempt.Issue.WispType != "" {
 			attempt.Issue.Ephemeral = true
 		}
+		if attempt.ProtectionClass != "" && (attempt.Issue.ID == "" || strings.TrimSpace(attempt.Issue.ID) != attempt.Issue.ID) {
+			return publicops.CreateResult{}, "", fmt.Errorf("%w: protected creation requires an explicit issue ID", storage.ErrValidation)
+		}
 		params, useWisp, err := createParams(attempt)
 		if err != nil {
 			return publicops.CreateResult{}, "", validationError(err)
+		}
+		digest, err := publicops.ProtectedMutationDigest(attempt)
+		if err != nil {
+			return publicops.CreateResult{}, "", err
+		}
+		protectedIDs := []string{params.ExplicitID, params.ParentID}
+		for _, dependency := range params.Dependencies {
+			protectedIDs = append(protectedIDs, dependency.TargetID)
+		}
+		if params.WaitsFor != nil {
+			protectedIDs = append(protectedIDs, params.WaitsFor.SpawnerID)
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, attempt.ProtectedPermit, "issue.create", protectedIDs, digest, attempt.ProtectionClass); err != nil {
+			return publicops.CreateResult{}, "", err
 		}
 		var created domain.CreateIssueResult
 		if useWisp {
@@ -107,6 +125,11 @@ func (o *issueOperations) Create(ctx context.Context, request publicops.CreateRe
 		}
 		if err != nil {
 			return publicops.CreateResult{}, "", storageissueops.ClassifyPublicCreateError(err)
+		}
+		if attempt.ProtectionClass != "" {
+			if err := classifyProtectedUOWRecord(ctx, uw, created.Issue.ID, attempt.ProtectionClass); err != nil {
+				return publicops.CreateResult{}, "", err
+			}
 		}
 		issue, err := hydrateIssueOperation(ctx, uw, created.Issue, true, false)
 		if err != nil {
@@ -211,6 +234,10 @@ func (o *issueOperations) Update(ctx context.Context, request publicops.UpdateRe
 	}
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.UpdateResult, string, error) {
 		attempt := storageissueops.CloneUpdateRequest(snapshot)
+		digest, err := publicops.ProtectedMutationDigest(attempt)
+		if err != nil {
+			return publicops.UpdateResult{}, "", err
+		}
 		spec, err := updateSpec(attempt)
 		if err != nil {
 			return publicops.UpdateResult{}, "", validationError(err)
@@ -221,6 +248,18 @@ func (o *issueOperations) Update(ctx context.Context, request publicops.UpdateRe
 		}
 		before, err = hydrateIssueOperation(ctx, uw, before, false, attempt.IssuePlaneOnly)
 		if err != nil {
+			return publicops.UpdateResult{}, "", err
+		}
+		protectedIDs := []string{attempt.IssueID}
+		if attempt.Patch.ParentID.Set {
+			for _, edge := range before.Dependencies {
+				if edge != nil && edge.Type == types.DepParentChild {
+					protectedIDs = append(protectedIDs, edge.DependsOnID)
+				}
+			}
+			protectedIDs = append(protectedIDs, attempt.Patch.ParentID.Value)
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, attempt.ProtectedPermit, "issue.update", protectedIDs, digest, ""); err != nil {
 			return publicops.UpdateResult{}, "", err
 		}
 		// The assignee fence belongs here, over the same-transaction row the
@@ -398,6 +437,13 @@ func (o *issueOperations) Close(ctx context.Context, request publicops.CloseRequ
 	}
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.CloseResult, string, error) {
 		attempt := storageissueops.CloneCloseRequest(snapshot)
+		digest, err := publicops.ProtectedMutationDigest(attempt)
+		if err != nil {
+			return publicops.CloseResult{}, "", err
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, attempt.ProtectedPermit, "issue.close", []string{attempt.IssueID}, digest, ""); err != nil {
+			return publicops.CloseResult{}, "", err
+		}
 		issue, useWisp, err := operationIssue(ctx, uw, attempt.IssueID, false)
 		if err != nil {
 			return publicops.CloseResult{}, "", err
@@ -440,6 +486,13 @@ func (o *issueOperations) Reopen(ctx context.Context, request publicops.ReopenRe
 	}
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.ReopenResult, string, error) {
 		attempt := storageissueops.CloneReopenRequest(snapshot)
+		digest, err := publicops.ProtectedMutationDigest(attempt)
+		if err != nil {
+			return publicops.ReopenResult{}, "", err
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, attempt.ProtectedPermit, "issue.reopen", []string{attempt.IssueID}, digest, ""); err != nil {
+			return publicops.ReopenResult{}, "", err
+		}
 		issue, useWisp, err := operationIssue(ctx, uw, attempt.IssueID, false)
 		if err != nil {
 			return publicops.ReopenResult{}, "", err

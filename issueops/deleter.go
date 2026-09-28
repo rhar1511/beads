@@ -19,6 +19,9 @@ import (
 // Implementations never mutate caller-owned request values: IDs is read, never
 // written through, and never sorted in place.
 type DeleteRequest struct {
+	// ProtectedPermit authorizes deletion only when it covers every explicitly
+	// classified id in the transaction-resolved final deletion set.
+	ProtectedPermit ProtectedMutationPermit
 	// Actor attributes the deletion wherever the backend records attribution.
 	// It is not an authorization boundary, and an empty Actor is accepted for
 	// the reason SweepRequest.Actor is: the deletion of a row leaves no row to

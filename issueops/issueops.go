@@ -187,6 +187,13 @@ type WaitsFor struct {
 // CreateRequest describes one atomic issue creation.
 type CreateRequest struct {
 	Actor string
+	// ProtectedPermit authorizes a protected create or a link to a protected
+	// endpoint. The backend verifies it against the complete scoped request in
+	// the write transaction; Actor is attribution only.
+	ProtectedPermit ProtectedMutationPermit
+	// ProtectionClass explicitly classifies the new record as protected source
+	// state. It is storage-managed and never inferred from issue content.
+	ProtectionClass string
 	// Issue is included in the request's single deep snapshot at method entry;
 	// every transaction attempt clones that same entry snapshot. Create accepts
 	// its ID, content, workflow, assignment, timestamps, scheduling,
@@ -229,7 +236,10 @@ type CreateRequest struct {
 // UpdateRequest describes an issue update.
 type UpdateRequest struct {
 	Actor, IssueID string
-	Patch          IssuePatch
+	// ProtectedPermit authorizes this exact mutation when the target or a link
+	// endpoint is explicitly classified.
+	ProtectedPermit ProtectedMutationPermit
+	Patch           IssuePatch
 	// Claim atomically claims the issue for Actor. It first sets Assignee to
 	// Actor and Status to StatusInProgress, then applies Patch; a set
 	// Patch.Assignee or Patch.Status overrides the corresponding claim value.
@@ -324,8 +334,9 @@ type UpdateRequest struct {
 
 // CloseRequest describes an issue closure.
 type CloseRequest struct {
-	Actor   string
-	IssueID string
+	Actor           string
+	IssueID         string
+	ProtectedPermit ProtectedMutationPermit
 	// Reason records why the issue was closed. It is stored on the issue and
 	// read back on CloseResult.Issue.CloseReason, alongside the ClosedAt the
 	// same close stamps.
@@ -360,8 +371,9 @@ type CloseRequest struct {
 
 // ReopenRequest describes an issue reopening.
 type ReopenRequest struct {
-	Actor   string
-	IssueID string
+	Actor           string
+	IssueID         string
+	ProtectedPermit ProtectedMutationPermit
 	// Reason records why literal closed and configured done statuses move to
 	// open. Non-done statuses are unchanged.
 	//

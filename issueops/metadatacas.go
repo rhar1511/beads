@@ -22,7 +22,8 @@ type CompareAndSetKeyRequest struct {
 	// coordination write between racing callers, and the one question asked of
 	// its history entry afterwards is which of them won. It is not an
 	// authorization boundary: nothing here checks who the caller is.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
 	// IssueID is the exact canonical id and must not be empty. The
 	// issue-to-wisp fallback happens INSIDE, exactly as it does for Reader.Get,
 	// so a caller never has to know which plane the key lives on. There is no

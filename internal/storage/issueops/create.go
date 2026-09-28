@@ -110,6 +110,9 @@ func mergeChangedTables(dst map[string]bool, src map[string]bool) map[string]boo
 
 func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, issue *types.Issue, actor string) (CreateIssueResult, error) {
 	var result CreateIssueResult
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.create", CreateMutationResourceIDs([]*types.Issue{issue})); err != nil {
+		return result, err
+	}
 	if err := PrepareIssueForInsert(issue, bc.CustomStatuses, bc.CustomTypes); err != nil {
 		return result, err
 	}
@@ -289,6 +292,9 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 		return CreateIssuesResult{}, err
 	}
 	issues = filteredIssues
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.create", CreateMutationResourceIDs(issues)); err != nil {
+		return CreateIssuesResult{}, err
+	}
 
 	// This function already runs a slice-wide ReconcileChildCounters below,
 	// covering every accepted issue; skip the redundant per-issue reconcile.
@@ -355,6 +361,20 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 		}
 	}
 	return result, nil
+}
+
+func CreateMutationResourceIDs(issues []*types.Issue) []string {
+	var ids []string
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		ids = append(ids, issue.ID)
+		for _, dependency := range issue.Dependencies {
+			ids = append(ids, dependency.IssueID, dependency.DependsOnID)
+		}
+	}
+	return ids
 }
 
 // CreateIssueDirtyTables returns the regular Dolt tables CreateIssueInTx may

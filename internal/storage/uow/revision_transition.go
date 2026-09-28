@@ -55,6 +55,10 @@ func (r *revisionTransition) TransitionMetadata(ctx context.Context, req publico
 	if err != nil {
 		return publicops.RevisionTransitionResult{}, err
 	}
+	digest, err := publicops.ProtectedMutationDigest(req)
+	if err != nil {
+		return publicops.RevisionTransitionResult{}, err
+	}
 	var preflight publicops.RevisionTransitionResult
 	var preflightDone bool
 	_, err = RunTxRead(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (struct{}, error) {
@@ -83,6 +87,9 @@ func (r *revisionTransition) TransitionMetadata(ctx context.Context, req publico
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		result, err := RunTxResult(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (publicops.RevisionTransitionResult, string, error) {
+			if err := requireProtectedUOWMutation(ctx, uw, req.ProtectedPermit, "issue.revision_transition", []string{plan.IssueID}, digest, ""); err != nil {
+				return publicops.RevisionTransitionResult{}, "", err
+			}
 			transition, wrote, err := uw.IssueUseCase().TransitionMetadata(ctx, plan)
 			if err != nil || !wrote {
 				return transition, "", err
