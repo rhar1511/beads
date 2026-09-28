@@ -197,6 +197,53 @@ func TestCanonicalSigningBytesAreStableAndStrictJSONRejectsDuplicateMembers(t *t
 	}
 }
 
+func TestVerifierAcceptsPinnedControllerBatchPermit(t *testing.T) {
+	permitPrivate := ed25519.NewKeyFromSeed([]byte("0123456789abcdef0123456789abcdef"))
+	revocationPrivate := ed25519.NewKeyFromSeed([]byte("abcdef0123456789abcdef0123456789"))
+	now := time.Date(2026, 1, 2, 3, 4, 30, 0, time.UTC)
+	bundle := Bundle{
+		Generation: 1,
+		Keys: []TrustedKey{
+			{KeyID: "key-a", Issuer: "issuer-a", Purpose: PermitKeyPurpose, PublicKey: base64.StdEncoding.EncodeToString(permitPrivate.Public().(ed25519.PublicKey))},
+			{KeyID: "revocation-key", Issuer: "issuer-a", Purpose: RevocationKeyPurpose, PublicKey: base64.StdEncoding.EncodeToString(revocationPrivate.Public().(ed25519.PublicKey))},
+		},
+		Revocations: signRevocations(t, revocationPrivate, Revocations{
+			SchemaVersion: RevocationsSchemaVersionV1, Purpose: RevocationKeyPurpose,
+			KeyID: "revocation-key", Issuer: "issuer-a", Audience: "audience-a",
+			ProjectID: "project-a", Database: "beads_fixture", Generation: 1,
+			IssuedAt:  now.Add(-time.Minute).Format(time.RFC3339Nano),
+			ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano), RevokedReplayIDs: []string{},
+		}),
+	}
+	verifier, err := NewVerifier(memoryAuthoritySource{bundle: bundle}, Options{
+		Audience: "audience-a", ProjectID: "project-a", Database: "beads_fixture", Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	const token = "eyJzY2hlbWFfdmVyc2lvbiI6ImJlYWRzLnByb3RlY3RlZC1tdXRhdGlvbi1wZXJtaXQudjEiLCJwdXJwb3NlIjoicHJvdGVjdGVkX211dGF0aW9uX3Blcm1pdCIsImtleV9pZCI6ImtleS1hIiwiaXNzdWVyIjoiaXNzdWVyLWEiLCJhdWRpZW5jZSI6ImF1ZGllbmNlLWEiLCJwcm9qZWN0X2lkIjoicHJvamVjdC1hIiwiZGF0YWJhc2UiOiJiZWFkc19maXh0dXJlIiwib3BlcmF0aW9uIjoiaXNzdWUuYmF0Y2hfYXBwbHkiLCJyZXNvdXJjZV9pZHMiOlsiYmQtbWFwIiwiYmQtcHJlcmVxdWlzaXRlIiwiYmQtcHJvdGVjdGVkLTEiXSwicmVxdWVzdF9kaWdlc3QiOiIxYTE3OTAxZWE0YWI3MWE5Yzg4YWQ2OTgxZDkwNGFkODQ4NjBhM2U5ZjhjMGQwYTAwZGJhZWU4MTRmZDg4NTE0IiwicmVwbGF5X2lkIjoicmVwbGF5LWlkZW50aWZpZXItMDAwMSIsImlzc3VlZF9hdCI6IjIwMjYtMDEtMDJUMDM6MDQ6MDVaIiwiZXhwaXJlc19hdCI6IjIwMjYtMDEtMDJUMDM6MDU6MDVaIn0.aw2BYvQ8hUnbIrYjMOC4I2Si7hLNybejNdTbmDtBuU07qK8n80ZbwLZcCUPEwMDZtmlUyzhgfk-W8K1vpcgNBQ"
+	verification, err := verifier.Verify(context.Background(), token, issueops.ProtectedMutationScope{
+		Audience: "audience-a", ProjectID: "project-a", Database: "beads_fixture", Operation: "issue.batch_apply",
+		ResourceIDs: []string{"bd-protected-1", "bd-map", "bd-prerequisite"},
+		Digest:      "1a17901ea4ab71a9c88ad6981d904ad84860a3e9f8c0d0a00dbaee814fd88514",
+	})
+	if err != nil {
+		t.Fatalf("Verify pinned controller permit: %v", err)
+	}
+	if verification.ReplayID != "replay-identifier-0001" {
+		t.Fatalf("ReplayID = %q, want pinned controller replay identity", verification.ReplayID)
+	}
+}
+
+func TestVerifierRejectsAudienceBeyondPersistedLimit(t *testing.T) {
+	audience := strings.Repeat("a", maxAudienceBytes+1)
+	if _, err := NewVerifier(memoryAuthoritySource{}, Options{
+		Audience: audience, ProjectID: "project-a", Database: "database-a",
+	}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("NewVerifier overlong audience error = %v, want %v", err, ErrUnavailable)
+	}
+}
+
 type authorityFixture struct {
 	bundle            Bundle
 	token             string

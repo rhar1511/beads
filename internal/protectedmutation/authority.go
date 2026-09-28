@@ -35,6 +35,7 @@ const (
 	maxPermitTokenBytes   = 64 << 10
 	maxRevocationBytes    = 4 << 20
 	maxTrustedKeys        = 64
+	maxAudienceBytes      = 255
 	maxResourceIDs        = 256
 	maxRevokedReplayIDs   = 65536
 	maxPermitAge          = 5 * time.Minute
@@ -150,7 +151,7 @@ var _ issueops.ProtectedMutationVerifier = (*Verifier)(nil)
 // NewVerifier validates the independent audience and project/database
 // bindings. There is no default or inferred authority.
 func NewVerifier(source Source, options Options) (*Verifier, error) {
-	if source == nil || !validAtom(options.Audience, 256) || !validAtom(options.ProjectID, 255) || !validAtom(options.Database, 255) {
+	if source == nil || !validAtom(options.Audience, maxAudienceBytes) || !validAtom(options.ProjectID, 255) || !validAtom(options.Database, 255) {
 		return nil, ErrUnavailable
 	}
 	if options.Now == nil {
@@ -376,7 +377,7 @@ type expectation struct {
 }
 
 func validateExpectation(scope issueops.ProtectedMutationScope, options Options) (expectation, error) {
-	if !validAtom(scope.Audience, 256) || !validAtom(scope.ProjectID, 255) || !validAtom(scope.Database, 255) ||
+	if !validAtom(scope.Audience, maxAudienceBytes) || !validAtom(scope.ProjectID, 255) || !validAtom(scope.Database, 255) ||
 		!validAtom(scope.Operation, 200) || !validSHA256(scope.Digest) {
 		return expectation{}, ErrMalformed
 	}
@@ -433,7 +434,7 @@ func canonicalClaims(claims Claims) ([]byte, error) {
 	if claims.Purpose != PermitKeyPurpose {
 		return nil, ErrPurpose
 	}
-	if !validAtom(claims.KeyID, 200) || !validAtom(claims.Issuer, 256) || !validAtom(claims.Audience, 256) ||
+	if !validAtom(claims.KeyID, 200) || !validAtom(claims.Issuer, 256) || !validAtom(claims.Audience, maxAudienceBytes) ||
 		!validAtom(claims.ProjectID, 255) || !validAtom(claims.Database, 255) || !validAtom(claims.Operation, 200) ||
 		!validSHA256(claims.RequestDigest) || !validReplayID(claims.ReplayID) {
 		return nil, ErrMalformed
@@ -463,7 +464,7 @@ func canonicalRevocations(list Revocations) ([]byte, error) {
 	if list.Purpose != RevocationKeyPurpose {
 		return nil, ErrPurpose
 	}
-	if !validAtom(list.KeyID, 200) || !validAtom(list.Issuer, 256) || !validAtom(list.Audience, 256) ||
+	if !validAtom(list.KeyID, 200) || !validAtom(list.Issuer, 256) || !validAtom(list.Audience, maxAudienceBytes) ||
 		!validAtom(list.ProjectID, 255) || !validAtom(list.Database, 255) || list.Generation == 0 {
 		return nil, ErrMalformed
 	}

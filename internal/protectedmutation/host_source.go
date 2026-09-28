@@ -34,11 +34,11 @@ type HostAuthorityConfig struct {
 // must come from trusted server startup configuration, never request or repo
 // data.
 type FileHostAuthoritySource struct {
-	directory string
+	directory  string
 	configName string
-	root      *os.Root
-	rootInfo  os.FileInfo
-	config    HostAuthorityConfig
+	root       *os.Root
+	rootInfo   os.FileInfo
+	config     HostAuthorityConfig
 }
 
 var _ Source = FileHostAuthoritySource{}
@@ -143,7 +143,7 @@ func (s FileHostAuthoritySource) verifyRootIdentity() error {
 }
 
 func validateHostAuthorityConfig(config HostAuthorityConfig, configName string) error {
-	if config.SchemaVersion != HostAuthoritySchemaV1 || !validAtom(config.Audience, 256) ||
+	if config.SchemaVersion != HostAuthoritySchemaV1 || !validAtom(config.Audience, maxAudienceBytes) ||
 		!validAtom(config.ProjectID, 255) || !validAtom(config.Database, 255) ||
 		!validHostFileName(config.KeyringFile) || !validHostFileName(config.RevocationsFile) ||
 		config.KeyringFile == config.RevocationsFile || config.KeyringFile == configName || config.RevocationsFile == configName {
