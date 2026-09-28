@@ -166,3 +166,60 @@ func TestProtectedCreateAndLinkDigestGolden(t *testing.T) {
 		t.Fatalf("Beads protected batch golden changed:\nbytes=%s\ndigest=%s", encoded, digest)
 	}
 }
+
+func TestProtectedFrontierRecordDigestsMatchControllerGoldens(t *testing.T) {
+	create := ApplyItem{
+		Kind: ItemCreate,
+		Create: &CreateItem{
+			Issue: &Issue{
+				ID:          "bd-frontier-map-1",
+				Title:       "Decision map for wrk-1",
+				Description: `{"schema_version":1,"kind":"decision-frontier/map/v1"}`,
+				IssueType:   "gate",
+				Metadata:    json.RawMessage(`{"gc.decision_frontier.record":"decision-frontier/map/v1","gc.decision_frontier.state":"pending"}`),
+				Labels:      []string{"decision-frontier"},
+			},
+			ProtectionClass: "source-decision",
+		},
+	}
+	linked := []ApplyItem{
+		create,
+		{
+			Kind: ItemDepAdd,
+			DepAdd: &DepAddItem{
+				Source: Ref{ID: "bd-frontier-map-1"},
+				Target: Ref{ID: "bd-question-1"},
+				Type:   "relates-to",
+			},
+		},
+		{
+			Kind: ItemDepAdd,
+			DepAdd: &DepAddItem{
+				Source: Ref{ID: "bd-prerequisite"},
+				Target: Ref{ID: "bd-frontier-map-1"},
+				Type:   "blocks",
+			},
+		},
+	}
+	for _, test := range []struct {
+		name   string
+		items  []ApplyItem
+		digest string
+	}{
+		{name: "create only", items: []ApplyItem{create}, digest: "f9bdd7a3fd99c83991c5288e92bb09da9b71ecc222809ac9faaded09ad796c85"},
+		{name: "create with ordered links", items: linked, digest: "f05bb472b3b4f5a797586c3d6df1a2afec9e6a8f065f03e48f42b3d966bbf568"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ApplyBatchRequestDigest(ApplyBatchRequest{
+				Actor: "controller-a", ProtectedPermit: "excluded-permit",
+				ReceiptID: "excluded-receipt", Items: test.items,
+			})
+			if err != nil {
+				t.Fatalf("ApplyBatchRequestDigest: %v", err)
+			}
+			if got != test.digest {
+				t.Fatalf("frontier record digest = %q, want controller golden %q", got, test.digest)
+			}
+		})
+	}
+}
