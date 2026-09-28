@@ -1,10 +1,13 @@
 package telemetry
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/schema"
 )
 
 // fakeDoltStore is a stub DoltStorage used to assert wrapper identity and
@@ -62,5 +65,23 @@ func TestWrapStorage_PeelsViaUnwrapStore(t *testing.T) {
 	got := storage.UnwrapStore(wrapped)
 	if got.(*fakeDoltStore) != raw {
 		t.Errorf("UnwrapStore did not peel InstrumentedStorage; got %T want %T", got, raw)
+	}
+}
+
+type protectedReadinessDoltStore struct {
+	storage.DoltStorage
+	err error
+}
+
+func (s *protectedReadinessDoltStore) ProtectedMutationReadiness(context.Context) (schema.ProtectedMutationReadiness, error) {
+	return schema.ProtectedMutationReadiness{}, s.err
+}
+
+func TestInstrumentedStorageForwardsProtectedMutationReadiness(t *testing.T) {
+	want := errors.New("readiness probe failed")
+	wrapped := &InstrumentedStorage{inner: &protectedReadinessDoltStore{err: want}}
+	_, err := wrapped.ProtectedMutationReadiness(context.Background())
+	if !errors.Is(err, want) {
+		t.Fatalf("ProtectedMutationReadiness() error = %v, want %v", err, want)
 	}
 }

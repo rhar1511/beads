@@ -121,7 +121,7 @@ func TestUOWProtectedBatchCreateLinkPermitAndReplay(t *testing.T) {
 	wrong := createLinkRequest("pbatch-wrong", "wrong", "wrong-permit", "source")
 	wrongCtx := issueops.WithProtectedMutationVerifier(ctx,
 		assertScope(wrong, []string{sourceID, "pbatch-wrong"}, "pbatch-wrong-replay", errors.New("signature mismatch")),
-		"test-audience")
+		"test-audience", "test-project", "test-database")
 	if _, err := applier.ApplyBatch(wrongCtx, wrong); !errors.Is(err, publicops.ErrProtectedRecord) {
 		t.Fatalf("wrong permit error = %v, want ErrProtectedRecord", err)
 	}
@@ -140,7 +140,7 @@ func TestUOWProtectedBatchCreateLinkPermitAndReplay(t *testing.T) {
 
 	request := createLinkRequest("pbatch-protected", "protected", "valid-permit", "source")
 	verifier := assertScope(request, []string{"pbatch-protected", sourceID}, "pbatch-protected-replay", nil)
-	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
 	if _, err := applier.ApplyBatch(protectedCtx, request); err != nil {
 		t.Fatalf("protected create and link: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestUOWProtectedBatchCreateLinkPermitAndReplay(t *testing.T) {
 	})
 	rollbackCtx := issueops.WithProtectedMutationVerifier(ctx,
 		assertScope(rollback, []string{"pbatch-missing-close", "pbatch-rollback", sourceID}, "pbatch-rollback-replay", nil),
-		"test-audience")
+		"test-audience", "test-project", "test-database")
 	if _, err := applier.ApplyBatch(rollbackCtx, rollback); err == nil {
 		t.Fatal("batch with a missing later close target succeeded, want rollback")
 	}
@@ -246,7 +246,7 @@ func TestUOWProtectedBatchNoOpCommitsPermitUseAndRejectsReplay(t *testing.T) {
 		}
 		return publicops.ProtectedMutationVerification{ReplayID: "pbnoop-replay"}, nil
 	})
-	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
 	result, err := applier.ApplyBatch(protectedCtx, request)
 	if err != nil {
 		t.Fatalf("protected semantic no-op batch: %v", err)
@@ -333,7 +333,7 @@ func TestUOWProtectedBatchReceiptReplaySkipsPermitRevalidation(t *testing.T) {
 		}
 		return publicops.ProtectedMutationVerification{ReplayID: "pbrec-replay-use"}, nil
 	})
-	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
 	first, err := applier.ApplyBatch(protectedCtx, request)
 	if err != nil {
 		t.Fatalf("first receipt-bearing protected batch: %v", err)
@@ -461,7 +461,7 @@ func TestUOWProtectedBatchReparentScopesTheOldParent(t *testing.T) {
 		}
 		return publicops.ProtectedMutationVerification{ReplayID: "pbparent-reparent-replay"}, nil
 	})
-	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
 	if _, err := applier.ApplyBatch(protectedCtx, request); err != nil {
 		t.Fatalf("reparent with permit covering old parent: %v", err)
 	}

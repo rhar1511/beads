@@ -304,11 +304,12 @@ func TestNotifyingProviderBuildsRolesOnItself(t *testing.T) {
 		// builds a role, so neither can build one "on itself".
 		"SetEventsJournalEnabled": true,
 		"RunEventsMaintenanceTx":  true,
-		// The transition-readiness capability is a startup-only schema and
-		// backfill probe. It constructs no role and writes no bead, so forwarding
-		// it to the selected inner provider is the intended behavior.
+		// These readiness capabilities are startup-only schema probes. They
+		// construct no role and write no bead, so forwarding them to the selected
+		// inner provider is the intended behavior.
 		"RevisionTransitionReadiness": true,
 		"BatchApplyReceiptReadiness":  true,
+		"ProtectedMutationReadiness":  true,
 	}
 
 	var checked int

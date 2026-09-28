@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -20,10 +21,10 @@ func (testProtectedMutationVerifier) Verify(context.Context, issueops.ProtectedM
 }
 
 func TestProtectedMutationAuthorityRequiresVerifiedSchema(t *testing.T) {
-	if _, err := NewProtectedMutationAuthority(testProtectedMutationVerifier{}, "workspace-a", schema.ProtectedMutationReadiness{}); err == nil {
+	if _, err := NewProtectedMutationAuthority(testProtectedMutationVerifier{}, "audience-a", "project-a", "database-a", schema.ProtectedMutationReadiness{}); err == nil {
 		t.Fatal("authority accepted zero-value schema readiness")
 	}
-	if _, err := NewProtectedMutationAuthority(nil, "workspace-a", readyProtectedMutationReadiness(t)); err == nil {
+	if _, err := NewProtectedMutationAuthority(nil, "audience-a", "project-a", "database-a", readyProtectedMutationReadiness(t)); err == nil {
 		t.Fatal("authority accepted a nil verifier")
 	}
 }
@@ -34,7 +35,7 @@ func TestProtectedMutationCapabilityAndPermitRequireStartupAuthority(t *testing.
 	ordinary := newTestServer(t, rolesConfig(Config{
 		Auth: authTokenFile(t, "token"), RevisionTransition: ordinaryRole,
 		TransitionReadiness: transitionReadiness,
-		Workspace:           domain.ContextInfo{ProjectID: "project-a"},
+		Workspace:           domain.ContextInfo{ProjectID: "project-a", Database: "database-a"},
 	}))
 	ordinaryContext := decodeBody(t, ordinary.do(t, http.MethodGet, "/v0/beads/context", bearer("token")))
 	ordinaryCapabilities, ok := ordinaryContext["capabilities"].([]any)
@@ -43,14 +44,14 @@ func TestProtectedMutationCapabilityAndPermitRequireStartupAuthority(t *testing.
 	}
 
 	readiness := readyProtectedMutationReadiness(t)
-	authority, err := NewProtectedMutationAuthority(testProtectedMutationVerifier{}, "workspace-a", readiness)
+	authority, err := NewProtectedMutationAuthority(testProtectedMutationVerifier{}, "audience-a", "project-a", "database-a", readiness)
 	if err != nil {
 		t.Fatalf("construct authority: %v", err)
 	}
 	unready := newTestServer(t, rolesConfig(Config{
 		Auth: authTokenFile(t, "token"), RevisionTransition: &revisionTransitionTestRole{},
 		ProtectedMutationAuthority: authority,
-		Workspace:                  domain.ContextInfo{ProjectID: "project-a"},
+		Workspace:                  domain.ContextInfo{ProjectID: "project-a", Database: "database-a"},
 	}))
 	if unready.protectedMutationReady {
 		t.Fatal("verifier and replay schema bypassed the Q43 transition readiness gate")
@@ -68,7 +69,7 @@ func TestProtectedMutationCapabilityAndPermitRequireStartupAuthority(t *testing.
 	server := newTestServer(t, rolesConfig(Config{
 		Auth: authTokenFile(t, "token"), RevisionTransition: role,
 		TransitionReadiness: transitionReadiness, ProtectedMutationAuthority: authority,
-		Workspace: domain.ContextInfo{ProjectID: "project-a"},
+		Workspace: domain.ContextInfo{ProjectID: "project-a", Database: "database-a"},
 	}))
 	if !server.revisionTransitionReady || !server.protectedMutationReady {
 		t.Fatal("Listen did not enable protected transitions with ready verifier and replay schema")
@@ -108,6 +109,22 @@ func TestProtectedMutationCapabilityAndPermitRequireStartupAuthority(t *testing.
 	}
 	if got := role.protectedAuthorityRecorded(); len(got) != 2 || !got[0] || !got[1] {
 		t.Fatalf("role authority context = %v, want trusted startup authority on both calls", got)
+	}
+}
+
+func TestProtectedMutationAuthorityMustMatchSelectedWorkspace(t *testing.T) {
+	readiness := readyProtectedMutationReadiness(t)
+	authority, err := NewProtectedMutationAuthority(testProtectedMutationVerifier{}, "audience-a", "project-a", "database-a", readiness)
+	if err != nil {
+		t.Fatalf("construct authority: %v", err)
+	}
+	_, err = Listen(Config{
+		Addr: "127.0.0.1:0", Auth: authTokenFile(t, "token"),
+		ProtectedMutationAuthority: authority,
+		Workspace:                  domain.ContextInfo{ProjectID: "project-a", Database: "database-b"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match the selected project and database") {
+		t.Fatalf("Listen error = %v, want selected-workspace binding refusal", err)
 	}
 }
 

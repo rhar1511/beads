@@ -19,6 +19,8 @@ type ProtectedMutationPermit string
 // binds the canonical request body when the caller can calculate one.
 type ProtectedMutationScope struct {
 	Audience    string
+	ProjectID   string
+	Database    string
 	Operation   string
 	ResourceIDs []string
 	Digest      string
@@ -32,9 +34,11 @@ type ProtectedMutationVerification struct {
 	ReplayID string
 }
 
-// ProtectedMutationVerifier verifies the permit signature, expiry, exact
-// scope, and replay identity. Beads inserts the returned replay identity into
-// its unique-use table in the same transaction as the protected write.
+// ProtectedMutationVerifier verifies the permit signature, validity window,
+// issuer/key, audience, project/database workspace, exact mutation scope,
+// revocation state, and replay identity. Beads inserts the returned replay
+// identity into its unique-use table in the same transaction as the protected
+// write.
 // Implementations own their key and issuer policy; ordinary Beads roles do not
 // receive transaction access from this seam.
 type ProtectedMutationVerifier interface {

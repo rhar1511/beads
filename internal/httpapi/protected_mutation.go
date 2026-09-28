@@ -55,6 +55,8 @@ func hasProtectedMutationControl(value string) bool {
 type ProtectedMutationAuthority struct {
 	verifier  issueops.ProtectedMutationVerifier
 	audience  string
+	projectID string
+	database  string
 	readiness schema.ProtectedMutationReadiness
 }
 
@@ -64,22 +66,40 @@ type ProtectedMutationAuthority struct {
 func NewProtectedMutationAuthority(
 	verifier issueops.ProtectedMutationVerifier,
 	audience string,
+	projectID string,
+	database string,
 	readiness schema.ProtectedMutationReadiness,
 ) (ProtectedMutationAuthority, error) {
 	if isNilProtectedMutationVerifier(verifier) || !readiness.Ready() ||
-		audience == "" || strings.TrimSpace(audience) != audience || len(audience) > 255 || !utf8.ValidString(audience) {
-		return ProtectedMutationAuthority{}, errors.New("httpapi: protected mutation authority requires a verifier, audience, and ready schema")
+		!validProtectedBinding(audience, 255) || !validProtectedBinding(projectID, 255) || !validProtectedBinding(database, 255) {
+		return ProtectedMutationAuthority{}, errors.New("httpapi: protected mutation authority requires a verifier, audience, project, database, and ready schema")
 	}
-	for _, r := range audience {
-		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
-			return ProtectedMutationAuthority{}, errors.New("httpapi: protected mutation audience contains control text")
-		}
-	}
-	return ProtectedMutationAuthority{verifier: verifier, audience: audience, readiness: readiness}, nil
+	return ProtectedMutationAuthority{verifier: verifier, audience: audience, projectID: projectID, database: database, readiness: readiness}, nil
 }
 
 func (a ProtectedMutationAuthority) ready() bool {
-	return !isNilProtectedMutationVerifier(a.verifier) && a.audience != "" && a.readiness.Ready()
+	return !isNilProtectedMutationVerifier(a.verifier) && validProtectedBinding(a.audience, 255) &&
+		validProtectedBinding(a.projectID, 255) && validProtectedBinding(a.database, 255) && a.readiness.Ready()
+}
+
+func (a ProtectedMutationAuthority) configured() bool {
+	return !isNilProtectedMutationVerifier(a.verifier) || a.audience != "" || a.projectID != "" || a.database != "" || a.readiness.Ready()
+}
+
+func (a ProtectedMutationAuthority) matchesWorkspace(projectID, database string) bool {
+	return a.projectID == projectID && a.database == database
+}
+
+func validProtectedBinding(value string, maxBytes int) bool {
+	if value == "" || strings.TrimSpace(value) != value || len(value) > maxBytes || !utf8.ValidString(value) {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			return false
+		}
+	}
+	return true
 }
 
 func isNilProtectedMutationVerifier(verifier issueops.ProtectedMutationVerifier) bool {

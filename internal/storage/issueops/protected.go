@@ -15,6 +15,8 @@ type protectedMutationConfig struct {
 	mu               sync.Mutex
 	verifier         publicops.ProtectedMutationVerifier
 	audience         string
+	projectID        string
+	database         string
 	verified         []publicops.ProtectedMutationScope
 	permitUseWritten bool
 }
@@ -22,12 +24,17 @@ type protectedMutationConfig struct {
 type protectedMutationConfigKey struct{}
 
 // WithProtectedMutationVerifier installs the backend's trusted verifier and
-// audience for the lifetime of a request. The verifier validates the signed
-// permit and returns its replay identity; Beads consumes that identity in the
-// active SQL transaction. This package is internal so ordinary external role
-// callers cannot replace the backend verifier.
-func WithProtectedMutationVerifier(ctx context.Context, verifier publicops.ProtectedMutationVerifier, audience string) context.Context {
-	return context.WithValue(ctx, protectedMutationConfigKey{}, &protectedMutationConfig{verifier: verifier, audience: strings.TrimSpace(audience)})
+// exact audience/project/database binding for the lifetime of a request. The
+// verifier validates the signed permit and returns its replay identity; Beads
+// consumes that identity in the active SQL transaction. This package is
+// internal so ordinary external role callers cannot replace the verifier.
+func WithProtectedMutationVerifier(ctx context.Context, verifier publicops.ProtectedMutationVerifier, audience, projectID, database string) context.Context {
+	return context.WithValue(ctx, protectedMutationConfigKey{}, &protectedMutationConfig{
+		verifier:  verifier,
+		audience:  strings.TrimSpace(audience),
+		projectID: projectID,
+		database:  database,
+	})
 }
 
 // ProtectedMutationAuthorityConfigured reports whether this request carries
@@ -89,6 +96,8 @@ func RequireProtectedMutation(ctx context.Context, tx DBTX, permit publicops.Pro
 	}
 	scope := publicops.ProtectedMutationScope{
 		Audience:    config.audience,
+		ProjectID:   config.projectID,
+		Database:    config.database,
 		Operation:   operation,
 		ResourceIDs: ids,
 		Digest:      digest,

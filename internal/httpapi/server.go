@@ -492,6 +492,9 @@ func ValidateBindAddr(addr string, allowNonLoopback bool) (net.IP, error) {
 // exist — N instances simply run on N ports — which is why fixed ports are the
 // deployment recommendation.)
 func Listen(cfg Config) (*Server, error) {
+	if cfg.ProtectedMutationAuthority.configured() && !cfg.ProtectedMutationAuthority.matchesWorkspace(cfg.Workspace.ProjectID, cfg.Workspace.Database) {
+		return nil, errors.New("httpapi: protected mutation authority does not match the selected project and database")
+	}
 	if err := checkDatabaseSource(cfg); err != nil {
 		return nil, err
 	}
@@ -1744,6 +1747,7 @@ func (s *Server) route(rt route) http.Handler {
 		if s.protectedMutationReady {
 			r = r.WithContext(storageissueops.WithProtectedMutationVerifier(
 				r.Context(), s.protectedMutationAuthority.verifier, s.protectedMutationAuthority.audience,
+				s.protectedMutationAuthority.projectID, s.protectedMutationAuthority.database,
 			))
 		}
 

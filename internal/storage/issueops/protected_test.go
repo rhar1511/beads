@@ -92,7 +92,7 @@ func TestRequireProtectedMutationPassesExactScopeToVerifier(t *testing.T) {
 		got, gotPermit = scope, permit
 		return publicops.ProtectedMutationVerification{ReplayID: "unique-use-1"}, nil
 	})
-	ctx := WithProtectedMutationVerifier(context.Background(), verifier, "workspace-audience")
+	ctx := WithProtectedMutationVerifier(context.Background(), verifier, "workspace-audience", "project-a", "database-a")
 	err = RequireProtectedMutation(ctx, tx, "signed-token", "issue.update", []string{"zeta", "alpha", "beta", "alpha"}, "canonical-digest", "")
 	if err != nil {
 		t.Fatalf("RequireProtectedMutation: %v", err)
@@ -100,8 +100,9 @@ func TestRequireProtectedMutationPassesExactScopeToVerifier(t *testing.T) {
 	if gotPermit != "signed-token" {
 		t.Fatalf("permit = %q, want request permit", gotPermit)
 	}
-	if got.Audience != "workspace-audience" || got.Operation != "issue.update" || got.Digest != "canonical-digest" {
-		t.Fatalf("scope = %#v, want exact audience, operation, and digest", got)
+	if got.Audience != "workspace-audience" || got.ProjectID != "project-a" || got.Database != "database-a" ||
+		got.Operation != "issue.update" || got.Digest != "canonical-digest" {
+		t.Fatalf("scope = %#v, want exact authority binding, operation, and digest", got)
 	}
 	wantIDs := []string{"alpha", "beta", "zeta"}
 	if len(got.ResourceIDs) != len(wantIDs) {
@@ -139,7 +140,7 @@ func TestRequireProtectedMutationConsumesReplayIdentityInActiveTransaction(t *te
 	verifier := protectedMutationVerifierFunc(func(context.Context, publicops.ProtectedMutationPermit, publicops.ProtectedMutationScope) (publicops.ProtectedMutationVerification, error) {
 		return publicops.ProtectedMutationVerification{ReplayID: "replay-1"}, nil
 	})
-	ctx := WithProtectedMutationVerifier(context.Background(), verifier, "workspace-audience")
+	ctx := WithProtectedMutationVerifier(context.Background(), verifier, "workspace-audience", "project-a", "database-a")
 	err = RequireProtectedMutation(ctx, tx, "permit", "issue.delete", []string{"protected"}, "digest", "")
 	if !errors.Is(err, publicops.ErrProtectedRecord) {
 		t.Fatalf("RequireProtectedMutation error = %v, want ErrProtectedRecord on replay", err)

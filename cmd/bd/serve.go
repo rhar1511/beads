@@ -296,6 +296,15 @@ func runServe() error {
 		if err != nil {
 			return HandleError("bd serve: %v", err)
 		}
+		protectedAuthority, closeProtectedAuthority, err := resolveServeProtectedMutationAuthority(rootCtx, info, roles.source)
+		if err != nil {
+			return HandleError("bd serve: %v", err)
+		}
+		defer func() {
+			if err := closeProtectedAuthority(); err != nil {
+				fmt.Fprintf(os.Stderr, "bd serve: closing protected mutation authority: %v\n", err)
+			}
+		}()
 		defer startServeEventsJournalMaintenance(info.BeadsDir, store)()
 		return serveListen(opts, httpapi.Config{
 			Reader:                     roles.reader,
@@ -325,6 +334,7 @@ func runServe() error {
 			SourceSnapshotReader:       roles.sourceSnapshotReader,
 			TransitionReadiness:        roles.transitionReadiness,
 			BatchApplyReceiptReadiness: roles.batchApplyReceiptReadiness,
+			ProtectedMutationAuthority: protectedAuthority,
 			BatchApplier:               roles.batchApplier,
 			Memories:                   roles.memories,
 			// Nil when this backend has no journal seam and the workspace never
@@ -397,6 +407,15 @@ func runServe() error {
 		}()
 		provider = p
 	}
+	protectedAuthority, closeProtectedAuthority, err := resolveServeProtectedMutationAuthority(rootCtx, info, provider)
+	if err != nil {
+		return HandleError("bd serve: %v", err)
+	}
+	defer func() {
+		if err := closeProtectedAuthority(); err != nil {
+			fmt.Fprintf(os.Stderr, "bd serve: closing protected mutation authority: %v\n", err)
+		}
+	}()
 
 	defer startServeEventsJournalMaintenance(info.BeadsDir, provider)()
 
@@ -404,6 +423,7 @@ func runServe() error {
 		Provider:                   provider,
 		TransitionReadiness:        probeRevisionTransitionReadiness(rootCtx, provider),
 		BatchApplyReceiptReadiness: probeBatchApplyReceiptReadiness(rootCtx, provider),
+		ProtectedMutationAuthority: protectedAuthority,
 		// No EventsJournal field on this arm: the provider carries the journal
 		// read as one of its own capability accessors, exactly as it carries
 		// every other role Listen would otherwise need spelled out. Activation
@@ -712,6 +732,7 @@ func serveIssueRoles(ctx context.Context, src serveRoleSource, journalEnabled bo
 	if hooked, ok := src.(*storage.HookFiringStore); ok {
 		src = hooked.Unwrap()
 	}
+	roles.source = src
 
 	// Each entry binds one Config field to the accessor that fills it, and
 	// names itself in the failure.
@@ -878,6 +899,8 @@ func serveJournalCursor(src serveRoleSource) (storage.EventsJournalCursor, bool)
 // requires every httpapi.Config literal in this package to sit in a function
 // that consulted serveDatabaseSource.
 type serveRoles struct {
+	// source is the one-peel store value used for optional startup probes.
+	source  any
 	reader  issueops.Reader
 	claimer issueops.Claimer
 	// batchCloser closes many issues as one transaction, behind

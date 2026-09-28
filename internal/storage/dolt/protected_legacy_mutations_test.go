@@ -94,7 +94,7 @@ func TestPermitAwareMutationConsumesOnceAndContextCannotAuthorizeNextTransaction
 		}
 		return publicops.ProtectedMutationVerification{ReplayID: "legacy-permit-use-once"}, nil
 	})
-	ctx = issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	ctx = issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
 	lifecycle, err := store.IssueLifecycle()
 	if err != nil {
 		t.Fatalf("IssueLifecycle: %v", err)
@@ -163,7 +163,7 @@ func TestProtectedBatchReceiptReplaySkipsPermitRevalidation(t *testing.T) {
 		}
 		return publicops.ProtectedMutationVerification{ReplayID: "legacy-protected-receipt-use"}, nil
 	})
-	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience")
+	protectedCtx := issueops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
 	first, err := applier.ApplyBatch(protectedCtx, request)
 	if err != nil {
 		t.Fatalf("first receipt-bearing protected batch: %v", err)

@@ -109,6 +109,19 @@ func (s *InstrumentedStorage) BatchApplyReceiptReadiness(ctx context.Context) (s
 	return source.BatchApplyReceiptReadiness(ctx)
 }
 
+// ProtectedMutationReadiness forwards the protected-record and replay-use
+// schema probe so store-backed bd serve startup sees the selected database's
+// exact readiness through this decorator.
+func (s *InstrumentedStorage) ProtectedMutationReadiness(ctx context.Context) (schema.ProtectedMutationReadiness, error) {
+	source, ok := s.inner.(interface {
+		ProtectedMutationReadiness(context.Context) (schema.ProtectedMutationReadiness, error)
+	})
+	if !ok {
+		return schema.ProtectedMutationReadiness{}, &storage.ErrUnsupported{Op: "ProtectedMutationReadiness", Backend: "instrumented store"}
+	}
+	return source.ProtectedMutationReadiness(ctx)
+}
+
 // op starts a span and records a metric for the named storage operation.
 func (s *InstrumentedStorage) op(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span, time.Time) {
 	all := append([]attribute.KeyValue{attribute.String("db.operation", name)}, attrs...)

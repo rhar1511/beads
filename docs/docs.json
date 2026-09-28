@@ -329,6 +329,7 @@
           "reference/git-integration",
           "reference/worktrees",
           "reference/protected-branches",
+          "reference/protected-mutation-authority",
           "reference/advanced",
           "reference/json-schema",
           "reference/events-journal",
