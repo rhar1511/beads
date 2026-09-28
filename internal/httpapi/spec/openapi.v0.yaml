@@ -63,7 +63,7 @@ info:
       outside its own parameter table with `400` / `code: invalid_argument` /
       `reason: "unknown_parameter"` and `param` naming the offending key.
       Operations that declare no QUERY parameter at all reject every query key
-      the same way. Today that is twenty-five of the forty-one operations
+      the same way. Today that is twenty-seven of the forty-three operations
       here — `GET /healthz`, `GET /v0/beads/context`,
       `GET /v0/beads/dependencies/cycles`, `POST /v0/beads/issues`,
       `PATCH /v0/beads/issues/{id}`,
@@ -72,7 +72,10 @@ info:
       `POST /v0/beads/issues/{id}:release`,
       `POST /v0/beads/issues/{id}:close`,
       `POST /v0/beads/issues/{id}:reopen`,
-      `POST /v0/beads/issues/{id}:casMetadata`, `POST /v0/beads/issues:sweep`,
+      `POST /v0/beads/issues/{id}:casMetadata`,
+      `POST /v0/beads/issues/{id}:transitionMetadata`,
+      `GET /v0/beads/issue-transition-receipts/{receipt_id}`,
+      `POST /v0/beads/issues:sweep`,
       `POST /v0/beads/issues:delete`,
       `POST /v0/beads/issues:batchCreate`,
       `POST /v0/beads/issues:batchApply`,
@@ -3319,6 +3322,162 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issues/{id}:transitionMetadata:
+    post:
+      operationId: transitionMetadata
+      summary: Apply a revision-fenced metadata transition with a durable receipt
+      description: >-
+        Changes one metadata marker only when both its current value and the
+        issue's exact signed 64-bit revision match. A marker miss is an ordinary
+        `200` with `applied: false` and `current`; a stale revision is
+        `409 precondition_failed`. Applied requests persist an immutable receipt
+        under `receipt_id`, so retry the exact same body after a lost response.
+        Reusing a receipt ID for a different request is a stable
+        `409 transition_receipt_conflict`.
+
+
+        Revision values are canonical decimal strings over the full signed
+        64-bit range. Send the string returned by an earlier issue read or
+        transition response; JSON numbers are refused because common consumers
+        round values above 2^53.
+
+
+        `expected` and `value` each distinguish omission (the marker is absent)
+        from a present JSON `null`. The optional `payload` defaults to `{}` when
+        omitted and may carry any JSON value. A successful write returns its
+        exact immutable receipt; `replayed: true` means this receipt proves the
+        same request already committed.
+
+
+        This operation always requires a configured bearer token, even on a
+        loopback server, and requires a matching `Bd-Project-Id` header. If the
+        server cannot assert its own project ID, it refuses the request. Wisps
+        are valid issue resources but do not have durable receipts, so a wisp
+        target returns `409 unsupported_resource`.
+
+
+        The `issues.transitionMetadata` and `issues.transitionReceipt.get`
+        capabilities are advertised together only after migrations 0067/0068,
+        ignored migration 0027, the zero-token checks, the receipt table probe,
+        the revision-transition role, and both route handlers are ready.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionMetadataRequest'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The marker was applied, replayed, or did not match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionMetadataResponse'
+        '400':
+          description: >-
+            Invalid request, including a malformed body, unknown field, invalid
+            receipt ID, invalid marker or payload JSON, a revision that is not
+            a canonical signed 64-bit decimal string, or a missing or mismatched
+            required `Bd-Project-Id` header.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No durable issue with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: >-
+            `precondition_failed` means `expected_version` was stale;
+            `transition_receipt_conflict` means this receipt ID is bound to a
+            different request; `unsupported_resource` means the target is a
+            wisp. None of these cases writes a transition.
+          x-bd-codes: [precondition_failed, transition_receipt_conflict, unsupported_resource]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration or role readiness for this route is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v0/beads/issue-transition-receipts/{receipt_id}:
+    get:
+      operationId: getTransitionReceipt
+      summary: Read an immutable issue transition receipt
+      description: >-
+        Reads the durable receipt for one exact `receipt_id`. Use this after a
+        timeout or lost response to determine whether a transition committed;
+        a `404` means no receipt is currently visible under that ID. This route
+        always requires a configured bearer token and a matching
+        `Bd-Project-Id` header. The capability is advertised only with the
+        paired transition write route after migration and data readiness pass.
+      parameters:
+        - name: receipt_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 191
+        - $ref: '#/components/parameters/ProjectID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The immutable transition receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionReceipt'
+        '400':
+          description: Invalid receipt ID, unknown query parameter, or missing or mismatched required project stamp.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No receipt with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration or role readiness for this route is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issues:sweep:
     post:
       operationId: sweepIssues
@@ -6104,14 +6263,27 @@ components:
       schema:
         type: string
 
+    ProjectID:
+      name: Bd-Project-Id
+      in: header
+      required: true
+      description: >-
+        Exact logical project ID the caller expects. These routes reject a
+        missing or mismatched stamp, and fail closed if the server cannot
+        assert its own project identity.
+      schema:
+        type: string
+        minLength: 1
+
   responses:
     Unauthenticated:
       description: >-
         The bearer credential was missing, malformed, or is not one this server
-        accepts. Emitted only by a server configured with a token file; one
-        without never emits it. `detail` is a fixed string, which is what
-        guarantees the presented credential is never echoed back to the client
-        or into any log between here and the caller.
+        accepts. Most routes emit this only when the server is configured with a
+        token file; revision-transition routes always require bearer
+        authentication. `detail` is a fixed string, which is what guarantees the
+        presented credential is never echoed back to the client or into any log
+        between here and the caller.
       x-bd-codes: [unauthenticated]
       headers:
         WWW-Authenticate:
@@ -7276,24 +7448,28 @@ components:
             `dependencies.add`, `dependencies.remove`,
             `memories.list`, `memories.get`, `memories.remember`,
             `memories.forget`, `events.list`, `events.watch`,
-            `issues.casMetadata`; the one behavior token is `project.enforce`,
+            `issues.casMetadata`, `issues.transitionMetadata`, and
+            `issues.transitionReceipt.get`; the one behavior token is `project.enforce`,
             which announces that a `Bd-Project-Id` stamp for the wrong workspace
             is refused here rather than silently ignored. The list grows
             additively, and an operation never appears here unless it is fully
-            implemented. This is how a client checks for an operation or a
-            behavior — never the version string.
+            implemented. The two revision-transition capabilities are
+            advertised together only when the startup readiness probe verifies
+            migrations 0067 and 0068, ignored migration 0027, no remaining zero
+            aggregate revisions, the receipt table, and the role behind each
+            route. This is how a client checks for an operation or a behavior —
+            never the version string.
 
 
-            THIS LIST IS BUILD-LEVEL, NOT WORKSPACE-LEVEL. It says which
-            operations this binary serves, and for every entry but two that is
-            the whole answer. `events.list` and `events.watch` are the
-            exceptions: the durable events journal is a per-workspace setting
-            that is OFF by default, so a server that advertises them may still
-            refuse every request to both with 409 `events_journal_disabled` —
-            correctly, because the operations exist and the workspace has no
-            journal. A consumer of either MUST treat the capability as "this
-            server speaks it" and the 409 as "not on this workspace", and must
-            not read the capability as a promise that records will arrive.
+            THIS LIST IS MOSTLY BUILD-LEVEL. The two revision-transition
+            capabilities are also gated by the selected database's migration
+            and data readiness, so their absence means this server instance
+            cannot safely serve them yet. `events.list` and `events.watch` are
+            gated separately by a per-workspace setting that is OFF by default;
+            a server may advertise them and still refuse requests with 409
+            `events_journal_disabled`. Consumers MUST treat those tokens as
+            "this server speaks it" and that 409 as "not on this workspace",
+            not as a promise that journal records will arrive.
           items:
             type: string
 
@@ -10217,6 +10393,96 @@ components:
         current:
           $ref: '#/components/schemas/MetadataValue'
 
+    TransitionMetadataRequest:
+      type: object
+      additionalProperties: false
+      required: [receipt_id, scope, kind, actor, expected_version, key]
+      properties:
+        receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+          description: >-
+            Caller-generated immutable receipt key. Keep it unchanged when
+            retrying the exact same request or recovering after a lost response.
+        scope:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+        actor:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The caller asserted actor, trimmed and validated by the server.
+        expected_version:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^-?[1-9][0-9]*$'
+          description: >-
+            Canonical decimal spelling of a nonzero signed 64-bit integer. The
+            server rejects overflow and JSON numbers.
+        key:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: One metadata key, using the workspace metadata-key syntax.
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+        payload:
+          $ref: '#/components/schemas/MetadataValue'
+
+    TransitionMetadataResponse:
+      type: object
+      required: [applied, replayed]
+      properties:
+        applied:
+          type: boolean
+          description: True when the marker transition applied or replayed.
+        replayed:
+          type: boolean
+          description: True when the exact receipt already existed for this request.
+        current:
+          $ref: '#/components/schemas/MetadataValue'
+        receipt:
+          $ref: '#/components/schemas/TransitionReceipt'
+
+    TransitionReceipt:
+      type: object
+      required:
+        [receipt_id, issue_id, scope, kind, actor, expected_version, to_version, key, payload]
+      properties:
+        receipt_id:
+          type: string
+        issue_id:
+          type: string
+        scope:
+          type: string
+        kind:
+          type: string
+        actor:
+          type: string
+        expected_version:
+          type: string
+          description: Canonical decimal spelling of the signed 64-bit source revision.
+        to_version:
+          type: string
+          description: Canonical decimal spelling of the signed 64-bit revision written.
+        key:
+          type: string
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+        payload:
+          $ref: '#/components/schemas/MetadataValue'
+
     UpdateIssueRequest:
       type: object
       additionalProperties: false
@@ -10847,12 +11113,15 @@ components:
             The stable machine-readable reason, and the ONLY member a client
             may dispatch on. v0's vocabulary: `invalid_argument` (400, also
             emitted by the Host-header middleware on any route),
-            `invalid_cursor` (400), `unauthenticated` (401, only on a server
-            configured with a token file), `not_found` (404),
+            `invalid_cursor` (400), `unauthenticated` (401, when a configured
+            token is refused or an authentication-required route has no
+            verifier), `not_found` (404),
             `already_claimed` (409), `not_claimable` (409),
             `not_closable` (409), `not_releasable` (409),
             `dependency_cycle` (409), `dependency_exists` (409),
             `already_exists` (409), `precondition_failed` (409),
+            `transition_receipt_conflict` (409), `unsupported_resource` (409),
+            `not_implemented` (501),
             `events_journal_disabled` (409), `events_journal_truncated` (410),
             `busy` (503),
             `db_unavailable` (503), `events_watch_saturated` (503),

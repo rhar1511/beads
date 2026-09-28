@@ -13,13 +13,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+
 	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/storage/uow"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/issueops"
@@ -607,7 +611,7 @@ func TestUnroutedPathsKeepTheErrorShape(t *testing.T) {
 //
 // What is left here is the half only this test can see: that the derivation
 // reaches the wire at all, through contextResponse, sorted, with the
-// `implemented` gate applied.
+// `implemented` gate applied and runtime readiness absent.
 func TestCapabilitiesAdvertiseEveryImplementedOperation(t *testing.T) {
 	ts := newTestServer(t, Config{})
 
@@ -624,7 +628,7 @@ func TestCapabilitiesAdvertiseEveryImplementedOperation(t *testing.T) {
 	// filter, and the sort — observable.
 	var want []string
 	for _, rt := range routeTable {
-		if rt.implemented && rt.capability != "" {
+		if rt.implemented && rt.capability != "" && rt.capabilityGate == "" {
 			want = append(want, rt.capability)
 		}
 	}
@@ -648,24 +652,116 @@ func TestCapabilitiesAdvertiseEveryImplementedOperation(t *testing.T) {
 	}
 }
 
-// THE `implemented` GATE IS NOT PINNED HERE, and saying so is the point.
-//
-// A loop asserting that no unimplemented row is advertised was written, run
-// against two mutations, and deleted: it cannot fail. Capabilities() applies the
-// gate, and the expectation above re-applies it, so a stub is missing from both
-// sides and they agree. Dropping the gate from Capabilities() is unfalsifiable
-// for a second reason — there are no 501 rows in v0 at all, so removing a filter
-// that filters nothing changes nothing. A green case named for that promise
-// would be worse than no case: a reviewer greps for the gate, finds a test named
-// for it, and stops looking.
-//
-// What actually holds it is TestSpecStatusCodesMatchHandlerTable, which fails on
-// ANY row with implemented false — 501 is documented nowhere and `not_implemented`
-// is deliberately absent from the frozen vocabulary, so a stub cannot land
-// without an exemption block that says why. The probe that would upgrade this
-// case is a Capabilities() that takes its rows as an argument; that is
-// production surgery for a test, and it is not worth it while a stub cannot
-// reach main.
+func TestListenPublishesBothTransitionCapabilitiesOnlyWithReadinessProof(t *testing.T) {
+	readiness := readyTransitionReadinessProof(t)
+	role := &revisionTransitionTestRole{result: issueops.RevisionTransitionResult{Applied: true}}
+	ts := newTestServer(t, rolesConfig(Config{
+		Auth: authTokenFile(t, "token"), RevisionTransition: role, TransitionReadiness: readiness,
+		Workspace: domain.ContextInfo{ProjectID: "project-a"},
+	}))
+	if !ts.revisionTransitionReady {
+		t.Fatal("Listen did not enable transition routes with a positive readiness proof and all other gates")
+	}
+	contextResponse := ts.do(t, http.MethodGet, "/v0/beads/context", bearer("token"))
+	contextBody := decodeBody(t, contextResponse)
+	capabilities, ok := contextBody["capabilities"].([]any)
+	if !ok || !hasString(capabilities, "issues.transitionMetadata") || !hasString(capabilities, "issues.transitionReceipt.get") {
+		t.Fatalf("context capabilities = %v, want both transition capabilities", contextBody["capabilities"])
+	}
+
+	headers := bearer("token")
+	headers.Set(ProjectIDHeader, "project-a")
+	post := ts.doBody(t, http.MethodPost, "/v0/beads/issues/bd-1:transitionMetadata", headers, "application/json", transitionTestBody)
+	if post.StatusCode != http.StatusOK {
+		t.Fatalf("POST transition status = %d, want 200: %s", post.StatusCode, readAll(t, post))
+	}
+	get := ts.do(t, http.MethodGet, "/v0/beads/issue-transition-receipts/r-1", headers)
+	if get.StatusCode != http.StatusNotFound || role.getID != "r-1" {
+		t.Fatalf("GET receipt status = %d and role receipt ID = %q, want routed 404 for r-1", get.StatusCode, role.getID)
+	}
+
+	var typedNilRole *revisionTransitionTestRole
+	typedNil := newTestServer(t, rolesConfig(Config{
+		Auth: authTokenFile(t, "token"), RevisionTransition: typedNilRole, TransitionReadiness: readiness,
+		Workspace: domain.ContextInfo{ProjectID: "project-a"},
+	}))
+	if typedNil.revisionTransitionReady {
+		t.Fatal("Listen enabled transition routes for a typed-nil role")
+	}
+	contextResponse = typedNil.do(t, http.MethodGet, "/v0/beads/context", bearer("token"))
+	contextBody = decodeBody(t, contextResponse)
+	capabilities, ok = contextBody["capabilities"].([]any)
+	if !ok || hasAnyString(capabilities, "issues.transitionMetadata", "issues.transitionReceipt.get") {
+		t.Fatalf("typed-nil role context advertised transition capabilities: %v", contextBody["capabilities"])
+	}
+}
+
+func readyTransitionReadinessProof(t *testing.T) schema.RevisionTransitionReadiness {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("create readiness DB: %v", err)
+	}
+	defer db.Close()
+
+	expectHTTPAPIReadinessVersions(mock)
+	for _, table := range []string{"issues", "wisps"} {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM " + table + " WHERE row_lock = 0 LIMIT 1")).
+			WillReturnRows(sqlmock.NewRows([]string{"1"}))
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT receipt_id FROM issue_transition_receipts LIMIT 0")).
+		WillReturnRows(sqlmock.NewRows([]string{"receipt_id"}))
+
+	readiness, err := schema.ProbeRevisionTransitionReadiness(context.Background(), db)
+	if err != nil {
+		t.Fatalf("probe readiness: %v", err)
+	}
+	if !readiness.Ready() {
+		t.Fatal("complete typed readiness proof is not ready")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("readiness probe did not check every prerequisite: %v", err)
+	}
+	return readiness
+}
+
+func expectHTTPAPIReadinessVersions(mock sqlmock.Sqlmock) {
+	for _, cursor := range []struct {
+		table   string
+		version int
+	}{
+		{table: "schema_migrations", version: schema.RevisionTransitionMainMigration},
+		{table: "ignored_schema_migrations", version: schema.RevisionTransitionIgnoredMigration},
+	} {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?")).
+			WithArgs(cursor.table).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(MAX(version), 0) FROM " + cursor.table)).
+			WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(cursor.version))
+		if cursor.table != "ignored_schema_migrations" {
+			continue
+		}
+		for _, table := range []string{"wisps", "wisp_dependencies"} {
+			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM INFORMATION_SCHEMA\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \?`).
+				WithArgs(table).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+		}
+		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM INFORMATION_SCHEMA\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \? AND COLUMN_NAME = \?`).
+			WithArgs("leases", "granted_node").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	}
+}
+
+func hasString(values []any, want string) bool {
+	for _, value := range values {
+		if text, ok := value.(string); ok && text == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRevisionTransitionCapabilityReadiness below checks the runtime proof
+// gate. This inventory test keeps the static route vocabulary in sync with
+// implemented handlers; GET /context uses capabilitiesFor with the server's
+// startup readiness result before publishing the two transition tokens.
 
 // TestClaimPathReachesItsHandler drives the path the DOCUMENT spells, which is
 // the one thing route parity cannot check for the claim row: that row declares

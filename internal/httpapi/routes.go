@@ -153,6 +153,15 @@ type route struct {
 	// reads that touch no workspace data are exempt and every other route —
 	// streaming or not — is enforced.
 	projectExempt bool
+	// authRequired makes the route require a configured bearer credential even
+	// on a loopback server whose other operations allow no-auth mode.
+	authRequired bool
+	// projectRequired makes Bd-Project-Id mandatory, and fails closed when the
+	// server has no project identity to compare it with.
+	projectRequired bool
+	// capabilityGate names an additional startup proof required before this
+	// route's capability is advertised.
+	capabilityGate string
 	// implemented gates the capability list, so a release between slices never
 	// advertises an operation that does not work. Every v0 operation is
 	// implemented as of the read-endpoints slice; the flag stays because the
@@ -558,6 +567,30 @@ var routeTable = []route{
 		handler:      (*Server).handleCompareAndSetMetadata,
 	},
 	{
+		op:              OpTransitionMetadata,
+		method:          http.MethodPost,
+		pattern:         customMethodPattern,
+		specPath:        "/v0/beads/issues/{id}:transitionMetadata",
+		customMethod:    ":transitionMetadata",
+		capability:      "issues.transitionMetadata",
+		capabilityGate:  "revision-transition",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleTransitionMetadata,
+	},
+	{
+		op:              OpGetTransitionReceipt,
+		method:          http.MethodGet,
+		pattern:         "/v0/beads/issue-transition-receipts/{receipt_id}",
+		capability:      "issues.transitionReceipt.get",
+		capabilityGate:  "revision-transition",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleGetTransitionReceipt,
+	},
+	{
 		op:     OpReopenIssue,
 		method: http.MethodPost,
 		// The close's mirror, on the dispatcher the close built. Nothing new is
@@ -750,16 +783,17 @@ func (r route) specPathOf() string {
 // rather than silently dropped by an older server.
 var behaviorCapabilities = []string{CapProjectEnforce}
 
-// Capabilities lists what this build advertises in ContextResponse.capabilities:
-// the operations it actually implements, gated on `implemented` so a stub can
-// never advertise itself, PLUS the behavior tokens for server-wide behaviors this
-// build enforces. A client that checks capabilities before calling gets a
-// truthful answer from every release, including one cut halfway through the
-// endpoint slices.
+// Capabilities returns this binary's static operation inventory. It is useful
+// for route/spec checks but is not a server-instance readiness assertion:
+// ContextResponse uses capabilitiesFor with the startup readiness proof.
 func Capabilities() []string {
+	return capabilitiesFor(true)
+}
+
+func capabilitiesFor(revisionTransitionReady bool) []string {
 	var out []string
 	for _, rt := range routeTable {
-		if rt.implemented && rt.capability != "" {
+		if rt.implemented && rt.capability != "" && (rt.capabilityGate == "" || (rt.capabilityGate == "revision-transition" && revisionTransitionReady)) {
 			out = append(out, rt.capability)
 		}
 	}

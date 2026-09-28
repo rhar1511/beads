@@ -11,6 +11,7 @@ import (
 	"github.com/steveyegge/beads/internal/hooks"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
 )
@@ -219,7 +220,7 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 		}
 	}
 
-	roles, err := serveIssueRoles(chained, false)
+	roles, err := serveIssueRoles(context.Background(), chained, false)
 	if err != nil {
 		t.Fatalf("serveIssueRoles: %v", err)
 	}
@@ -309,7 +310,7 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 		// BD_NO_HOOKS=1 wires no hook decorator at all, so the roles are the
 		// store's own and the peel must be conditional.
 		bare := wireStorageDecorators(middle, hooks.NewRunner(t.TempDir()), true)
-		roles, err := serveIssueRoles(bare, false)
+		roles, err := serveIssueRoles(context.Background(), bare, false)
 		if err != nil {
 			t.Fatalf("serveIssueRoles: %v", err)
 		}
@@ -322,7 +323,7 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 		// httpapi.Listen refuses a partial role set, but a nil store reaching
 		// it as an all-nil set would report "no database source" — true, and
 		// useless. Name the real condition here.
-		if _, err := serveIssueRoles(nil, false); err == nil {
+		if _, err := serveIssueRoles(context.Background(), nil, false); err == nil {
 			t.Fatal("serveIssueRoles(nil) = nil error; want a refusal naming the missing store")
 		}
 	})
@@ -341,7 +342,7 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 			t.Fatal("the fixture store reads the journal; this test proves nothing")
 		}
 
-		roles, err := serveIssueRoles(chained, false)
+		roles, err := serveIssueRoles(context.Background(), chained, false)
 		if err != nil {
 			t.Fatalf("serveIssueRoles with the journal off: %v", err)
 		}
@@ -349,10 +350,46 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 			t.Error("a store that cannot read the journal produced a reader")
 		}
 
-		if _, err := serveIssueRoles(chained, true); err == nil {
+		if _, err := serveIssueRoles(context.Background(), chained, true); err == nil {
 			t.Fatal("serveIssueRoles accepted a journal-enabled workspace on a backend that cannot read the journal")
 		}
 	})
+}
+
+func TestServeIssueRolesProbesReadinessWithThePassedContext(t *testing.T) {
+	type contextKey struct{}
+	rootCtx := context.WithValue(context.Background(), contextKey{}, "root")
+	source := &serveReadinessContextStore{serveRolesDoltStore: &serveRolesDoltStore{serveRolesStore: &serveRolesStore{}}}
+	if _, err := serveIssueRoles(rootCtx, source, false); err != nil {
+		t.Fatalf("serveIssueRoles: %v", err)
+	}
+	if source.readinessContext != rootCtx {
+		t.Errorf("readiness probe context = %v, want the root context %v", source.readinessContext, rootCtx)
+	}
+}
+
+type serveReadinessContextStore struct {
+	*serveRolesDoltStore
+	readinessContext context.Context
+}
+
+func (*serveReadinessContextStore) RevisionTransition() (issueops.RevisionTransition, error) {
+	return &serveReadinessStubRole{}, nil
+}
+
+func (s *serveReadinessContextStore) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	s.readinessContext = ctx
+	return schema.RevisionTransitionReadiness{}, nil
+}
+
+type serveReadinessStubRole struct{}
+
+func (*serveReadinessStubRole) TransitionMetadata(context.Context, issueops.RevisionTransitionRequest) (issueops.RevisionTransitionResult, error) {
+	return issueops.RevisionTransitionResult{}, nil
+}
+
+func (*serveReadinessStubRole) GetReceipt(context.Context, string) (*issueops.RevisionTransitionReceipt, error) {
+	return nil, nil
 }
 
 // TestServeResolvedModeNamesTheRegisteredBackend. The startup label is

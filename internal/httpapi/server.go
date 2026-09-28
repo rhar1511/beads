@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/steveyegge/beads/internal/httpapi/apigen"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/storage/uow"
 	"github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
@@ -265,6 +267,13 @@ type Config struct {
 	// every other role: a Config missing it would bind and nil-dereference on
 	// the first request that reached that handler.
 	MetadataCAS issueops.MetadataCAS
+	// RevisionTransition is the optional revision-fenced metadata transition
+	// role for a roles-backed server. It is used only with a positive
+	// TransitionReadiness proof; absence leaves both HTTP capabilities hidden.
+	RevisionTransition issueops.RevisionTransition
+	// TransitionReadiness is a read-only schema/data probe result. Its zero
+	// value is unready, and only the schema probe can create a positive value.
+	TransitionReadiness schema.RevisionTransitionReadiness
 	// BatchApplier is the ordered, heterogeneous plan behind
 	// POST /v0/beads/issues:batchApply. Required on the same terms as every
 	// other role: a Config missing it would bind and nil-dereference on the
@@ -345,32 +354,34 @@ type Server struct {
 	// reader(), claimer(), cycleDetector() and the rest of those accessors hand
 	// back on the store-shaped source; the field names differ from the method
 	// names because a struct cannot carry both.
-	issueReader       issueops.Reader
-	issueClaimer      issueops.Claimer
-	issueBatchCloser  issueops.BatchCloser
-	issueReadyClaimer issueops.ReadyClaimer
-	issueReleaser     issueops.Releaser
-	issueLifecycle    issueops.Lifecycle
-	settings          issueops.WorkspaceConfig
-	issueStats        issueops.StatsReporter
-	issueCycles       issueops.CycleDetector
-	issueEdges        issueops.EdgeReader
-	issueEdgeCounter  issueops.GraphCounter
-	issueRelations    issueops.Relations
-	issueCommenter    issueops.Commenter
-	issueBlocking     issueops.BlockingAnnotator
-	issueTree         issueops.TreeWalker
-	issueReadyCounter issueops.ReadyCounter
-	issueCounter      issueops.Counter
-	issueQuerier      issueops.Querier
-	issueSweeper      issueops.Sweeper
-	issueDeleter      issueops.Deleter
-	issueBatchCreator issueops.BatchCreator
-	issueDependencies issueops.DependencyEditor
-	issueMetadataCAS  issueops.MetadataCAS
-	issueBatchApplier issueops.BatchApplier
-	workspaceMemories memoryops.Memories
-	eventsJournal     storage.EventsJournalCursor
+	issueReader             issueops.Reader
+	issueClaimer            issueops.Claimer
+	issueBatchCloser        issueops.BatchCloser
+	issueReadyClaimer       issueops.ReadyClaimer
+	issueReleaser           issueops.Releaser
+	issueLifecycle          issueops.Lifecycle
+	settings                issueops.WorkspaceConfig
+	issueStats              issueops.StatsReporter
+	issueCycles             issueops.CycleDetector
+	issueEdges              issueops.EdgeReader
+	issueEdgeCounter        issueops.GraphCounter
+	issueRelations          issueops.Relations
+	issueCommenter          issueops.Commenter
+	issueBlocking           issueops.BlockingAnnotator
+	issueTree               issueops.TreeWalker
+	issueReadyCounter       issueops.ReadyCounter
+	issueCounter            issueops.Counter
+	issueQuerier            issueops.Querier
+	issueSweeper            issueops.Sweeper
+	issueDeleter            issueops.Deleter
+	issueBatchCreator       issueops.BatchCreator
+	issueDependencies       issueops.DependencyEditor
+	issueMetadataCAS        issueops.MetadataCAS
+	issueRevisionTransition issueops.RevisionTransition
+	revisionTransitionReady bool
+	issueBatchApplier       issueops.BatchApplier
+	workspaceMemories       memoryops.Memories
+	eventsJournal           storage.EventsJournalCursor
 
 	listener net.Listener
 	http     *http.Server
@@ -488,6 +499,18 @@ func Listen(cfg Config) (*Server, error) {
 	if cfg.Stderr == nil {
 		cfg.Stderr = os.Stderr
 	}
+	transitionRole := cfg.RevisionTransition
+	if cfg.Provider != nil && cfg.TransitionReadiness.Ready() {
+		if source, ok := cfg.Provider.(uow.RevisionTransitionSource); ok {
+			transitionRole, err = source.RevisionTransition()
+			if err != nil {
+				transitionRole = nil
+			}
+		} else {
+			transitionRole = nil
+		}
+	}
+	transitionReady := revisionTransitionRoutesReady(cfg.TransitionReadiness, transitionRole, cfg.Auth, cfg.Workspace.ProjectID)
 
 	prefix, err := newIDPrefix()
 	if err != nil {
@@ -531,13 +554,15 @@ func Listen(cfg Config) (*Server, error) {
 		closing:         make(chan struct{}),
 		maxWatchStreams: maxWatchStreams,
 
-		log:      log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
-		stdout:   cfg.Stdout,
-		ctxBody:  contextResponse(cfg.Workspace, cfg.SchemaVersion, Capabilities()),
-		hosts:    newHostPolicy(ip, cfg.AllowedHosts),
-		auth:     cfg.Auth,
-		idPrefix: prefix,
-		maxConns: maxConns,
+		log:                     log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
+		stdout:                  cfg.Stdout,
+		ctxBody:                 contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesFor(transitionReady)),
+		hosts:                   newHostPolicy(ip, cfg.AllowedHosts),
+		auth:                    cfg.Auth,
+		idPrefix:                prefix,
+		maxConns:                maxConns,
+		issueRevisionTransition: transitionRole,
+		revisionTransitionReady: transitionReady,
 	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
@@ -580,6 +605,26 @@ func Listen(cfg Config) (*Server, error) {
 	fmt.Fprintf(s.stdout, "bd serve: listening on http://%s\n", s.Addr())
 	s.logStartup()
 	return s, nil
+}
+
+// revisionTransitionRoutesReady is the complete startup gate for publishing or
+// serving either transition route. Readiness alone is insufficient: both
+// routes require a role, bearer authentication, and a known project identity.
+func revisionTransitionRoutesReady(readiness schema.RevisionTransitionReadiness, role issueops.RevisionTransition, auth *TokenFileAuth, projectID string) bool {
+	return readiness.Ready() && !isNilRevisionTransitionRole(role) && auth != nil && strings.TrimSpace(projectID) != ""
+}
+
+func isNilRevisionTransitionRole(role issueops.RevisionTransition) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // checkDatabaseSource enforces exactly one complete database source.
@@ -1145,6 +1190,17 @@ func (s *Server) metadataCAS(r *http.Request) (issueops.MetadataCAS, error) {
 	return src.MetadataCAS()
 }
 
+// revisionTransition returns the version-fenced metadata transition role for
+// one request. Provider-backed roles are built over timedProvider so their
+// unit-of-work acquisition remains visible in the request log.
+func (s *Server) revisionTransition(r *http.Request) (issueops.RevisionTransition, error) {
+	if s.provider == nil {
+		return s.issueRevisionTransition, nil
+	}
+	var src uow.RevisionTransitionSource = timedProvider{inner: s.provider, rec: requestInfo(r.Context())}
+	return src.RevisionTransition()
+}
+
 // batchApplier returns the ordered-plan write surface for one request, on the
 // same terms as every role above and held by INTERFACE so
 // uow.BatchApplierSource is load-bearing rather than decorative.
@@ -1563,8 +1619,14 @@ func (s *Server) route(rt route) http.Handler {
 			r = r.WithContext(ctx)
 		}
 
-		if !rt.authExempt && s.auth != nil && !s.authorize(w, r, rec) {
-			return
+		if !rt.authExempt && (rt.authRequired || s.auth != nil) {
+			if s.auth == nil {
+				s.fail(w, r, newResult(CodeUnauthenticated, ""))
+				return
+			}
+			if !s.authorize(w, r, rec) {
+				return
+			}
 		}
 
 		// Identity before resources: a stamp for the wrong workspace is turned
@@ -1574,7 +1636,13 @@ func (s *Server) route(rt route) http.Handler {
 		// the credential check so the server_project_id it discloses stays
 		// behind the authentication gate.
 		if !rt.projectExempt {
-			if res := s.checkProjectStamp(r); res != nil {
+			var res *Result
+			if rt.projectRequired {
+				res = s.checkRequiredProjectStamp(r)
+			} else {
+				res = s.checkProjectStamp(r)
+			}
+			if res != nil {
 				s.fail(w, r, *res)
 				return
 			}
@@ -1688,6 +1756,24 @@ func (s *Server) checkProjectStamp(r *http.Request) *Result {
 	requestInfo(r.Context()).refuse(stamp)
 	res := ProjectMismatch(stamp, s.ctxBody.ProjectId)
 	return &res
+}
+
+// checkRequiredProjectStamp is the stricter identity gate for transition
+// operations. These routes require a caller assertion and fail closed when
+// this server cannot assert its own project identity.
+func (s *Server) checkRequiredProjectStamp(r *http.Request) *Result {
+	stamp := r.Header.Get(ProjectIDHeader)
+	if stamp == "" {
+		res := InvalidArgument(ProjectIDHeader, ReasonInvalidValue,
+			"the "+ProjectIDHeader+" header is required for this operation")
+		return &res
+	}
+	if stamp != s.ctxBody.ProjectId || s.ctxBody.ProjectId == "" {
+		requestInfo(r.Context()).refuse(stamp)
+		res := ProjectMismatch(stamp, s.ctxBody.ProjectId)
+		return &res
+	}
+	return nil
 }
 
 // fail writes a problem response and records what it was for the log line.

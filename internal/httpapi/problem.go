@@ -153,6 +153,16 @@ const (
 	// existing client dispatches on, while a 409 that turns out to be
 	// unreachable retires for free.
 	CodeAlreadyExists Code = "already_exists"
+	// CodeTransitionReceiptConflict means this receipt ID is already bound to a
+	// different request. It is stable across retries and never includes stored
+	// receipt contents in the response.
+	CodeTransitionReceiptConflict Code = "transition_receipt_conflict"
+	// CodeUnsupportedResource means the addressed resource plane cannot perform
+	// this operation (currently, a wisp cannot carry a durable revision receipt).
+	CodeUnsupportedResource Code = "unsupported_resource"
+	// CodeNotImplemented means this server lacks the startup prerequisites for
+	// the route. Such routes are omitted from capabilities until ready.
+	CodeNotImplemented Code = "not_implemented"
 	// CodePreconditionFailed is a compare-and-set guard that MISSED on an
 	// operation whose contract is that a miss refuses everything. The expected
 	// values travel in typed extension members; a batch operation adds the
@@ -242,17 +252,20 @@ const codeClientClosed Code = "client_closed"
 // codeStatus freezes one HTTP status per code. A code that could arrive with
 // two different statuses would defeat the point of dispatching on it.
 var codeStatus = map[Code]int{
-	CodeInvalidArgument:  http.StatusBadRequest,
-	CodeInvalidCursor:    http.StatusBadRequest,
-	CodeUnauthenticated:  http.StatusUnauthorized,
-	CodeNotFound:         http.StatusNotFound,
-	CodeAlreadyClaimed:   http.StatusConflict,
-	CodeNotClaimable:     http.StatusConflict,
-	CodeNotClosable:      http.StatusConflict,
-	CodeNotReleasable:    http.StatusConflict,
-	CodeDependencyCycle:  http.StatusConflict,
-	CodeDependencyExists: http.StatusConflict,
-	CodeAlreadyExists:    http.StatusConflict,
+	CodeInvalidArgument:           http.StatusBadRequest,
+	CodeInvalidCursor:             http.StatusBadRequest,
+	CodeUnauthenticated:           http.StatusUnauthorized,
+	CodeNotFound:                  http.StatusNotFound,
+	CodeAlreadyClaimed:            http.StatusConflict,
+	CodeNotClaimable:              http.StatusConflict,
+	CodeNotClosable:               http.StatusConflict,
+	CodeNotReleasable:             http.StatusConflict,
+	CodeDependencyCycle:           http.StatusConflict,
+	CodeDependencyExists:          http.StatusConflict,
+	CodeAlreadyExists:             http.StatusConflict,
+	CodeTransitionReceiptConflict: http.StatusConflict,
+	CodeUnsupportedResource:       http.StatusConflict,
+	CodeNotImplemented:            http.StatusNotImplemented,
 
 	CodePreconditionFailed: http.StatusConflict,
 
@@ -313,10 +326,13 @@ const (
 // is exactly what must never happen to a presented token — it would land in
 // every client log and proxy trace between here and the caller.
 var staticDetail = map[Code]string{
-	CodeUnauthenticated: "missing or invalid bearer token",
-	CodeBusy:            "the server is busy; retry shortly",
-	CodeDBUnavailable:   "database temporarily unavailable; retry",
-	CodeInternal:        "internal server error",
+	CodeUnauthenticated:           "missing or invalid bearer token",
+	CodeBusy:                      "the server is busy; retry shortly",
+	CodeDBUnavailable:             "database temporarily unavailable; retry",
+	CodeInternal:                  "internal server error",
+	CodeTransitionReceiptConflict: "this receipt ID is already bound to a different request",
+	CodeUnsupportedResource:       "revision transitions are not supported for this resource",
+	CodeNotImplemented:            "revision transition routes are not ready on this server",
 }
 
 // Retry-After values, in seconds.
@@ -580,6 +596,8 @@ const (
 	// lost race is the answer to the question the caller asked, and the value
 	// that refused the swap is what its retry needs next.
 	OpCompareAndSetMetadata = "compareAndSetMetadata"
+	OpTransitionMetadata    = "transitionMetadata"
+	OpGetTransitionReceipt  = "getTransitionReceipt"
 )
 
 // specBearerScheme is the name of the document's securityScheme for the bearer
@@ -1005,6 +1023,15 @@ var operationCodes = map[string][]Code{
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
+	OpTransitionMetadata: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodePreconditionFailed, CodeTransitionReceiptConflict,
+		CodeUnsupportedResource, CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpGetTransitionReceipt: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
 	OpRemoveDependency: {CodeInvalidArgument, CodeUnauthenticated, CodeBusy, CodeDBUnavailable, CodeInternal},
 	// The two conflict codes are this operation's alone, and both say the same
 	// kind of thing: the request is fine as a request and the GRAPH refuses it,
@@ -1286,6 +1313,28 @@ func InvalidCursor() Result {
 // apart would be probing which ids are well-formed.
 func NotFound() Result {
 	return newResult(CodeNotFound, "no issue or wisp with that id")
+}
+
+// TransitionReceiptNotFound reports a missing immutable transition receipt.
+func TransitionReceiptNotFound() Result {
+	return newResult(CodeNotFound, "no transition receipt exists with that exact ID")
+}
+
+// TransitionReceiptConflict reports a stable receipt-ID binding conflict.
+func TransitionReceiptConflict() Result {
+	return newResult(CodeTransitionReceiptConflict, "")
+}
+
+// UnsupportedTransitionResource is the stable refusal for a resource plane
+// such as a wisp that cannot produce a durable revision receipt.
+func UnsupportedTransitionResource() Result {
+	return newResult(CodeUnsupportedResource, "")
+}
+
+// TransitionNotImplemented reports that the server did not prove the schema
+// and role prerequisites needed by the transition routes.
+func TransitionNotImplemented() Result {
+	return newResult(CodeNotImplemented, "")
 }
 
 // EventsJournalDisabled builds the 409 for a workspace whose journal is off.

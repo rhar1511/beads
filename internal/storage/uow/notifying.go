@@ -86,6 +86,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
@@ -305,6 +306,14 @@ func (p *notifyingProvider) MetadataCAS() (publicops.MetadataCAS, error) { retur
 
 func (p *notifyingProvider) RevisionTransition() (publicops.RevisionTransition, error) {
 	return NewRevisionTransition(p)
+}
+
+func (p *notifyingProvider) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	source, ok := p.inner.(RevisionTransitionReadinessSource)
+	if !ok {
+		return schema.RevisionTransitionReadiness{}, &storage.ErrUnsupported{Op: "RevisionTransitionReadiness", Backend: "provider"}
+	}
+	return source.RevisionTransitionReadiness(ctx)
 }
 
 func (p *notifyingProvider) Releaser() (publicops.Releaser, error) { return NewReleaser(p) }

@@ -175,6 +175,16 @@ func assertServedCapabilities(t *testing.T, body map[string]any) {
 	if len(want) == 0 {
 		t.Fatal("this build derives no capabilities; the assertion below would pass against a server that advertises nothing")
 	}
+	transitionWrite := slices.Contains(got, "issues.transitionMetadata")
+	transitionReceipt := slices.Contains(got, "issues.transitionReceipt.get")
+	if transitionWrite != transitionReceipt {
+		t.Errorf("transition capabilities must be advertised together, got write=%v receipt=%v", transitionWrite, transitionReceipt)
+	}
+	if !transitionWrite {
+		want = slices.DeleteFunc(want, func(capability string) bool {
+			return capability == "issues.transitionMetadata" || capability == "issues.transitionReceipt.get"
+		})
+	}
 	if !slices.Equal(got, want) {
 		t.Errorf("capabilities = %v, want %v", got, want)
 	}

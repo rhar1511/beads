@@ -11,7 +11,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/issueops"
 )
 
 const storageScopeName = "github.com/steveyegge/beads/storage"
@@ -70,6 +72,30 @@ func WrapStorage(s storage.DoltStorage) storage.DoltStorage {
 // Unwrap satisfies storage.Unwrapper so storage.UnwrapStore can peel the
 // instrumentation layer for optional-interface type assertions.
 func (s *InstrumentedStorage) Unwrap() storage.DoltStorage { return s.inner }
+
+// RevisionTransition forwards the optional transition role without changing
+// its semantics. The role owns its own transaction and does not fire hooks.
+func (s *InstrumentedStorage) RevisionTransition() (issueops.RevisionTransition, error) {
+	source, ok := s.inner.(interface {
+		RevisionTransition() (issueops.RevisionTransition, error)
+	})
+	if !ok {
+		return nil, &storage.ErrUnsupported{Op: "RevisionTransition", Backend: "instrumented store"}
+	}
+	return source.RevisionTransition()
+}
+
+// RevisionTransitionReadiness forwards the read-only migration probe to the
+// wrapped store so telemetry decoration does not hide startup readiness.
+func (s *InstrumentedStorage) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	source, ok := s.inner.(interface {
+		RevisionTransitionReadiness(context.Context) (schema.RevisionTransitionReadiness, error)
+	})
+	if !ok {
+		return schema.RevisionTransitionReadiness{}, &storage.ErrUnsupported{Op: "RevisionTransitionReadiness", Backend: "instrumented store"}
+	}
+	return source.RevisionTransitionReadiness(ctx)
+}
 
 // op starts a span and records a metric for the named storage operation.
 func (s *InstrumentedStorage) op(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span, time.Time) {

@@ -992,9 +992,9 @@ type ContextResponse struct {
 	// OPTIONAL, and absent means only that this server does not disclose its filesystem layout — never that it has no workspace. A client MUST NOT require it, MUST NOT treat absence as an error, and has no use for the value beyond display: it is a path on the SERVER's filesystem, which the client cannot open. Identify the workspace by `project_id` and `database`, which are required.
 	BeadsDir *string `json:"beads_dir,omitempty"`
 
-	// Capabilities The tokens this server advertises: the OPERATIONS it implements, derived from its route table, and the server-wide BEHAVIORS it enforces. v0's operation vocabulary is `ready.list`, `ready.count`, `issues.list`, `issues.query`, `issues.count`, `issues.get`, `issues.related`, `issues.create`, `issues.addComment`, `issues.batchClose`, `issues.claim`, `issues.claimNext`, `issues.release`, `issues.close`, `issues.reopen`, `issues.update`, `issues.sweep`, `issues.delete`, `issues.batchCreate`, `issues.batchApply`, `stats.get`, `config.list`, `config.get`, `config.set`, `config.unset`, `dependencies.cycles`, `dependencies.list`, `dependencies.count`, `dependencies.blocking`, `dependencies.tree`, `dependencies.add`, `dependencies.remove`, `memories.list`, `memories.get`, `memories.remember`, `memories.forget`, `events.list`, `events.watch`, `issues.casMetadata`; the one behavior token is `project.enforce`, which announces that a `Bd-Project-Id` stamp for the wrong workspace is refused here rather than silently ignored. The list grows additively, and an operation never appears here unless it is fully implemented. This is how a client checks for an operation or a behavior — never the version string.
+	// Capabilities The tokens this server advertises: the OPERATIONS it implements, derived from its route table, and the server-wide BEHAVIORS it enforces. v0's operation vocabulary is `ready.list`, `ready.count`, `issues.list`, `issues.query`, `issues.count`, `issues.get`, `issues.related`, `issues.create`, `issues.addComment`, `issues.batchClose`, `issues.claim`, `issues.claimNext`, `issues.release`, `issues.close`, `issues.reopen`, `issues.update`, `issues.sweep`, `issues.delete`, `issues.batchCreate`, `issues.batchApply`, `stats.get`, `config.list`, `config.get`, `config.set`, `config.unset`, `dependencies.cycles`, `dependencies.list`, `dependencies.count`, `dependencies.blocking`, `dependencies.tree`, `dependencies.add`, `dependencies.remove`, `memories.list`, `memories.get`, `memories.remember`, `memories.forget`, `events.list`, `events.watch`, `issues.casMetadata`, `issues.transitionMetadata`, and `issues.transitionReceipt.get`; the one behavior token is `project.enforce`, which announces that a `Bd-Project-Id` stamp for the wrong workspace is refused here rather than silently ignored. The list grows additively, and an operation never appears here unless it is fully implemented. The two revision-transition capabilities are advertised together only when the startup readiness probe verifies migrations 0067 and 0068, ignored migration 0027, no remaining zero aggregate revisions, the receipt table, and the role behind each route. This is how a client checks for an operation or a behavior — never the version string.
 	//
-	// THIS LIST IS BUILD-LEVEL, NOT WORKSPACE-LEVEL. It says which operations this binary serves, and for every entry but two that is the whole answer. `events.list` and `events.watch` are the exceptions: the durable events journal is a per-workspace setting that is OFF by default, so a server that advertises them may still refuse every request to both with 409 `events_journal_disabled` — correctly, because the operations exist and the workspace has no journal. A consumer of either MUST treat the capability as "this server speaks it" and the 409 as "not on this workspace", and must not read the capability as a promise that records will arrive.
+	// THIS LIST IS MOSTLY BUILD-LEVEL. The two revision-transition capabilities are also gated by the selected database's migration and data readiness, so their absence means this server instance cannot safely serve them yet. `events.list` and `events.watch` are gated separately by a per-workspace setting that is OFF by default; a server may advertise them and still refuse requests with 409 `events_journal_disabled`. Consumers MUST treat those tokens as "this server speaks it" and that 409 as "not on this workspace", not as a promise that journal records will arrive.
 	Capabilities []string `json:"capabilities"`
 
 	// Database Logical database name (not a host or a DSN).
@@ -1480,7 +1480,7 @@ type Problem struct {
 	// BlockerIsAncestor With `dependency_cycle`, hierarchy refusal only: true when `blocker_id` is an ANCESTOR of `issue_id` (which cannot close until its descendants finish, so the gate would never clear), false when it is a DESCENDANT (blocked status cascades, so it would inherit the block and never close). Both polarities are reported; this member is never omitted to mean false. See `issue_id`.
 	BlockerIsAncestor *bool `json:"blocker_is_ancestor,omitempty"`
 
-	// Code The stable machine-readable reason, and the ONLY member a client may dispatch on. v0's vocabulary: `invalid_argument` (400, also emitted by the Host-header middleware on any route), `invalid_cursor` (400), `unauthenticated` (401, only on a server configured with a token file), `not_found` (404), `already_claimed` (409), `not_claimable` (409), `not_closable` (409), `not_releasable` (409), `dependency_cycle` (409), `dependency_exists` (409), `already_exists` (409), `precondition_failed` (409), `events_journal_disabled` (409), `events_journal_truncated` (410), `busy` (503), `db_unavailable` (503), `events_watch_saturated` (503), `internal` (500). Renaming or removing a status+code pair is a breaking change; ADDING one is not, so clients MUST default-branch on unknown values and fall back to the status class (unknown 4xx → client bug, fail loud; unknown 503 → retry per `Retry-After`; other unknown 5xx → server fault).
+	// Code The stable machine-readable reason, and the ONLY member a client may dispatch on. v0's vocabulary: `invalid_argument` (400, also emitted by the Host-header middleware on any route), `invalid_cursor` (400), `unauthenticated` (401, when a configured token is refused or an authentication-required route has no verifier), `not_found` (404), `already_claimed` (409), `not_claimable` (409), `not_closable` (409), `not_releasable` (409), `dependency_cycle` (409), `dependency_exists` (409), `already_exists` (409), `precondition_failed` (409), `transition_receipt_conflict` (409), `unsupported_resource` (409), `not_implemented` (501), `events_journal_disabled` (409), `events_journal_truncated` (410), `busy` (503), `db_unavailable` (503), `events_watch_saturated` (503), `internal` (500). Renaming or removing a status+code pair is a breaking change; ADDING one is not, so clients MUST default-branch on unknown values and fall back to the status class (unknown 4xx → client bug, fail loud; unknown 503 → retry per `Retry-After`; other unknown 5xx → server fault).
 	Code string `json:"code"`
 
 	// DeclaredLater With `invalid_argument` on a batch operation whose items may name each other: whether the unresolvable key IS declared by the request, at a LATER index.
@@ -1899,6 +1899,84 @@ type SweepSkips struct {
 	Unreadable int `json:"unreadable"`
 }
 
+// TransitionMetadataRequest defines model for TransitionMetadataRequest.
+type TransitionMetadataRequest struct {
+	// Actor The caller asserted actor, trimmed and validated by the server.
+	Actor string `json:"actor"`
+
+	// Expected One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Expected MetadataValue `json:"expected,omitempty"`
+
+	// ExpectedVersion Canonical decimal spelling of a nonzero signed 64-bit integer. The server rejects overflow and JSON numbers.
+	ExpectedVersion string `json:"expected_version"`
+
+	// Key One metadata key, using the workspace metadata-key syntax.
+	Key  string `json:"key"`
+	Kind string `json:"kind"`
+
+	// Payload One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Payload MetadataValue `json:"payload,omitempty"`
+
+	// ReceiptId Caller-generated immutable receipt key. Keep it unchanged when retrying the exact same request or recovering after a lost response.
+	ReceiptId string `json:"receipt_id"`
+	Scope     string `json:"scope"`
+
+	// Value One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Value MetadataValue `json:"value,omitempty"`
+}
+
+// TransitionMetadataResponse defines model for TransitionMetadataResponse.
+type TransitionMetadataResponse struct {
+	// Applied True when the marker transition applied or replayed.
+	Applied bool `json:"applied"`
+
+	// Current One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Current MetadataValue      `json:"current,omitempty"`
+	Receipt *TransitionReceipt `json:"receipt,omitempty"`
+
+	// Replayed True when the exact receipt already existed for this request.
+	Replayed bool `json:"replayed"`
+}
+
+// TransitionReceipt defines model for TransitionReceipt.
+type TransitionReceipt struct {
+	Actor string `json:"actor"`
+
+	// Expected One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Expected MetadataValue `json:"expected,omitempty"`
+
+	// ExpectedVersion Canonical decimal spelling of the signed 64-bit source revision.
+	ExpectedVersion string `json:"expected_version"`
+	IssueId         string `json:"issue_id"`
+	Key             string `json:"key"`
+	Kind            string `json:"kind"`
+
+	// Payload One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Payload   MetadataValue `json:"payload"`
+	ReceiptId string        `json:"receipt_id"`
+	Scope     string        `json:"scope"`
+
+	// ToVersion Canonical decimal spelling of the signed 64-bit revision written.
+	ToVersion string `json:"to_version"`
+
+	// Value One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Value MetadataValue `json:"value,omitempty"`
+}
+
 // TreeNode One node of a walked dependency tree: a full issue plus where the walk reached it. Property semantics for the issue members are documented on `Issue`.
 //
 // The tree is FLAT. A node's place in it is read from `depth` and `parent_id`, not from nesting, and a subtree is contiguous in `items`.
@@ -1959,6 +2037,9 @@ type IssueID = string
 
 // MemoryKey defines model for MemoryKey.
 type MemoryKey = string
+
+// ProjectID defines model for ProjectID.
+type ProjectID = string
 
 // SettingKey defines model for SettingKey.
 type SettingKey = string
@@ -2106,6 +2187,12 @@ type WatchEventsParams struct {
 	LastEventID *int64 `json:"Last-Event-ID,omitempty"`
 }
 
+// GetTransitionReceiptParams defines parameters for GetTransitionReceipt.
+type GetTransitionReceiptParams struct {
+	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
+	BdProjectId ProjectID `json:"Bd-Project-Id"`
+}
+
 // ListIssuesParams defines parameters for ListIssues.
 type ListIssuesParams struct {
 	// Status Status filter. Repeat the parameter, or pass a comma-separated list. Custom statuses configured for the workspace are honored.
@@ -2225,6 +2312,12 @@ type ListRelatedIssuesParams struct {
 
 // ListRelatedIssuesParamsDirection defines parameters for ListRelatedIssues.
 type ListRelatedIssuesParamsDirection string
+
+// TransitionMetadataParams defines parameters for TransitionMetadata.
+type TransitionMetadataParams struct {
+	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
+	BdProjectId ProjectID `json:"Bd-Project-Id"`
+}
 
 // ClaimNextIssueParams defines parameters for ClaimNextIssue.
 type ClaimNextIssueParams struct {
@@ -2584,6 +2677,9 @@ type ReleaseIssueJSONRequestBody = ReleaseIssueRequest
 
 // ReopenIssueJSONRequestBody defines body for ReopenIssue for application/json ContentType.
 type ReopenIssueJSONRequestBody = ReopenIssueRequest
+
+// TransitionMetadataJSONRequestBody defines body for TransitionMetadata for application/json ContentType.
+type TransitionMetadataJSONRequestBody = TransitionMetadataRequest
 
 // ApplyBatchJSONRequestBody defines body for ApplyBatch for application/json ContentType.
 type ApplyBatchJSONRequestBody = ApplyBatchRequest

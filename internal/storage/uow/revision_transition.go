@@ -7,6 +7,7 @@ import (
 
 	"github.com/steveyegge/beads/internal/storage"
 	storeops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	publicops "github.com/steveyegge/beads/issueops"
 )
 
@@ -16,12 +17,27 @@ type RevisionTransitionSource interface {
 	RevisionTransition() (publicops.RevisionTransition, error)
 }
 
+// RevisionTransitionReadinessSource reports whether this provider's selected
+// database has every migration and backfill required by the transition role.
+type RevisionTransitionReadinessSource interface {
+	RevisionTransitionReadiness(context.Context) (schema.RevisionTransitionReadiness, error)
+}
+
 type revisionTransition struct {
 	provider UnitOfWorkProvider
 }
 
 func (p *doltSQLProvider) RevisionTransition() (publicops.RevisionTransition, error) {
 	return NewRevisionTransition(p)
+}
+
+// RevisionTransitionReadiness probes the exact schema and backfill state for
+// this provider's selected database. A probe error is not readiness.
+func (p *doltSQLProvider) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	if p == nil || p.db == nil {
+		return schema.RevisionTransitionReadiness{}, &storage.ErrUnsupported{Op: "RevisionTransitionReadiness", Backend: "nil"}
+	}
+	return schema.ProbeRevisionTransitionReadiness(ctx, p.db)
 }
 
 // NewRevisionTransition constructs the transition role backed by provider.

@@ -350,6 +350,7 @@ var (
 	_ uow.BatchCreatorSource        = timedProvider{}
 	_ uow.DependencyEditorSource    = timedProvider{}
 	_ uow.MetadataCASSource         = timedProvider{}
+	_ uow.RevisionTransitionSource  = timedProvider{}
 	_ uow.BatchApplierSource        = timedProvider{}
 	_ uow.MemoriesSource            = timedProvider{}
 	_ uow.EventsJournalCursorSource = timedProvider{}
@@ -529,6 +530,10 @@ func (p timedProvider) DependencyEditor() (issueops.DependencyEditor, error) {
 // same reason and with the same hazard as IssueReader.
 func (p timedProvider) MetadataCAS() (issueops.MetadataCAS, error) {
 	return uow.NewMetadataCAS(p)
+}
+
+func (p timedProvider) RevisionTransition() (issueops.RevisionTransition, error) {
+	return uow.NewRevisionTransition(p)
 }
 
 // BatchApplier builds the ordered-plan write role OVER THIS WRAPPER, for the

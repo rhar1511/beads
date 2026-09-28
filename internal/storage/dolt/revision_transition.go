@@ -8,6 +8,7 @@ import (
 
 	"github.com/steveyegge/beads/internal/storage"
 	storeops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/issueops"
 )
 
@@ -17,6 +18,15 @@ func (s *DoltStore) RevisionTransition() (issueops.RevisionTransition, error) {
 		return nil, &storage.ErrUnsupported{Op: "RevisionTransition", Backend: "nil"}
 	}
 	return &revisionTransition{store: s}, nil
+}
+
+// RevisionTransitionReadiness verifies the migration and backfill state that
+// must hold before this store's transition role is advertised over HTTP.
+func (s *DoltStore) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	if s == nil || s.db == nil {
+		return schema.RevisionTransitionReadiness{}, &storage.ErrUnsupported{Op: "RevisionTransitionReadiness", Backend: "nil"}
+	}
+	return schema.ProbeRevisionTransitionReadiness(ctx, s.db)
 }
 
 type revisionTransition struct{ store *DoltStore }
@@ -71,7 +81,7 @@ func (r *revisionTransition) GetReceipt(ctx context.Context, receiptID string) (
 		return nil, err
 	}
 	var receipt *issueops.RevisionTransitionReceipt
-	if err := r.store.withRetryTx(ctx, func(tx *sql.Tx) error {
+	if err := r.store.withReadTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		receipt, err = storeops.GetRevisionTransitionReceiptInTx(ctx, tx, receiptID)
 		return err
