@@ -291,6 +291,17 @@ var routeTable = []route{
 		handler:     (*Server).handleGetIssue,
 	},
 	{
+		op:              OpGetSourceSnapshot,
+		method:          http.MethodGet,
+		pattern:         "/v0/beads/issues/{id}/sourceSnapshot",
+		capability:      "issues.sourceSnapshot",
+		capabilityGate:  "source-snapshot",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleGetSourceSnapshot,
+	},
+	{
 		op:     OpUpdateIssue,
 		method: http.MethodPatch,
 		// A PLAIN METHOD on the issue-detail path, not a custom method: partial
@@ -791,9 +802,14 @@ func Capabilities() []string {
 }
 
 func capabilitiesFor(revisionTransitionReady bool) []string {
+	return capabilitiesForWithGates(revisionTransitionReady, revisionTransitionReady)
+}
+
+func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady bool) []string {
 	var out []string
 	for _, rt := range routeTable {
-		if rt.implemented && rt.capability != "" && (rt.capabilityGate == "" || (rt.capabilityGate == "revision-transition" && revisionTransitionReady)) {
+		gateReady := rt.capabilityGate == "" || (rt.capabilityGate == "revision-transition" && revisionTransitionReady) || (rt.capabilityGate == "source-snapshot" && sourceSnapshotReady)
+		if rt.implemented && rt.capability != "" && gateReady {
 			out = append(out, rt.capability)
 		}
 	}

@@ -271,6 +271,10 @@ type Config struct {
 	// role for a roles-backed server. It is used only with a positive
 	// TransitionReadiness proof; absence leaves both HTTP capabilities hidden.
 	RevisionTransition issueops.RevisionTransition
+	// SourceSnapshotReader is the optional atomic durable issue-plus-outgoing-
+	// edges read. It is published only when the same Q43 revision readiness
+	// proof, authentication, and project identity are present.
+	SourceSnapshotReader issueops.SourceSnapshotReader
 	// TransitionReadiness is a read-only schema/data probe result. Its zero
 	// value is unready, and only the schema probe can create a positive value.
 	TransitionReadiness schema.RevisionTransitionReadiness
@@ -379,6 +383,8 @@ type Server struct {
 	issueMetadataCAS        issueops.MetadataCAS
 	issueRevisionTransition issueops.RevisionTransition
 	revisionTransitionReady bool
+	issueSourceSnapshot     issueops.SourceSnapshotReader
+	sourceSnapshotReady     bool
 	issueBatchApplier       issueops.BatchApplier
 	workspaceMemories       memoryops.Memories
 	eventsJournal           storage.EventsJournalCursor
@@ -500,6 +506,7 @@ func Listen(cfg Config) (*Server, error) {
 		cfg.Stderr = os.Stderr
 	}
 	transitionRole := cfg.RevisionTransition
+	sourceSnapshotRole := cfg.SourceSnapshotReader
 	if cfg.Provider != nil && cfg.TransitionReadiness.Ready() {
 		if source, ok := cfg.Provider.(uow.RevisionTransitionSource); ok {
 			transitionRole, err = source.RevisionTransition()
@@ -509,8 +516,17 @@ func Listen(cfg Config) (*Server, error) {
 		} else {
 			transitionRole = nil
 		}
+		if source, ok := cfg.Provider.(uow.SourceSnapshotReaderSource); ok {
+			sourceSnapshotRole, err = source.SourceSnapshotReader()
+			if err != nil {
+				sourceSnapshotRole = nil
+			}
+		} else {
+			sourceSnapshotRole = nil
+		}
 	}
 	transitionReady := revisionTransitionRoutesReady(cfg.TransitionReadiness, transitionRole, cfg.Auth, cfg.Workspace.ProjectID)
+	sourceSnapshotReady := sourceSnapshotRoutesReady(cfg.TransitionReadiness, sourceSnapshotRole, cfg.Auth, cfg.Workspace.ProjectID)
 
 	prefix, err := newIDPrefix()
 	if err != nil {
@@ -556,13 +572,15 @@ func Listen(cfg Config) (*Server, error) {
 
 		log:                     log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
 		stdout:                  cfg.Stdout,
-		ctxBody:                 contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesFor(transitionReady)),
+		ctxBody:                 contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady)),
 		hosts:                   newHostPolicy(ip, cfg.AllowedHosts),
 		auth:                    cfg.Auth,
 		idPrefix:                prefix,
 		maxConns:                maxConns,
 		issueRevisionTransition: transitionRole,
 		revisionTransitionReady: transitionReady,
+		issueSourceSnapshot:     sourceSnapshotRole,
+		sourceSnapshotReady:     sourceSnapshotReady,
 	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
@@ -614,7 +632,24 @@ func revisionTransitionRoutesReady(readiness schema.RevisionTransitionReadiness,
 	return readiness.Ready() && !isNilRevisionTransitionRole(role) && auth != nil && strings.TrimSpace(projectID) != ""
 }
 
+func sourceSnapshotRoutesReady(readiness schema.RevisionTransitionReadiness, role issueops.SourceSnapshotReader, auth *TokenFileAuth, projectID string) bool {
+	return readiness.Ready() && !isNilSourceSnapshotReader(role) && auth != nil && strings.TrimSpace(projectID) != ""
+}
+
 func isNilRevisionTransitionRole(role issueops.RevisionTransition) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isNilSourceSnapshotReader(role issueops.SourceSnapshotReader) bool {
 	if role == nil {
 		return true
 	}
@@ -680,7 +715,7 @@ func sourceRoles(cfg Config) []any {
 const roleSourceNames = "Reader, Claimer, ReadyClaimer, Releaser, Lifecycle, BatchCloser, Settings, Stats, CycleDetector, EdgeReader, GraphCounter, Relations, Commenter, BlockingAnnotator, TreeWalker, ReadyCounter, Counter, Querier, Sweeper, Deleter, BatchCreator, DependencyEditor, BatchApplier, Memories and MetadataCAS"
 
 func anyRoleSet(cfg Config) bool {
-	return slices.ContainsFunc(sourceRoles(cfg), func(r any) bool { return r != nil })
+	return cfg.SourceSnapshotReader != nil || slices.ContainsFunc(sourceRoles(cfg), func(r any) bool { return r != nil })
 }
 
 func everyRoleSet(cfg Config) bool {
@@ -688,7 +723,7 @@ func everyRoleSet(cfg Config) bool {
 }
 
 func anyRoleFiresHooks(cfg Config) bool {
-	return slices.ContainsFunc(sourceRoles(cfg), storage.RoleFiresHooks)
+	return storage.RoleFiresHooks(cfg.SourceSnapshotReader) || slices.ContainsFunc(sourceRoles(cfg), storage.RoleFiresHooks)
 }
 
 func checkDatabaseSource(cfg Config) error {
@@ -1199,6 +1234,20 @@ func (s *Server) revisionTransition(r *http.Request) (issueops.RevisionTransitio
 	}
 	var src uow.RevisionTransitionSource = timedProvider{inner: s.provider, rec: requestInfo(r.Context())}
 	return src.RevisionTransition()
+}
+
+// sourceSnapshotReader returns the atomic durable source read role. Provider-
+// backed calls use timedProvider so the one unit of work appears in uow_ms.
+func (s *Server) sourceSnapshotReader(r *http.Request) (issueops.SourceSnapshotReader, error) {
+	if s.provider == nil {
+		return checkedSourceSnapshotReader{inner: s.issueSourceSnapshot}, nil
+	}
+	var src uow.SourceSnapshotReaderSource = timedProvider{inner: s.provider, rec: requestInfo(r.Context())}
+	reader, err := src.SourceSnapshotReader()
+	if err != nil {
+		return nil, err
+	}
+	return checkedSourceSnapshotReader{inner: reader}, nil
 }
 
 // batchApplier returns the ordered-plan write surface for one request, on the

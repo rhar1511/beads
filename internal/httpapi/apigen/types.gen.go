@@ -992,9 +992,9 @@ type ContextResponse struct {
 	// OPTIONAL, and absent means only that this server does not disclose its filesystem layout — never that it has no workspace. A client MUST NOT require it, MUST NOT treat absence as an error, and has no use for the value beyond display: it is a path on the SERVER's filesystem, which the client cannot open. Identify the workspace by `project_id` and `database`, which are required.
 	BeadsDir *string `json:"beads_dir,omitempty"`
 
-	// Capabilities The tokens this server advertises: the OPERATIONS it implements, derived from its route table, and the server-wide BEHAVIORS it enforces. v0's operation vocabulary is `ready.list`, `ready.count`, `issues.list`, `issues.query`, `issues.count`, `issues.get`, `issues.related`, `issues.create`, `issues.addComment`, `issues.batchClose`, `issues.claim`, `issues.claimNext`, `issues.release`, `issues.close`, `issues.reopen`, `issues.update`, `issues.sweep`, `issues.delete`, `issues.batchCreate`, `issues.batchApply`, `stats.get`, `config.list`, `config.get`, `config.set`, `config.unset`, `dependencies.cycles`, `dependencies.list`, `dependencies.count`, `dependencies.blocking`, `dependencies.tree`, `dependencies.add`, `dependencies.remove`, `memories.list`, `memories.get`, `memories.remember`, `memories.forget`, `events.list`, `events.watch`, `issues.casMetadata`, `issues.transitionMetadata`, and `issues.transitionReceipt.get`; the one behavior token is `project.enforce`, which announces that a `Bd-Project-Id` stamp for the wrong workspace is refused here rather than silently ignored. The list grows additively, and an operation never appears here unless it is fully implemented. The two revision-transition capabilities are advertised together only when the startup readiness probe verifies migrations 0067 and 0068, ignored migration 0027, no remaining zero aggregate revisions, the receipt table, and the role behind each route. This is how a client checks for an operation or a behavior — never the version string.
+	// Capabilities The tokens this server advertises: the OPERATIONS it implements, derived from its route table, and the server-wide BEHAVIORS it enforces. v0's operation vocabulary is `ready.list`, `ready.count`, `issues.list`, `issues.query`, `issues.count`, `issues.get`, `issues.related`, `issues.create`, `issues.addComment`, `issues.batchClose`, `issues.claim`, `issues.claimNext`, `issues.release`, `issues.close`, `issues.reopen`, `issues.update`, `issues.sweep`, `issues.delete`, `issues.batchCreate`, `issues.batchApply`, `stats.get`, `config.list`, `config.get`, `config.set`, `config.unset`, `dependencies.cycles`, `dependencies.list`, `dependencies.count`, `dependencies.blocking`, `dependencies.tree`, `dependencies.add`, `dependencies.remove`, `memories.list`, `memories.get`, `memories.remember`, `memories.forget`, `events.list`, `events.watch`, `issues.casMetadata`, `issues.transitionMetadata`, `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; the one behavior token is `project.enforce`, which announces that a `Bd-Project-Id` stamp for the wrong workspace is refused here rather than silently ignored. The list grows additively, and an operation never appears here unless it is fully implemented. The two revision-transition capabilities are advertised together only when the startup readiness probe verifies migrations 0067 and 0068, ignored migration 0027, no remaining zero aggregate revisions, the receipt table, and the role behind each route. `issues.sourceSnapshot` is advertised only when the same revision readiness proof and its atomic source-snapshot role are available, and the server has authentication and a project ID. This is how a client checks for an operation or a behavior — never the version string.
 	//
-	// THIS LIST IS MOSTLY BUILD-LEVEL. The two revision-transition capabilities are also gated by the selected database's migration and data readiness, so their absence means this server instance cannot safely serve them yet. `events.list` and `events.watch` are gated separately by a per-workspace setting that is OFF by default; a server may advertise them and still refuse requests with 409 `events_journal_disabled`. Consumers MUST treat those tokens as "this server speaks it" and that 409 as "not on this workspace", not as a promise that journal records will arrive.
+	// THIS LIST IS MOSTLY BUILD-LEVEL. The revision-transition and source-snapshot capabilities are also gated by the selected database's migration and data readiness, so their absence means this server instance cannot safely serve them yet. `events.list` and `events.watch` are gated separately by a per-workspace setting that is OFF by default; a server may advertise them and still refuse requests with 409 `events_journal_disabled`. Consumers MUST treat those tokens as "this server speaks it" and that 409 as "not on this workspace", not as a promise that journal records will arrive.
 	Capabilities []string `json:"capabilities"`
 
 	// Database Logical database name (not a host or a DSN).
@@ -1806,6 +1806,13 @@ type SettingsPage struct {
 	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
+// SourceSnapshotResponse The exact durable issue row and its complete outgoing durable dependency list, observed in one database snapshot. The issue revision is the canonical signed decimal string for the row_lock used by guarded transitions. `outgoing_dependencies` is always present, including as an empty array when the snapshot proves that no outgoing edge exists.
+type SourceSnapshotResponse struct {
+	// Issue An `Issue` with its labels, dependency edges and cardinalities — the body of `GET /v0/beads/issues/{id}`. `dependencies` and `dependents` carry FULL issue objects plus the edge type, not bare edges. Property semantics are documented on `Issue`.
+	Issue                IssueDetails `json:"issue"`
+	OutgoingDependencies []Dependency `json:"outgoing_dependencies"`
+}
+
 // Statistics Workspace summary counts. Two of them are DEPENDENCY-AWARE and two are structurally always zero; both facts are stated on the properties themselves, because every number here is the same JSON type and nothing else on the wire distinguishes them.
 //
 // This is the struct `bd status --json` marshals under `summary`, pinned so the two surfaces are one compatibility domain.
@@ -2312,6 +2319,12 @@ type ListRelatedIssuesParams struct {
 
 // ListRelatedIssuesParamsDirection defines parameters for ListRelatedIssues.
 type ListRelatedIssuesParamsDirection string
+
+// GetSourceSnapshotParams defines parameters for GetSourceSnapshot.
+type GetSourceSnapshotParams struct {
+	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
+	BdProjectId ProjectID `json:"Bd-Project-Id"`
+}
 
 // TransitionMetadataParams defines parameters for TransitionMetadata.
 type TransitionMetadataParams struct {

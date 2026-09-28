@@ -2348,6 +2348,75 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issues/{id}/sourceSnapshot:
+    get:
+      operationId: getSourceSnapshot
+      summary: Read one durable issue and its complete outgoing edges atomically
+      description: >-
+        Returns the exact durable issue row, including its canonical signed
+        aggregate revision token, and every outgoing durable dependency row
+        from one database snapshot. The revision is the same `row_lock`
+        aggregate domain that revision-fenced metadata transitions compare.
+        This read does not resolve wisps or hydrate dependency targets.
+
+
+        `outgoing_dependencies` is always present. An empty array means the
+        read completed and found no outgoing edges; an absent or null list is
+        never a successful answer. Dependency-read failures fail the whole
+        request rather than returning a partial issue snapshot.
+
+
+        This operation always requires a configured bearer token and a
+        matching `Bd-Project-Id` header. It is advertised only when the Q43
+        revision readiness proof, source-snapshot role, authentication, and
+        project identity are all available.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+        - $ref: '#/components/parameters/ProjectID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The durable issue row and all outgoing durable edges from one snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceSnapshotResponse'
+        '400':
+          description: The project stamp is missing or does not match, or an unsupported query parameter was supplied.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No durable issue with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: The issue does not have a qualified durable aggregate revision.
+          x-bd-codes: [unsupported_resource]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '501':
+          description: Migration or role readiness for this route is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issues/{id}/related:
     get:
       operationId: listRelatedIssues
@@ -6832,6 +6901,22 @@ components:
             `float` — rounds anything past 2^53 to a value NEAR the token that is not
             it, so a guard composed from it is refused against a row nothing else
             touched. A string round-trips exactly in every consumer.
+    SourceSnapshotResponse:
+      type: object
+      description: >-
+        The exact durable issue row and its complete outgoing durable dependency
+        list, observed in one database snapshot. The issue revision is the
+        canonical signed decimal string for the row_lock used by guarded
+        transitions. `outgoing_dependencies` is always present, including as
+        an empty array when the snapshot proves that no outgoing edge exists.
+      required: [issue, outgoing_dependencies]
+      properties:
+        issue:
+          $ref: '#/components/schemas/IssueDetails'
+        outgoing_dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dependency'
     IssueWithDependencyMetadata:
       type: object
       description: >-
@@ -7448,8 +7533,8 @@ components:
             `dependencies.add`, `dependencies.remove`,
             `memories.list`, `memories.get`, `memories.remember`,
             `memories.forget`, `events.list`, `events.watch`,
-            `issues.casMetadata`, `issues.transitionMetadata`, and
-            `issues.transitionReceipt.get`; the one behavior token is `project.enforce`,
+            `issues.casMetadata`, `issues.transitionMetadata`,
+            `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; the one behavior token is `project.enforce`,
             which announces that a `Bd-Project-Id` stamp for the wrong workspace
             is refused here rather than silently ignored. The list grows
             additively, and an operation never appears here unless it is fully
@@ -7457,14 +7542,17 @@ components:
             advertised together only when the startup readiness probe verifies
             migrations 0067 and 0068, ignored migration 0027, no remaining zero
             aggregate revisions, the receipt table, and the role behind each
-            route. This is how a client checks for an operation or a behavior —
-            never the version string.
+            route. `issues.sourceSnapshot` is advertised only when the same
+            revision readiness proof and its atomic source-snapshot role are
+            available, and the server has authentication and a project ID.
+            This is how a client checks for an operation or a behavior — never
+            the version string.
 
 
-            THIS LIST IS MOSTLY BUILD-LEVEL. The two revision-transition
-            capabilities are also gated by the selected database's migration
-            and data readiness, so their absence means this server instance
-            cannot safely serve them yet. `events.list` and `events.watch` are
+            THIS LIST IS MOSTLY BUILD-LEVEL. The revision-transition and
+            source-snapshot capabilities are also gated by the selected
+            database's migration and data readiness, so their absence means
+            this server instance cannot safely serve them yet. `events.list` and `events.watch` are
             gated separately by a per-workspace setting that is OFF by default;
             a server may advertise them and still refuse requests with 409
             `events_journal_disabled`. Consumers MUST treat those tokens as

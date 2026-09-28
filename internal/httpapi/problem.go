@@ -331,8 +331,8 @@ var staticDetail = map[Code]string{
 	CodeDBUnavailable:             "database temporarily unavailable; retry",
 	CodeInternal:                  "internal server error",
 	CodeTransitionReceiptConflict: "this receipt ID is already bound to a different request",
-	CodeUnsupportedResource:       "revision transitions are not supported for this resource",
-	CodeNotImplemented:            "revision transition routes are not ready on this server",
+	CodeUnsupportedResource:       "operation is not supported for this resource",
+	CodeNotImplemented:            "operation is not ready on this server",
 }
 
 // Retry-After values, in seconds.
@@ -360,13 +360,14 @@ var ErrBusy = errors.New("server busy")
 
 // Operation ids, matching the spec's operationId values exactly.
 const (
-	OpHealth        = "health"
-	OpGetContext    = "getContext"
-	OpListReadyWork = "listReadyWork"
-	OpGetStats      = "getStats"
-	OpListIssues    = "listIssues"
-	OpGetIssue      = "getIssue"
-	OpClaimIssue    = "claimIssue"
+	OpHealth            = "health"
+	OpGetContext        = "getContext"
+	OpListReadyWork     = "listReadyWork"
+	OpGetStats          = "getStats"
+	OpListIssues        = "listIssues"
+	OpGetIssue          = "getIssue"
+	OpGetSourceSnapshot = "getSourceSnapshot"
+	OpClaimIssue        = "claimIssue"
 	// OpBatchCloseIssues closes many issues as one transaction, behind
 	// issueops.BatchCloser. It is the surface's ONLY operation whose 200 body
 	// carries refusals: the role is deliberately not all-or-nothing, so an id
@@ -644,6 +645,10 @@ var operationCodes = map[string][]Code{
 	// this server knows, not the document-level unknown-key rule this table
 	// omits.
 	OpGetIssue: {CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeBusy, CodeDBUnavailable, CodeInternal},
+	OpGetSourceSnapshot: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeUnsupportedResource,
+		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
 	// No 400 of its own: the operation takes no parameters, so the only
 	// invalid_argument it can raise is the document-level unknown-query-key
 	// rule this table deliberately omits.
@@ -1331,9 +1336,21 @@ func UnsupportedTransitionResource() Result {
 	return newResult(CodeUnsupportedResource, "")
 }
 
+// UnsupportedResource is the stable refusal for any operation whose addressed
+// resource plane cannot satisfy that operation's durable contract.
+func UnsupportedResource() Result {
+	return newResult(CodeUnsupportedResource, "")
+}
+
 // TransitionNotImplemented reports that the server did not prove the schema
 // and role prerequisites needed by the transition routes.
 func TransitionNotImplemented() Result {
+	return newResult(CodeNotImplemented, "")
+}
+
+// SourceSnapshotNotImplemented reports that the server did not prove the
+// schema and role prerequisites needed by the source-snapshot route.
+func SourceSnapshotNotImplemented() Result {
 	return newResult(CodeNotImplemented, "")
 }
 

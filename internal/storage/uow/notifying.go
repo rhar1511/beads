@@ -308,6 +308,12 @@ func (p *notifyingProvider) RevisionTransition() (publicops.RevisionTransition, 
 	return NewRevisionTransition(p)
 }
 
+// SourceSnapshotReader builds on THIS provider so the atomic read stays inside
+// one notifying unit of work. The operation is read-only and emits no hook.
+func (p *notifyingProvider) SourceSnapshotReader() (publicops.SourceSnapshotReader, error) {
+	return NewSourceSnapshotReader(p)
+}
+
 func (p *notifyingProvider) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
 	source, ok := p.inner.(RevisionTransitionReadinessSource)
 	if !ok {

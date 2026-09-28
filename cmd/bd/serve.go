@@ -298,33 +298,34 @@ func runServe() error {
 		}
 		defer startServeEventsJournalMaintenance(info.BeadsDir, store)()
 		return serveListen(opts, httpapi.Config{
-			Reader:              roles.reader,
-			Claimer:             roles.claimer,
-			BatchCloser:         roles.batchCloser,
-			ReadyClaimer:        roles.readyClaimer,
-			Releaser:            roles.releaser,
-			Lifecycle:           roles.lifecycle,
-			Settings:            roles.settings,
-			Stats:               roles.stats,
-			CycleDetector:       roles.cycles,
-			EdgeReader:          roles.edges,
-			GraphCounter:        roles.edgeCounter,
-			Relations:           roles.relations,
-			Commenter:           roles.commenter,
-			BlockingAnnotator:   roles.blocking,
-			TreeWalker:          roles.tree,
-			ReadyCounter:        roles.readyCounter,
-			Counter:             roles.counter,
-			Querier:             roles.querier,
-			Sweeper:             roles.sweeper,
-			Deleter:             roles.deleter,
-			BatchCreator:        roles.batchCreator,
-			DependencyEditor:    roles.dependencyEditor,
-			MetadataCAS:         roles.metadataCAS,
-			RevisionTransition:  roles.revisionTransition,
-			TransitionReadiness: roles.transitionReadiness,
-			BatchApplier:        roles.batchApplier,
-			Memories:            roles.memories,
+			Reader:               roles.reader,
+			Claimer:              roles.claimer,
+			BatchCloser:          roles.batchCloser,
+			ReadyClaimer:         roles.readyClaimer,
+			Releaser:             roles.releaser,
+			Lifecycle:            roles.lifecycle,
+			Settings:             roles.settings,
+			Stats:                roles.stats,
+			CycleDetector:        roles.cycles,
+			EdgeReader:           roles.edges,
+			GraphCounter:         roles.edgeCounter,
+			Relations:            roles.relations,
+			Commenter:            roles.commenter,
+			BlockingAnnotator:    roles.blocking,
+			TreeWalker:           roles.tree,
+			ReadyCounter:         roles.readyCounter,
+			Counter:              roles.counter,
+			Querier:              roles.querier,
+			Sweeper:              roles.sweeper,
+			Deleter:              roles.deleter,
+			BatchCreator:         roles.batchCreator,
+			DependencyEditor:     roles.dependencyEditor,
+			MetadataCAS:          roles.metadataCAS,
+			RevisionTransition:   roles.revisionTransition,
+			SourceSnapshotReader: roles.sourceSnapshotReader,
+			TransitionReadiness:  roles.transitionReadiness,
+			BatchApplier:         roles.batchApplier,
+			Memories:             roles.memories,
 			// Nil when this backend has no journal seam and the workspace never
 			// asked for one; Listen requires it exactly when the flag below is
 			// set, and serveIssueRoles has already refused the enabled case.
@@ -788,7 +789,14 @@ func serveIssueRoles(ctx context.Context, src serveRoleSource, journalEnabled bo
 			roles.revisionTransition = role
 		}
 	}
-	if roles.revisionTransition != nil {
+	if roleSource, ok := src.(interface {
+		SourceSnapshotReader() (issueops.SourceSnapshotReader, error)
+	}); ok {
+		if role, err := roleSource.SourceSnapshotReader(); err == nil {
+			roles.sourceSnapshotReader = role
+		}
+	}
+	if roles.revisionTransition != nil || roles.sourceSnapshotReader != nil {
 		if source, ok := src.(interface {
 			RevisionTransitionReadiness(context.Context) (schema.RevisionTransitionReadiness, error)
 		}); ok {
@@ -885,9 +893,10 @@ type serveRoles struct {
 	// metadataCAS is the conditional single-key metadata write. Its accessor
 	// recurses through the hook decorator, so the ONE peel above is what keeps
 	// this server from running the workspace's on_update script per swap.
-	metadataCAS         issueops.MetadataCAS
-	revisionTransition  issueops.RevisionTransition
-	transitionReadiness schema.RevisionTransitionReadiness
+	metadataCAS          issueops.MetadataCAS
+	revisionTransition   issueops.RevisionTransition
+	sourceSnapshotReader issueops.SourceSnapshotReader
+	transitionReadiness  schema.RevisionTransitionReadiness
 	// batchApplier is the role that makes the ONE peel above matter most, and
 	// the arithmetic is what makes it worth its own sentence. Its hook wrapper
 	// fires FOUR vocabularies from one call — on_create for every created item,

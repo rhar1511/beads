@@ -1007,6 +1007,17 @@ func (r *dependencySQLRepositoryImpl) GetDependencyRecordsForIssues(ctx context.
 	return out, nil
 }
 
+func (r *dependencySQLRepositoryImpl) GetDurableDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error) {
+	if len(issueIDs) == 0 {
+		return map[string][]*types.Dependency{}, nil
+	}
+	out, err := issueops.GetDependencyRecordsForIssuesFromTableInTx(ctx, r.runner, "dependencies", issueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("db: DependencySQLRepository.GetDurableDependencyRecordsForIssues: %w", err)
+	}
+	return out, nil
+}
+
 func (r *dependencySQLRepositoryImpl) GetWispDependencyRecordsForIDs(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error) {
 	if len(wispIDs) == 0 {
 		return map[string][]*types.Dependency{}, nil

@@ -157,6 +157,20 @@ func TestQ43ServerModeTransitionConformance(t *testing.T) {
 	if got := q43AssertIssueEffect(t, baseURL, project.ProjectID, issueID, request); got != updatedRevision {
 		t.Fatalf("revision after exact replay = %d, want unchanged %d", got, updatedRevision)
 	}
+	q43AssertSourceSnapshot(t, client, baseURL, project.ProjectID, issueID, updatedRevision, nil)
+
+	firstTargetID := strings.TrimSpace(q43Run(t, 2*time.Minute, env, workspace, bd,
+		"create", "--silent", "Q43 source snapshot first target", "-p", "2"))
+	secondTargetID := strings.TrimSpace(q43Run(t, 2*time.Minute, env, workspace, bd,
+		"create", "--silent", "Q43 source snapshot second target", "-p", "2"))
+	if firstTargetID == "" || secondTargetID == "" {
+		t.Fatalf("bd create returned empty source-snapshot target IDs: %q, %q", firstTargetID, secondTargetID)
+	}
+	q43Run(t, 2*time.Minute, env, workspace, bd, "dep", "add", issueID, firstTargetID)
+	q43Run(t, 2*time.Minute, env, workspace, bd, "dep", "add", issueID, secondTargetID, "--type", "related")
+	edgeRevision := q43IssueRevision(t, baseURL, project.ProjectID, issueID)
+	edges := map[string]string{firstTargetID: "blocks", secondTargetID: "related"}
+	q43AssertSourceSnapshot(t, client, baseURL, project.ProjectID, issueID, edgeRevision, edges)
 
 	// Two simultaneous copies of one request must resolve to one applied write
 	// and one replay, with a single resulting revision.
@@ -184,6 +198,7 @@ func TestQ43ServerModeTransitionConformance(t *testing.T) {
 	serve = q43StartServe(t, bd, workspace, env, tokenFile)
 	baseURL = serve.baseURL()
 	client = q43Client(t, baseURL, project.ProjectID, database, http.DefaultClient)
+	q43AssertReadyContext(t, client, baseURL, project.ProjectID, database)
 	restartedReceipt, err := client.GetTransitionReceipt(t.Context(), request.ReceiptID)
 	if err != nil {
 		t.Fatalf("read Q43 receipt after clean bd serve restart: %v", err)
@@ -192,9 +207,10 @@ func TestQ43ServerModeTransitionConformance(t *testing.T) {
 	if restartedReceipt.ToVersion != stored.ToVersion {
 		t.Fatalf("receipt to_version after restart = %d, want %d", restartedReceipt.ToVersion, stored.ToVersion)
 	}
-	if got := q43AssertIssueEffect(t, baseURL, project.ProjectID, issueID, request); got != updatedRevision {
-		t.Fatalf("issue revision after bd serve restart = %d, want %d", got, updatedRevision)
+	if got := q43AssertIssueEffect(t, baseURL, project.ProjectID, issueID, request); got != edgeRevision {
+		t.Fatalf("issue revision after bd serve restart = %d, want %d", got, edgeRevision)
 	}
+	q43AssertSourceSnapshot(t, client, baseURL, project.ProjectID, issueID, edgeRevision, edges)
 
 	// The proxy forwards the POST to the real server, reads its successful
 	// response, then closes the client connection before returning any bytes.
@@ -587,6 +603,9 @@ func q43AssertReadyContext(t *testing.T, client *httpclient.Client, baseURL, pro
 	if err := client.VerifyRevisionTransition(ctx, projectID, database); err != nil {
 		t.Fatalf("verify live server transition identity and capabilities: %v", err)
 	}
+	if err := client.VerifySourceSnapshot(ctx, projectID, database); err != nil {
+		t.Fatalf("verify live server source-snapshot identity and capabilities: %v", err)
+	}
 	response, err := q43AuthenticatedGET(ctx, baseURL+"/v0/beads/context", projectID)
 	if err != nil {
 		t.Fatalf("read authenticated server context: %v", err)
@@ -604,7 +623,7 @@ func q43AssertReadyContext(t *testing.T, client *httpclient.Client, baseURL, pro
 	if body.APIVersion != "v0" || body.ProjectID != projectID || body.Database != database || body.DoltMode != "server" {
 		t.Fatalf("server identity = api %q project %q database %q mode %q, want v0, %q, %q, server", body.APIVersion, body.ProjectID, body.Database, body.DoltMode, projectID, database)
 	}
-	for _, required := range []string{"project.enforce", "issues.transitionMetadata", "issues.transitionReceipt.get"} {
+	for _, required := range []string{"project.enforce", "issues.transitionMetadata", "issues.transitionReceipt.get", "issues.sourceSnapshot"} {
 		if !slicesContains(body.Capabilities, required) {
 			t.Fatalf("server context omits Q43 capability %q: %v", required, body.Capabilities)
 		}
@@ -682,6 +701,43 @@ func q43ReadIssue(t *testing.T, baseURL, projectID, issueID string) q43IssueSnap
 func q43IssueRevision(t *testing.T, baseURL, projectID, issueID string) int64 {
 	t.Helper()
 	return q43ReadIssue(t, baseURL, projectID, issueID).Revision
+}
+
+func q43AssertSourceSnapshot(t *testing.T, client *httpclient.Client, baseURL, projectID, issueID string, expectedRevision int64, expectedEdges map[string]string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	snapshot, err := client.GetSourceSnapshot(ctx, issueID)
+	if err != nil {
+		t.Fatalf("read source snapshot for %s: %v", issueID, err)
+	}
+	if snapshot == nil || snapshot.Issue.ID != issueID {
+		t.Fatalf("source snapshot issue = %+v, want %s", snapshot, issueID)
+	}
+	wantToken := strconv.FormatInt(expectedRevision, 10)
+	if snapshot.Issue.RowVersion != expectedRevision || snapshot.Issue.Revision != wantToken {
+		t.Fatalf("source snapshot revision = %d/%q, want %d/%q", snapshot.Issue.RowVersion, snapshot.Issue.Revision, expectedRevision, wantToken)
+	}
+	if liveRevision := q43IssueRevision(t, baseURL, projectID, issueID); liveRevision != expectedRevision {
+		t.Fatalf("live issue revision = %d, want source snapshot revision %d", liveRevision, expectedRevision)
+	}
+	if snapshot.OutgoingDependencies == nil {
+		t.Fatal("source snapshot dependency list is nil, want explicit empty or complete array")
+	}
+	if len(snapshot.OutgoingDependencies) != len(expectedEdges) {
+		t.Fatalf("source snapshot edges = %+v, want %d exact edges", snapshot.OutgoingDependencies, len(expectedEdges))
+	}
+	seen := make(map[string]bool, len(snapshot.OutgoingDependencies))
+	for _, edge := range snapshot.OutgoingDependencies {
+		if edge == nil || edge.IssueID != issueID {
+			t.Fatalf("source snapshot contains invalid outgoing edge: %+v", edge)
+		}
+		wantType, ok := expectedEdges[edge.DependsOnID]
+		if !ok || string(edge.Type) != wantType || seen[edge.DependsOnID] {
+			t.Fatalf("source snapshot contains unexpected or duplicate edge: %+v (expected %v)", edge, expectedEdges)
+		}
+		seen[edge.DependsOnID] = true
+	}
 }
 
 func q43AssertIssueEffect(t *testing.T, baseURL, projectID, issueID string, request httpclient.TransitionMetadataRequest) int64 {
