@@ -157,6 +157,10 @@ const (
 	// different request. It is stable across retries and never includes stored
 	// receipt contents in the response.
 	CodeTransitionReceiptConflict Code = "transition_receipt_conflict"
+	// CodeProtectedRecord reports a mutation refused by the backend's record
+	// protection checks. It deliberately carries no permit or classification
+	// details.
+	CodeProtectedRecord Code = "protected_record"
 	// CodeUnsupportedResource means the addressed resource plane cannot perform
 	// this operation (currently, a wisp cannot carry a durable revision receipt).
 	CodeUnsupportedResource Code = "unsupported_resource"
@@ -264,6 +268,7 @@ var codeStatus = map[Code]int{
 	CodeDependencyExists:          http.StatusConflict,
 	CodeAlreadyExists:             http.StatusConflict,
 	CodeTransitionReceiptConflict: http.StatusConflict,
+	CodeProtectedRecord:           http.StatusConflict,
 	CodeUnsupportedResource:       http.StatusConflict,
 	CodeNotImplemented:            http.StatusNotImplemented,
 
@@ -331,6 +336,7 @@ var staticDetail = map[Code]string{
 	CodeDBUnavailable:             "database temporarily unavailable; retry",
 	CodeInternal:                  "internal server error",
 	CodeTransitionReceiptConflict: "this receipt ID is already bound to a different request",
+	CodeProtectedRecord:           "this mutation was refused",
 	CodeUnsupportedResource:       "operation is not supported for this resource",
 	CodeNotImplemented:            "operation is not ready on this server",
 }
@@ -1031,7 +1037,8 @@ var operationCodes = map[string][]Code{
 	OpTransitionMetadata: {
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodePreconditionFailed, CodeTransitionReceiptConflict,
-		CodeUnsupportedResource, CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+		CodeProtectedRecord, CodeUnsupportedResource, CodeNotImplemented,
+		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	OpGetTransitionReceipt: {
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
@@ -1328,6 +1335,12 @@ func TransitionReceiptNotFound() Result {
 // TransitionReceiptConflict reports a stable receipt-ID binding conflict.
 func TransitionReceiptConflict() Result {
 	return newResult(CodeTransitionReceiptConflict, "")
+}
+
+// ProtectedRecordRefused reports a backend refusal without exposing permit or
+// classification details.
+func ProtectedRecordRefused() Result {
+	return newResult(CodeProtectedRecord, "")
 }
 
 // UnsupportedTransitionResource is the stable refusal for a resource plane

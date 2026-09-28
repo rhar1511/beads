@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/steveyegge/beads/internal/httpapi/apigen"
@@ -15,7 +16,7 @@ import (
 )
 
 var transitionMetadataRequestMembers = []string{
-	"receipt_id", "scope", "kind", "actor", "expected_version", "key", "expected", "value", "payload",
+	"receipt_id", "scope", "kind", "actor", "expected_version", "key", "expected", "value", "payload", "protected_permit",
 }
 
 // handleTransitionMetadata applies one revision-fenced metadata transition.
@@ -134,8 +135,18 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 			return bad("payload", "`payload` must be a JSON value")
 		}
 	}
+	var protectedPermit issueops.ProtectedMutationPermit
+	if _, present := members["protected_permit"]; present {
+		token, ok := requiredStringMember(members, "protected_permit")
+		if !ok || token == "" || len(token) > maxProtectedMutationPermitBytes ||
+			!utf8.ValidString(token) || strings.TrimSpace(token) != token || hasProtectedMutationControl(token) {
+			return bad("protected_permit", "`protected_permit` must be a nonempty opaque token of at most 65536 bytes")
+		}
+		protectedPermit = issueops.ProtectedMutationPermit(token)
+	}
 
 	request := issueops.RevisionTransitionRequest{
+		ProtectedPermit: protectedPermit,
 		ReceiptID:       receiptID,
 		IssueID:         id,
 		Scope:           scope,
@@ -154,6 +165,7 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 		return bad("", "the revision transition request is invalid")
 	}
 	return issueops.RevisionTransitionRequest{
+		ProtectedPermit: request.ProtectedPermit,
 		ReceiptID:       plan.ReceiptID,
 		IssueID:         plan.IssueID,
 		Scope:           plan.Scope,
@@ -165,6 +177,15 @@ func (s *Server) revisionTransitionRequest(w http.ResponseWriter, r *http.Reques
 		Value:           plan.Value,
 		Payload:         plan.Payload,
 	}, true
+}
+
+func hasProtectedMutationControl(value string) bool {
+	for _, r := range value {
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			return true
+		}
+	}
+	return false
 }
 
 func requiredStringMember(members map[string]json.RawMessage, name string) (string, bool) {
@@ -207,6 +228,8 @@ func (s *Server) failTransitionMetadata(w http.ResponseWriter, r *http.Request, 
 		s.fail(w, r, PreconditionFailed().WithExpectedVersion(request.ExpectedVersion))
 	case errors.Is(err, issueops.ErrTransitionReceiptConflict):
 		s.fail(w, r, TransitionReceiptConflict())
+	case errors.Is(err, issueops.ErrProtectedRecord):
+		s.fail(w, r, ProtectedRecordRefused())
 	default:
 		var unsupported *storage.ErrUnsupported
 		if errors.As(err, &unsupported) {

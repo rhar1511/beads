@@ -28,6 +28,7 @@ import (
 	"github.com/steveyegge/beads/internal/httpapi/apigen"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/storage/uow"
 	"github.com/steveyegge/beads/issueops"
@@ -278,6 +279,10 @@ type Config struct {
 	// TransitionReadiness is a read-only schema/data probe result. Its zero
 	// value is unready, and only the schema probe can create a positive value.
 	TransitionReadiness schema.RevisionTransitionReadiness
+	// ProtectedMutationAuthority is immutable server-startup authority. Its zero
+	// value leaves protected writes fail-closed and the protected capability
+	// hidden. It is never populated from request data or role credentials.
+	ProtectedMutationAuthority ProtectedMutationAuthority
 	// BatchApplier is the ordered, heterogeneous plan behind
 	// POST /v0/beads/issues:batchApply. Required on the same terms as every
 	// other role: a Config missing it would bind and nil-dereference on the
@@ -358,36 +363,38 @@ type Server struct {
 	// reader(), claimer(), cycleDetector() and the rest of those accessors hand
 	// back on the store-shaped source; the field names differ from the method
 	// names because a struct cannot carry both.
-	issueReader             issueops.Reader
-	issueClaimer            issueops.Claimer
-	issueBatchCloser        issueops.BatchCloser
-	issueReadyClaimer       issueops.ReadyClaimer
-	issueReleaser           issueops.Releaser
-	issueLifecycle          issueops.Lifecycle
-	settings                issueops.WorkspaceConfig
-	issueStats              issueops.StatsReporter
-	issueCycles             issueops.CycleDetector
-	issueEdges              issueops.EdgeReader
-	issueEdgeCounter        issueops.GraphCounter
-	issueRelations          issueops.Relations
-	issueCommenter          issueops.Commenter
-	issueBlocking           issueops.BlockingAnnotator
-	issueTree               issueops.TreeWalker
-	issueReadyCounter       issueops.ReadyCounter
-	issueCounter            issueops.Counter
-	issueQuerier            issueops.Querier
-	issueSweeper            issueops.Sweeper
-	issueDeleter            issueops.Deleter
-	issueBatchCreator       issueops.BatchCreator
-	issueDependencies       issueops.DependencyEditor
-	issueMetadataCAS        issueops.MetadataCAS
-	issueRevisionTransition issueops.RevisionTransition
-	revisionTransitionReady bool
-	issueSourceSnapshot     issueops.SourceSnapshotReader
-	sourceSnapshotReady     bool
-	issueBatchApplier       issueops.BatchApplier
-	workspaceMemories       memoryops.Memories
-	eventsJournal           storage.EventsJournalCursor
+	issueReader                issueops.Reader
+	issueClaimer               issueops.Claimer
+	issueBatchCloser           issueops.BatchCloser
+	issueReadyClaimer          issueops.ReadyClaimer
+	issueReleaser              issueops.Releaser
+	issueLifecycle             issueops.Lifecycle
+	settings                   issueops.WorkspaceConfig
+	issueStats                 issueops.StatsReporter
+	issueCycles                issueops.CycleDetector
+	issueEdges                 issueops.EdgeReader
+	issueEdgeCounter           issueops.GraphCounter
+	issueRelations             issueops.Relations
+	issueCommenter             issueops.Commenter
+	issueBlocking              issueops.BlockingAnnotator
+	issueTree                  issueops.TreeWalker
+	issueReadyCounter          issueops.ReadyCounter
+	issueCounter               issueops.Counter
+	issueQuerier               issueops.Querier
+	issueSweeper               issueops.Sweeper
+	issueDeleter               issueops.Deleter
+	issueBatchCreator          issueops.BatchCreator
+	issueDependencies          issueops.DependencyEditor
+	issueMetadataCAS           issueops.MetadataCAS
+	issueRevisionTransition    issueops.RevisionTransition
+	revisionTransitionReady    bool
+	protectedMutationAuthority ProtectedMutationAuthority
+	protectedMutationReady     bool
+	issueSourceSnapshot        issueops.SourceSnapshotReader
+	sourceSnapshotReady        bool
+	issueBatchApplier          issueops.BatchApplier
+	workspaceMemories          memoryops.Memories
+	eventsJournal              storage.EventsJournalCursor
 
 	listener net.Listener
 	http     *http.Server
@@ -526,6 +533,7 @@ func Listen(cfg Config) (*Server, error) {
 		}
 	}
 	transitionReady := revisionTransitionRoutesReady(cfg.TransitionReadiness, transitionRole, cfg.Auth, cfg.Workspace.ProjectID)
+	protectedMutationReady := transitionReady && cfg.ProtectedMutationAuthority.ready()
 	sourceSnapshotReady := sourceSnapshotRoutesReady(cfg.TransitionReadiness, sourceSnapshotRole, cfg.Auth, cfg.Workspace.ProjectID)
 
 	prefix, err := newIDPrefix()
@@ -570,17 +578,19 @@ func Listen(cfg Config) (*Server, error) {
 		closing:         make(chan struct{}),
 		maxWatchStreams: maxWatchStreams,
 
-		log:                     log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
-		stdout:                  cfg.Stdout,
-		ctxBody:                 contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady)),
-		hosts:                   newHostPolicy(ip, cfg.AllowedHosts),
-		auth:                    cfg.Auth,
-		idPrefix:                prefix,
-		maxConns:                maxConns,
-		issueRevisionTransition: transitionRole,
-		revisionTransitionReady: transitionReady,
-		issueSourceSnapshot:     sourceSnapshotRole,
-		sourceSnapshotReady:     sourceSnapshotReady,
+		log:                        log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
+		stdout:                     cfg.Stdout,
+		ctxBody:                    contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady, protectedMutationReady)),
+		hosts:                      newHostPolicy(ip, cfg.AllowedHosts),
+		auth:                       cfg.Auth,
+		idPrefix:                   prefix,
+		maxConns:                   maxConns,
+		issueRevisionTransition:    transitionRole,
+		revisionTransitionReady:    transitionReady,
+		protectedMutationAuthority: cfg.ProtectedMutationAuthority,
+		protectedMutationReady:     protectedMutationReady,
+		issueSourceSnapshot:        sourceSnapshotRole,
+		sourceSnapshotReady:        sourceSnapshotReady,
 	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
@@ -1704,6 +1714,12 @@ func (s *Server) route(rt route) http.Handler {
 				return
 			}
 			defer release()
+		}
+
+		if s.protectedMutationReady {
+			r = r.WithContext(storageissueops.WithProtectedMutationVerifier(
+				r.Context(), s.protectedMutationAuthority.verifier, s.protectedMutationAuthority.audience,
+			))
 		}
 
 		rt.handler(s, w, r)

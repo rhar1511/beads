@@ -39,6 +39,10 @@ const ProjectIDHeader = "Bd-Project-Id"
 // instead of discovering an older server silently ignored its stamp.
 const CapProjectEnforce = "project.enforce"
 
+// CapProtectedMutation announces trusted permit verification and durable
+// replay protection for explicitly classified mutations.
+const CapProtectedMutation = "issues.protectedMutation"
+
 // customMethodTarget splits the custom method off the segment the router
 // matched, and reports the row that claims it.
 //
@@ -794,18 +798,18 @@ func (r route) specPathOf() string {
 // rather than silently dropped by an older server.
 var behaviorCapabilities = []string{CapProjectEnforce}
 
-// Capabilities returns this binary's static operation inventory. It is useful
-// for route/spec checks but is not a server-instance readiness assertion:
-// ContextResponse uses capabilitiesFor with the startup readiness proof.
+// Capabilities returns this binary's static operation and behavior inventory.
+// It is useful for route/spec checks but is not a server-instance readiness
+// assertion: ContextResponse uses capability gates with startup readiness.
 func Capabilities() []string {
-	return capabilitiesFor(true)
+	return capabilitiesForWithGates(true, true, true)
 }
 
 func capabilitiesFor(revisionTransitionReady bool) []string {
-	return capabilitiesForWithGates(revisionTransitionReady, revisionTransitionReady)
+	return capabilitiesForWithGates(revisionTransitionReady, revisionTransitionReady, false)
 }
 
-func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady bool) []string {
+func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady, protectedMutationReady bool) []string {
 	var out []string
 	for _, rt := range routeTable {
 		gateReady := rt.capabilityGate == "" || (rt.capabilityGate == "revision-transition" && revisionTransitionReady) || (rt.capabilityGate == "source-snapshot" && sourceSnapshotReady)
@@ -814,6 +818,9 @@ func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady bool)
 		}
 	}
 	out = append(out, behaviorCapabilities...)
+	if protectedMutationReady {
+		out = append(out, CapProtectedMutation)
+	}
 	slices.Sort(out)
 	return out
 }

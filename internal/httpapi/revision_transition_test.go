@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/issueops"
 )
 
@@ -18,6 +20,8 @@ const transitionTestBody = `{"receipt_id":"r-1","scope":"lease","kind":"renew","
 type revisionTransitionTestRole struct {
 	mu            sync.Mutex
 	requests      []issueops.RevisionTransitionRequest
+	results       []issueops.RevisionTransitionResult
+	protectedAuth []bool
 	getID         string
 	receipt       *issueops.RevisionTransitionReceipt
 	err           error
@@ -26,14 +30,19 @@ type revisionTransitionTestRole struct {
 	actorOverride string
 }
 
-func (r *revisionTransitionTestRole) TransitionMetadata(_ context.Context, request issueops.RevisionTransitionRequest) (issueops.RevisionTransitionResult, error) {
+func (r *revisionTransitionTestRole) TransitionMetadata(ctx context.Context, request issueops.RevisionTransitionRequest) (issueops.RevisionTransitionResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.requests = append(r.requests, request)
+	r.protectedAuth = append(r.protectedAuth, storageissueops.ProtectedMutationAuthorityConfigured(ctx))
 	if r.err != nil {
 		return issueops.RevisionTransitionResult{}, r.err
 	}
 	result := r.result
+	if len(r.results) > 0 {
+		result = r.results[0]
+		r.results = r.results[1:]
+	}
 	if result.Applied && result.Receipt == nil {
 		result.Receipt = transitionTestReceipt(request)
 		if r.toVersion != nil {
@@ -63,6 +72,17 @@ func (r *revisionTransitionTestRole) recorded() []issueops.RevisionTransitionReq
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]issueops.RevisionTransitionRequest(nil), r.requests...)
+}
+
+func (r *revisionTransitionTestRole) protectedAuthorityRecorded() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool(nil), r.protectedAuth...)
+}
+
+func transitionBodyWithProtectedPermit(token string) string {
+	encoded, _ := json.Marshal(token)
+	return strings.TrimSuffix(transitionTestBody, "}") + `,"protected_permit":` + string(encoded) + `}`
 }
 
 func transitionTestReceipt(request issueops.RevisionTransitionRequest) *issueops.RevisionTransitionReceipt {
@@ -176,10 +196,68 @@ func TestTransitionMetadataBindsExactFieldsAndNullMarkers(t *testing.T) {
 	if string(request.Payload) != `{}` {
 		t.Errorf("omitted payload = %q, want canonical default", request.Payload)
 	}
+	if request.ProtectedPermit != "" {
+		t.Errorf("ordinary transition permit = %q, want empty", request.ProtectedPermit)
+	}
+	if got := role.protectedAuthorityRecorded(); len(got) != 1 || got[0] {
+		t.Errorf("ordinary transition authority context = %v, want one unconfigured call", got)
+	}
 	response := decodeBody(t, resp)
 	receipt := response["receipt"].(map[string]any)
 	if receipt["expected_version"] != "9223372036854775807" || receipt["to_version"] != "-9223372036854775808" {
 		t.Errorf("wire revisions = %v, want signed decimal strings", receipt)
+	}
+}
+
+func TestTransitionMetadataRejectsMalformedProtectedPermit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value string
+	}{
+		{name: "null", value: `null`},
+		{name: "number", value: `7`},
+		{name: "empty", value: `""`},
+		{name: "leading whitespace", value: `" permit"`},
+		{name: "control character", value: `"permit\u0000suffix"`},
+		{name: "too long", value: `"` + strings.Repeat("x", maxProtectedMutationPermitBytes+1) + `"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			role := &revisionTransitionTestRole{result: issueops.RevisionTransitionResult{Applied: true}}
+			ts := newTestServer(t, rolesConfig(Config{
+				Auth: authTokenFile(t, "token"), RevisionTransition: role,
+				Workspace: domain.ContextInfo{ProjectID: "project-a"},
+			}))
+			ts.revisionTransitionReady = true
+			headers := bearer("token")
+			headers.Set(ProjectIDHeader, "project-a")
+			body := strings.TrimSuffix(transitionTestBody, "}") + `,"protected_permit":` + tc.value + `}`
+			resp := ts.doBody(t, http.MethodPost, "/v0/beads/issues/bd-1:transitionMetadata", headers, "application/json", body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("malformed permit status = %d, want 400: %s", resp.StatusCode, readAll(t, resp))
+			}
+			if len(role.recorded()) != 0 {
+				t.Fatal("malformed permit reached the transition role")
+			}
+		})
+	}
+}
+
+func TestTransitionMetadataRejectsUnknownMemberAlongsideProtectedPermit(t *testing.T) {
+	role := &revisionTransitionTestRole{result: issueops.RevisionTransitionResult{Applied: true}}
+	ts := newTestServer(t, rolesConfig(Config{
+		Auth: authTokenFile(t, "token"), RevisionTransition: role,
+		Workspace: domain.ContextInfo{ProjectID: "project-a"},
+	}))
+	ts.revisionTransitionReady = true
+	headers := bearer("token")
+	headers.Set(ProjectIDHeader, "project-a")
+	body := strings.TrimSuffix(transitionBodyWithProtectedPermit("opaque"), "}") + `,"unexpected":true}`
+	resp := ts.doBody(t, http.MethodPost, "/v0/beads/issues/bd-1:transitionMetadata", headers, "application/json", body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown-member status = %d, want 400: %s", resp.StatusCode, readAll(t, resp))
+	}
+	if len(role.recorded()) != 0 {
+		t.Fatal("request with an unknown member reached the transition role")
 	}
 }
 
@@ -312,6 +390,12 @@ func TestTransitionErrorsHaveStableStatuses(t *testing.T) {
 	}{
 		{name: "stale revision", err: storage.ErrVersionMismatch, status: http.StatusConflict, code: string(CodePreconditionFailed)},
 		{name: "receipt binding conflict", err: issueops.ErrTransitionReceiptConflict, status: http.StatusConflict, code: string(CodeTransitionReceiptConflict)},
+		{
+			name:   "protected record refusal",
+			err:    fmt.Errorf("permit secret-token for class internal-class: %w", issueops.ErrProtectedRecord),
+			status: http.StatusConflict,
+			code:   string(CodeProtectedRecord),
+		},
 		{name: "missing issue", err: storage.ErrNotFound, status: http.StatusNotFound, code: string(CodeNotFound)},
 		{name: "wisp unsupported", err: &storage.ErrUnsupported{Op: "revision transition", Backend: "wisp"}, status: http.StatusConflict, code: string(CodeUnsupportedResource)},
 	} {
@@ -331,6 +415,9 @@ func TestTransitionErrorsHaveStableStatuses(t *testing.T) {
 			body := decodeBody(t, resp)
 			if body["code"] != tc.code {
 				t.Errorf("code = %v, want %s", body["code"], tc.code)
+			}
+			if tc.code == string(CodeProtectedRecord) && body["detail"] != staticDetail[CodeProtectedRecord] {
+				t.Errorf("protected refusal detail = %v, want fixed generic detail", body["detail"])
 			}
 		})
 	}

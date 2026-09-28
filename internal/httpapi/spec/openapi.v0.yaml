@@ -3405,6 +3405,11 @@ paths:
         `409 transition_receipt_conflict`.
 
 
+        A backend may refuse a mutation with `409 protected_record`. The code
+        and fixed detail do not disclose record classification or permit
+        details.
+
+
         Revision values are canonical decimal strings over the full signed
         64-bit range. Send the string returned by an earlier issue read or
         transition response; JSON numbers are refused because common consumers
@@ -3471,9 +3476,15 @@ paths:
           description: >-
             `precondition_failed` means `expected_version` was stale;
             `transition_receipt_conflict` means this receipt ID is bound to a
-            different request; `unsupported_resource` means the target is a
-            wisp. None of these cases writes a transition.
-          x-bd-codes: [precondition_failed, transition_receipt_conflict, unsupported_resource]
+            different request; `protected_record` means the backend refused
+            the mutation without disclosing classification or permit details;
+            `unsupported_resource` means the target is a wisp. None of these
+            cases writes a transition.
+          x-bd-codes:
+            - precondition_failed
+            - transition_receipt_conflict
+            - protected_record
+            - unsupported_resource
           content:
             application/problem+json:
               schema:
@@ -7534,9 +7545,9 @@ components:
             `memories.list`, `memories.get`, `memories.remember`,
             `memories.forget`, `events.list`, `events.watch`,
             `issues.casMetadata`, `issues.transitionMetadata`,
-            `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; the one behavior token is `project.enforce`,
+            `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `project.enforce`,
             which announces that a `Bd-Project-Id` stamp for the wrong workspace
-            is refused here rather than silently ignored. The list grows
+            is refused here rather than silently ignored, and `issues.protectedMutation`, which announces a startup-owned verifier and the durable permit-use table are ready. The list grows
             additively, and an operation never appears here unless it is fully
             implemented. The two revision-transition capabilities are
             advertised together only when the startup readiness probe verifies
@@ -7545,6 +7556,10 @@ components:
             route. `issues.sourceSnapshot` is advertised only when the same
             revision readiness proof and its atomic source-snapshot role are
             available, and the server has authentication and a project ID.
+            `issues.protectedMutation` is advertised only when a startup-owned
+            verifier, migrations 0069 and 0070, both protected-mutation tables,
+            the revision-transition route, authentication, and a project
+            identity are ready.
             This is how a client checks for an operation or a behavior — never
             the version string.
 
@@ -10525,6 +10540,15 @@ components:
           $ref: '#/components/schemas/MetadataValue'
         payload:
           $ref: '#/components/schemas/MetadataValue'
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          description: >-
+            An opaque permit for a mutation of an explicitly classified record.
+            It does not classify the record. The storage role verifies the exact
+            operation, resources, and request digest, then consumes replay in
+            the write transaction. Generic receipts remain read evidence only.
 
     TransitionMetadataResponse:
       type: object
@@ -11208,7 +11232,8 @@ components:
             `not_closable` (409), `not_releasable` (409),
             `dependency_cycle` (409), `dependency_exists` (409),
             `already_exists` (409), `precondition_failed` (409),
-            `transition_receipt_conflict` (409), `unsupported_resource` (409),
+            `transition_receipt_conflict` (409), `protected_record` (409),
+            `unsupported_resource` (409),
             `not_implemented` (501),
             `events_journal_disabled` (409), `events_journal_truncated` (410),
             `busy` (503),
@@ -11225,11 +11250,10 @@ components:
             string per code and carries nothing about the underlying failure:
             driver and dial errors routinely embed the DSN, database user and
             host:port, and this API supports binding beyond loopback. It is
-            fixed for `unauthenticated` too, and for the mirror-image reason:
-            the caller's own input there is a credential, so echoing it would
-            write the token into every client log and proxy trace on the way
-            back. Other 4xx details reflect the caller's own input back and are
-            specific.
+            fixed for `unauthenticated` and `protected_record` too, because
+            those refusals must not reveal credentials, permits, or internal
+            record-class details. Other 4xx details reflect the caller's own
+            input back and are specific.
         param:
           type: string
           description: >-

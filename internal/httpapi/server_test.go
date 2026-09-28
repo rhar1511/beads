@@ -668,6 +668,9 @@ func TestListenPublishesBothTransitionCapabilitiesOnlyWithReadinessProof(t *test
 	if !ok || !hasString(capabilities, "issues.transitionMetadata") || !hasString(capabilities, "issues.transitionReceipt.get") {
 		t.Fatalf("context capabilities = %v, want both transition capabilities", contextBody["capabilities"])
 	}
+	if hasString(capabilities, CapProtectedMutation) {
+		t.Fatalf("context without a protected mutation authority advertised %q", CapProtectedMutation)
+	}
 
 	headers := bearer("token")
 	headers.Set(ProjectIDHeader, "project-a")
@@ -801,6 +804,9 @@ func TestCapabilitiesListImplementedOperationsOnly(t *testing.T) {
 	for _, c := range behaviorCapabilities {
 		advertised[c] = true
 	}
+	// This behavior is conditional on startup verifier and replay-table readiness,
+	// so it is not part of the always-advertised behaviorCapabilities slice.
+	advertised[CapProtectedMutation] = true
 	for _, got := range Capabilities() {
 		if !advertised[got] {
 			t.Errorf("Capabilities() lists %q, which is neither an implemented operation nor a behavior capability", got)
