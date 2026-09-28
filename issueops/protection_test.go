@@ -1,6 +1,9 @@
 package issueops
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestProtectedMutationDigestClearsPermitAndBindsRequest(t *testing.T) {
 	base := UpdateRequest{
@@ -106,5 +109,60 @@ func TestApplyBatchRequestDigestBindsPersistedHiddenCreateInputs(t *testing.T) {
 	}
 	if first != fourth {
 		t.Fatalf("derived RowVersion changed digest: %q != %q", first, fourth)
+	}
+}
+
+func TestProtectedCreateAndLinkDigestGolden(t *testing.T) {
+	request := ApplyBatchRequest{
+		Actor:           "controller-a",
+		ProtectedPermit: "excluded-permit",
+		ReceiptID:       "excluded-receipt",
+		Items: []ApplyItem{
+			{
+				Kind: ItemCreate,
+				Create: &CreateItem{
+					Issue:           &Issue{ID: "bd-protected-1", Title: "Protected record"},
+					ProtectionClass: "source-decision",
+				},
+			},
+			{
+				Kind: ItemDepAdd,
+				DepAdd: &DepAddItem{
+					Source: Ref{ID: "bd-protected-1"},
+					Target: Ref{ID: "bd-map"},
+					Type:   "relates-to",
+				},
+			},
+			{
+				Kind: ItemDepAdd,
+				DepAdd: &DepAddItem{
+					Source: Ref{ID: "bd-prerequisite"},
+					Target: Ref{ID: "bd-protected-1"},
+					Type:   "blocks",
+				},
+			},
+		},
+	}
+
+	unsigned := request
+	unsigned.ReceiptID = ""
+	unsigned.ProtectedPermit = ""
+	createSourceRepos := make([]string, len(unsigned.Items))
+	encoded, err := json.Marshal(struct {
+		Request           ApplyBatchRequest
+		CreateSourceRepos []string
+	}{Request: unsigned, CreateSourceRepos: createSourceRepos})
+	if err != nil {
+		t.Fatalf("marshal golden digest input: %v", err)
+	}
+	digest, err := ApplyBatchRequestDigest(request)
+	if err != nil {
+		t.Fatalf("ApplyBatchRequestDigest: %v", err)
+	}
+
+	const wantBytes = `{"Request":{"Actor":"controller-a","ProtectedPermit":"","Items":[{"Kind":"create","Create":{"Key":"","Issue":{"id":"bd-protected-1","title":"Protected record","priority":0,"created_at":"0001-01-01T00:00:00Z","updated_at":"0001-01-01T00:00:00Z"},"ProtectionClass":"source-decision","MetadataRefs":null},"Update":null,"Close":null,"DepAdd":null},{"Kind":"dep_add","Create":null,"Update":null,"Close":null,"DepAdd":{"Source":{"Key":"","ID":"bd-protected-1"},"Target":{"Key":"","ID":"bd-map"},"Type":"relates-to","Metadata":""}},{"Kind":"dep_add","Create":null,"Update":null,"Close":null,"DepAdd":{"Source":{"Key":"","ID":"bd-prerequisite"},"Target":{"Key":"","ID":"bd-protected-1"},"Type":"blocks","Metadata":""}}],"Provenance":"","ForceIDPrefix":false,"SkipPerEdgeCycleCheck":false},"CreateSourceRepos":["","",""]}`
+	const wantDigest = "1a17901ea4ab71a9c88ad6981d904ad84860a3e9f8c0d0a00dbaee814fd88514"
+	if string(encoded) != wantBytes || digest != wantDigest {
+		t.Fatalf("Beads protected batch golden changed:\nbytes=%s\ndigest=%s", encoded, digest)
 	}
 }
