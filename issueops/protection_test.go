@@ -201,6 +201,14 @@ func TestProtectedFrontierRecordDigestsMatchControllerGoldens(t *testing.T) {
 			},
 		},
 	}
+	linkOnly := []ApplyItem{{
+		Kind: ItemDepAdd,
+		DepAdd: &DepAddItem{
+			Source: Ref{ID: "bd-question-b"},
+			Target: Ref{ID: "bd-question-a"},
+			Type:   "blocks",
+		},
+	}}
 	for _, test := range []struct {
 		name   string
 		items  []ApplyItem
@@ -208,6 +216,7 @@ func TestProtectedFrontierRecordDigestsMatchControllerGoldens(t *testing.T) {
 	}{
 		{name: "create only", items: []ApplyItem{create}, digest: "f9bdd7a3fd99c83991c5288e92bb09da9b71ecc222809ac9faaded09ad796c85"},
 		{name: "create with ordered links", items: linked, digest: "f05bb472b3b4f5a797586c3d6df1a2afec9e6a8f065f03e48f42b3d966bbf568"},
+		{name: "link only", items: linkOnly, digest: "a1613932a1e5cf482be9f1d79e0cbd274cc21923987e016811324a406678306d"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := ApplyBatchRequestDigest(ApplyBatchRequest{
