@@ -229,6 +229,9 @@ func getRevisionTransitionReceiptInTx(ctx context.Context, tx DBTX, receiptID st
 	if err != nil {
 		return nil, err
 	}
+	if receipt.Key == storage.RevisionTransitionPatchReceiptMarker {
+		return nil, fmt.Errorf("%w: receipt %s contains a typed issue patch", publicops.ErrTransitionReceiptConflict, receiptID)
+	}
 	if expectedPresent != 0 && expectedPresent != 1 {
 		return nil, fmt.Errorf("revision transition receipt %s has invalid expected-presence flag", receiptID)
 	}

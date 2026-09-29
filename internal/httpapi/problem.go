@@ -607,9 +607,11 @@ const (
 	// It is the only WRITE on this surface whose ordinary refusal is a 200: a
 	// lost race is the answer to the question the caller asked, and the value
 	// that refused the swap is what its retry needs next.
-	OpCompareAndSetMetadata = "compareAndSetMetadata"
-	OpTransitionMetadata    = "transitionMetadata"
-	OpGetTransitionReceipt  = "getTransitionReceipt"
+	OpCompareAndSetMetadata     = "compareAndSetMetadata"
+	OpTransitionMetadata        = "transitionMetadata"
+	OpGetTransitionReceipt      = "getTransitionReceipt"
+	OpTransitionPatch           = "transitionPatch"
+	OpGetTransitionPatchReceipt = "getTransitionPatchReceipt"
 )
 
 // specBearerScheme is the name of the document's securityScheme for the bearer
@@ -1050,6 +1052,16 @@ var operationCodes = map[string][]Code{
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	OpGetTransitionReceipt: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpTransitionPatch: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodePreconditionFailed, CodeTransitionReceiptConflict,
+		CodeProtectedRecord, CodeUnsupportedResource, CodeNotImplemented,
+		CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpGetTransitionPatchReceipt: {
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
 	},

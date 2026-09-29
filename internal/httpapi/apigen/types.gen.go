@@ -1004,7 +1004,7 @@ type ContextResponse struct {
 	// OPTIONAL, and absent means only that this server does not disclose its filesystem layout — never that it has no workspace. A client MUST NOT require it, MUST NOT treat absence as an error, and has no use for the value beyond display: it is a path on the SERVER's filesystem, which the client cannot open. Identify the workspace by `project_id` and `database`, which are required.
 	BeadsDir *string `json:"beads_dir,omitempty"`
 
-	// Capabilities The tokens this server advertises: the OPERATIONS it implements, derived from its route table, and the server-wide BEHAVIORS it enforces. v0's operation vocabulary is `ready.list`, `ready.count`, `issues.list`, `issues.query`, `issues.count`, `issues.get`, `issues.related`, `issues.create`, `issues.addComment`, `issues.batchClose`, `issues.claim`, `issues.claimNext`, `issues.release`, `issues.close`, `issues.reopen`, `issues.update`, `issues.sweep`, `issues.delete`, `issues.batchCreate`, `issues.batchApply`, `stats.get`, `config.list`, `config.get`, `config.set`, `config.unset`, `dependencies.cycles`, `dependencies.list`, `dependencies.count`, `dependencies.blocking`, `dependencies.tree`, `dependencies.add`, `dependencies.remove`, `memories.list`, `memories.get`, `memories.remember`, `memories.forget`, `events.list`, `events.watch`, `issues.casMetadata`, `issues.transitionMetadata`, `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `issues.batchApplyReceipt`, `project.enforce`, which announces that a `Bd-Project-Id` stamp for the wrong workspace is refused here rather than silently ignored, and `issues.protectedMutation`, which announces a startup-owned verifier and the durable permit-use table are ready. The list grows additively, and an operation never appears here unless it is fully implemented. The two revision-transition capabilities are advertised together only when the startup readiness probe verifies migrations 0067 and 0068, ignored migration 0027, no remaining zero aggregate revisions, the receipt table, and the role behind each route. `issues.sourceSnapshot` is advertised only when the same revision readiness proof and its atomic source-snapshot role are available, and the server has authentication and a project ID. `issues.protectedMutation` is advertised only when a startup-owned verifier, migrations 0069 and 0070, both protected-mutation tables, the revision-transition route, authentication, and a project identity are ready. `issues.batchApplyReceipt` is advertised only when migration 0071, the durable result receipt table, and the batchApply role are ready. This is how a client checks for an operation or a behavior — never the version string.
+	// Capabilities The tokens this server advertises: the OPERATIONS it implements, derived from its route table, and the server-wide BEHAVIORS it enforces. v0's operation vocabulary is `ready.list`, `ready.count`, `issues.list`, `issues.query`, `issues.count`, `issues.get`, `issues.related`, `issues.create`, `issues.addComment`, `issues.batchClose`, `issues.claim`, `issues.claimNext`, `issues.release`, `issues.close`, `issues.reopen`, `issues.update`, `issues.sweep`, `issues.delete`, `issues.batchCreate`, `issues.batchApply`, `stats.get`, `config.list`, `config.get`, `config.set`, `config.unset`, `dependencies.cycles`, `dependencies.list`, `dependencies.count`, `dependencies.blocking`, `dependencies.tree`, `dependencies.add`, `dependencies.remove`, `memories.list`, `memories.get`, `memories.remember`, `memories.forget`, `events.list`, `events.watch`, `issues.casMetadata`, `issues.transitionMetadata`, `issues.transitionReceipt.get`, `issues.transitionPatch`, `issues.transitionPatchReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `issues.batchApplyReceipt`, `project.enforce`, which announces that a `Bd-Project-Id` stamp for the wrong workspace is refused here rather than silently ignored, and `issues.protectedMutation`, which announces a startup-owned verifier and the durable permit-use table are ready. The list grows additively, and an operation never appears here unless it is fully implemented. The two revision-transition capabilities are advertised together only when the startup readiness probe verifies migrations 0067 and 0068, ignored migration 0027, no remaining zero aggregate revisions, the receipt table, and the role behind each route. `issues.sourceSnapshot` is advertised only when the same revision readiness proof and its atomic source-snapshot role are available, and the server has authentication and a project ID. `issues.protectedMutation` is advertised only when a startup-owned verifier, migrations 0069 and 0070, both protected-mutation tables, the revision-transition route, authentication, and a project identity are ready. `issues.batchApplyReceipt` is advertised only when migration 0071, the durable result receipt table, and the batchApply role are ready. The typed patch pair is advertised only after migration 0072, its exact receipt columns, the patch role, and the protected-mutation verifier are ready; both routes also require bearer authentication and a project identity. This is how a client checks for an operation or a behavior — never the version string.
 	//
 	// THIS LIST IS MOSTLY BUILD-LEVEL. The revision-transition and source-snapshot capabilities are also gated by the selected database's migration and data readiness, so their absence means this server instance cannot safely serve them yet. `events.list` and `events.watch` are gated separately by a per-workspace setting that is OFF by default; a server may advertise them and still refuse requests with 409 `events_journal_disabled`. Consumers MUST treat those tokens as "this server speaks it" and that 409 as "not on this workspace", not as a promise that journal records will arrive.
 	Capabilities []string `json:"capabilities"`
@@ -1921,6 +1921,36 @@ type SweepSkips struct {
 	Unreadable int `json:"unreadable"`
 }
 
+// TransitionIssuePatch defines model for TransitionIssuePatch.
+type TransitionIssuePatch struct {
+	Assignee *TransitionStringPatch `json:"assignee,omitempty"`
+	Labels   *TransitionLabelsPatch `json:"labels,omitempty"`
+
+	// Metadata Metadata compare-and-set entries. Keys are canonicalized in sorted order and may appear once. Omitted `expected` means the key must be absent; present JSON `null` is distinct. Omitted `value` deletes the key; present JSON `null` stores null.
+	Metadata *[]TransitionMetadataPatch `json:"metadata,omitempty"`
+	Status   *TransitionStatusPatch     `json:"status,omitempty"`
+}
+
+// TransitionLabelsPatch defines model for TransitionLabelsPatch.
+type TransitionLabelsPatch struct {
+	Expected []string `json:"expected"`
+	Value    []string `json:"value"`
+}
+
+// TransitionMetadataPatch defines model for TransitionMetadataPatch.
+type TransitionMetadataPatch struct {
+	// Expected One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Expected MetadataValue `json:"expected,omitempty"`
+	Key      string        `json:"key"`
+
+	// Value One metadata value: ANY JSON value — string, number, boolean, null, array or object — because typed values enter through the explicit JSON metadata path and persist in older rows. It is not a string, and a client must not decode it as one.
+	//
+	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
+	Value MetadataValue `json:"value,omitempty"`
+}
+
 // TransitionMetadataRequest defines model for TransitionMetadataRequest.
 type TransitionMetadataRequest struct {
 	// Actor The caller asserted actor, trimmed and validated by the server.
@@ -1971,6 +2001,53 @@ type TransitionMetadataResponse struct {
 	Replayed bool `json:"replayed"`
 }
 
+// TransitionPatchReceipt defines model for TransitionPatchReceipt.
+type TransitionPatchReceipt struct {
+	Actor string `json:"actor"`
+
+	// ExpectedVersion Canonical signed 64-bit revision required by this patch.
+	ExpectedVersion    string               `json:"expected_version"`
+	IssueId            string               `json:"issue_id"`
+	Kind               string               `json:"kind"`
+	Patch              TransitionIssuePatch `json:"patch"`
+	PriorReceiptDigest string               `json:"prior_receipt_digest"`
+	PriorReceiptId     string               `json:"prior_receipt_id"`
+	ReceiptId          string               `json:"receipt_id"`
+	Scope              string               `json:"scope"`
+
+	// ToVersion Exact backend-generated revision committed with this patch.
+	ToVersion string `json:"to_version"`
+}
+
+// TransitionPatchRequest defines model for TransitionPatchRequest.
+type TransitionPatchRequest struct {
+	// Actor Caller-asserted audit actor, limited to 255 Unicode characters by the patch planner.
+	Actor string `json:"actor"`
+
+	// ExpectedVersion Canonical nonzero signed 64-bit revision token.
+	ExpectedVersion string               `json:"expected_version"`
+	Kind            string               `json:"kind"`
+	Patch           TransitionIssuePatch `json:"patch"`
+
+	// PriorReceiptDigest SHA-256 digest of the exact prior durable receipt.
+	PriorReceiptDigest string `json:"prior_receipt_digest"`
+	PriorReceiptId     string `json:"prior_receipt_id"`
+
+	// ProtectedPermit Required exact signed authorization for this operation, issue, workspace, and canonical patch. Bearer authentication alone does not authorize the write. Storage verifies and consumes its replay identity in the source-and-receipt transaction.
+	ProtectedPermit string `json:"protected_permit"`
+
+	// ReceiptId Keep this exact ID for retry and lost-response recovery.
+	ReceiptId string `json:"receipt_id"`
+	Scope     string `json:"scope"`
+}
+
+// TransitionPatchResponse defines model for TransitionPatchResponse.
+type TransitionPatchResponse struct {
+	Applied  bool                    `json:"applied"`
+	Receipt  *TransitionPatchReceipt `json:"receipt,omitempty"`
+	Replayed bool                    `json:"replayed"`
+}
+
 // TransitionReceipt defines model for TransitionReceipt.
 type TransitionReceipt struct {
 	Actor string `json:"actor"`
@@ -2000,6 +2077,18 @@ type TransitionReceipt struct {
 	//
 	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
 	Value MetadataValue `json:"value,omitempty"`
+}
+
+// TransitionStatusPatch defines model for TransitionStatusPatch.
+type TransitionStatusPatch struct {
+	Expected string `json:"expected"`
+	Value    string `json:"value"`
+}
+
+// TransitionStringPatch defines model for TransitionStringPatch.
+type TransitionStringPatch struct {
+	Expected string `json:"expected"`
+	Value    string `json:"value"`
 }
 
 // TreeNode One node of a walked dependency tree: a full issue plus where the walk reached it. Property semantics for the issue members are documented on `Issue`.
@@ -2212,6 +2301,12 @@ type WatchEventsParams struct {
 	LastEventID *int64 `json:"Last-Event-ID,omitempty"`
 }
 
+// GetTransitionPatchReceiptParams defines parameters for GetTransitionPatchReceipt.
+type GetTransitionPatchReceiptParams struct {
+	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
+	BdProjectId ProjectID `json:"Bd-Project-Id"`
+}
+
 // GetTransitionReceiptParams defines parameters for GetTransitionReceipt.
 type GetTransitionReceiptParams struct {
 	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
@@ -2346,6 +2441,12 @@ type GetSourceSnapshotParams struct {
 
 // TransitionMetadataParams defines parameters for TransitionMetadata.
 type TransitionMetadataParams struct {
+	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
+	BdProjectId ProjectID `json:"Bd-Project-Id"`
+}
+
+// TransitionPatchParams defines parameters for TransitionPatch.
+type TransitionPatchParams struct {
 	// BdProjectId Exact logical project ID the caller expects. These routes reject a missing or mismatched stamp, and fail closed if the server cannot assert its own project identity.
 	BdProjectId ProjectID `json:"Bd-Project-Id"`
 }
@@ -2711,6 +2812,9 @@ type ReopenIssueJSONRequestBody = ReopenIssueRequest
 
 // TransitionMetadataJSONRequestBody defines body for TransitionMetadata for application/json ContentType.
 type TransitionMetadataJSONRequestBody = TransitionMetadataRequest
+
+// TransitionPatchJSONRequestBody defines body for TransitionPatch for application/json ContentType.
+type TransitionPatchJSONRequestBody = TransitionPatchRequest
 
 // ApplyBatchJSONRequestBody defines body for ApplyBatch for application/json ContentType.
 type ApplyBatchJSONRequestBody = ApplyBatchRequest

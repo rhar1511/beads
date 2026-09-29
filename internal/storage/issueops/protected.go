@@ -119,6 +119,41 @@ func RequireProtectedMutation(ctx context.Context, tx DBTX, permit publicops.Pro
 	return nil
 }
 
+// RequireAuthorizedMutation consumes an exact signed permit even when the
+// target row is not classified as protected. It is for narrowly scoped
+// controller operations whose authority must remain explicit independent of
+// the row's ordinary protection classification.
+func RequireAuthorizedMutation(ctx context.Context, tx DBTX, permit publicops.ProtectedMutationPermit, operation string, resourceIDs []string, digest string) error {
+	ids := canonicalProtectedIDs(resourceIDs)
+	config, _ := ctx.Value(protectedMutationConfigKey{}).(*protectedMutationConfig)
+	if config == nil || config.verifier == nil || strings.TrimSpace(config.audience) == "" || permit == "" {
+		return fmt.Errorf("%w: operation %s requires an exact signed permit", publicops.ErrProtectedRecord, operation)
+	}
+	if protectedAuthorizationCached(config, operation, config.audience, ids, digest) {
+		return nil
+	}
+	scope := publicops.ProtectedMutationScope{
+		Audience: config.audience, ProjectID: config.projectID,
+		Database: config.database, Operation: operation,
+		ResourceIDs: ids, Digest: digest,
+	}
+	verified, err := config.verifier.Verify(ctx, permit, scope)
+	if err != nil {
+		return fmt.Errorf("%w: %v", publicops.ErrProtectedRecord, err)
+	}
+	if strings.TrimSpace(verified.ReplayID) != verified.ReplayID || verified.ReplayID == "" || len(verified.ReplayID) > 255 {
+		return fmt.Errorf("%w: verifier returned an invalid replay identity", publicops.ErrProtectedRecord)
+	}
+	if err := ConsumeProtectedMutationPermitInTx(ctx, tx, config.audience, verified); err != nil {
+		return fmt.Errorf("%w: consume permit replay identity: %v", publicops.ErrProtectedRecord, err)
+	}
+	config.mu.Lock()
+	config.verified = append(config.verified, scope)
+	config.permitUseWritten = true
+	config.mu.Unlock()
+	return nil
+}
+
 // ConsumeProtectedMutationPermitInTx claims the verifier-validated replay
 // identity in the active mutation transaction. The identity is retained
 // permanently so clock skew and cleanup races cannot make a valid replay pass.
@@ -226,7 +261,7 @@ func protectedDerivedOperationCovers(outer, derived string) bool {
 	switch outer {
 	case "issue.create", "issue.update", "issue.close", "issue.reopen",
 		"issue.batch_apply", "issue.batch_create", "issue.batch_close",
-		"dependency.add", "dependency.remove":
+		"dependency.add", "dependency.remove", "issue.revision_transition_patch":
 		return true
 	default:
 		return false
@@ -251,6 +286,8 @@ func protectedOperationCovers(outer, leaf string) bool {
 		return leaf == "issue.comment"
 	case "metadata.compare_and_set":
 		return leaf == "issue.update"
+	case "issue.revision_transition_patch":
+		return leaf == "issue.update" || leaf == "issue.label_add" || leaf == "issue.label_remove"
 	default:
 		return false
 	}

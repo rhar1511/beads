@@ -391,6 +391,7 @@ type Server struct {
 	issueMetadataCAS           issueops.MetadataCAS
 	issueRevisionTransition    issueops.RevisionTransition
 	revisionTransitionReady    bool
+	revisionPatchReady         bool
 	protectedMutationAuthority ProtectedMutationAuthority
 	protectedMutationReady     bool
 	issueSourceSnapshot        issueops.SourceSnapshotReader
@@ -541,6 +542,8 @@ func Listen(cfg Config) (*Server, error) {
 	}
 	transitionReady := revisionTransitionRoutesReady(cfg.TransitionReadiness, transitionRole, cfg.Auth, cfg.Workspace.ProjectID)
 	protectedMutationReady := transitionReady && cfg.ProtectedMutationAuthority.ready()
+	patchRole, _ := transitionRole.(issueops.RevisionTransitionPatcher)
+	transitionPatchReady := revisionTransitionPatchRoutesReady(cfg.TransitionReadiness, transitionRole, patchRole, cfg.Auth, cfg.Workspace.ProjectID, protectedMutationReady)
 	sourceSnapshotReady := sourceSnapshotRoutesReady(cfg.TransitionReadiness, sourceSnapshotRole, cfg.Auth, cfg.Workspace.ProjectID)
 	batchApplyReceiptReady := cfg.BatchApplyReceiptReadiness.Ready()
 	if cfg.Provider == nil {
@@ -594,13 +597,14 @@ func Listen(cfg Config) (*Server, error) {
 
 		log:                        log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
 		stdout:                     cfg.Stdout,
-		ctxBody:                    contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady, protectedMutationReady, batchApplyReceiptReady)),
+		ctxBody:                    contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady, protectedMutationReady, batchApplyReceiptReady, transitionPatchReady)),
 		hosts:                      newHostPolicy(ip, cfg.AllowedHosts),
 		auth:                       cfg.Auth,
 		idPrefix:                   prefix,
 		maxConns:                   maxConns,
 		issueRevisionTransition:    transitionRole,
 		revisionTransitionReady:    transitionReady,
+		revisionPatchReady:         transitionPatchReady,
 		protectedMutationAuthority: cfg.ProtectedMutationAuthority,
 		protectedMutationReady:     protectedMutationReady,
 		issueSourceSnapshot:        sourceSnapshotRole,
@@ -657,11 +661,29 @@ func revisionTransitionRoutesReady(readiness schema.RevisionTransitionReadiness,
 	return readiness.Ready() && !isNilRevisionTransitionRole(role) && auth != nil && strings.TrimSpace(projectID) != ""
 }
 
+func revisionTransitionPatchRoutesReady(readiness schema.RevisionTransitionReadiness, transition issueops.RevisionTransition, patch issueops.RevisionTransitionPatcher, auth *TokenFileAuth, projectID string, protectedReady bool) bool {
+	return readiness.PatchReady() && !isNilRevisionTransitionRole(transition) && !isNilRevisionTransitionPatcher(patch) &&
+		auth != nil && strings.TrimSpace(projectID) != "" && protectedReady
+}
+
 func sourceSnapshotRoutesReady(readiness schema.RevisionTransitionReadiness, role issueops.SourceSnapshotReader, auth *TokenFileAuth, projectID string) bool {
 	return readiness.Ready() && !isNilSourceSnapshotReader(role) && auth != nil && strings.TrimSpace(projectID) != ""
 }
 
 func isNilRevisionTransitionRole(role issueops.RevisionTransition) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isNilRevisionTransitionPatcher(role issueops.RevisionTransitionPatcher) bool {
 	if role == nil {
 		return true
 	}

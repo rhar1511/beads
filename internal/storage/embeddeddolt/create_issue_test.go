@@ -32,12 +32,13 @@ type testEnv struct {
 func newTestEnv(t *testing.T, prefix string) *testEnv {
 	t.Helper()
 	fixture := newPristineEmbeddedDoltFixture(t, prefix)
-	t.Cleanup(func() { closeEmbeddedDoltStore(t, fixture.store) })
-	return &testEnv{
+	te := &testEnv{
 		store:    fixture.store,
 		dataDir:  fixture.dataDir,
 		database: fixture.database,
 	}
+	t.Cleanup(func() { closeEmbeddedDoltStore(t, te.store) })
+	return te
 }
 
 // queryScalar opens a short-lived raw SQL connection, runs a single-row query,

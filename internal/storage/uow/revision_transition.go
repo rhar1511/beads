@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/domain"
 	storeops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/storage/schema"
 	publicops "github.com/steveyegge/beads/issueops"
@@ -49,6 +50,7 @@ func NewRevisionTransition(provider UnitOfWorkProvider) (publicops.RevisionTrans
 }
 
 var _ publicops.RevisionTransition = (*revisionTransition)(nil)
+var _ publicops.RevisionTransitionPatcher = (*revisionTransition)(nil)
 
 func (r *revisionTransition) TransitionMetadata(ctx context.Context, req publicops.RevisionTransitionRequest) (publicops.RevisionTransitionResult, error) {
 	plan, err := storage.PlanRevisionTransition(req)
@@ -162,5 +164,68 @@ func (r *revisionTransition) GetReceipt(ctx context.Context, receiptID string) (
 	}
 	return RunTxRead(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (*publicops.RevisionTransitionReceipt, error) {
 		return uw.IssueUseCase().GetRevisionTransitionReceipt(ctx, receiptID)
+	})
+}
+
+func (r *revisionTransition) TransitionPatch(ctx context.Context, req publicops.RevisionTransitionPatchRequest) (publicops.RevisionTransitionPatchResult, error) {
+	plan, err := storage.PlanRevisionTransitionPatch(req)
+	if err != nil {
+		return publicops.RevisionTransitionPatchResult{}, err
+	}
+	digest, err := publicops.ProtectedMutationDigest(plan)
+	if err != nil {
+		return publicops.RevisionTransitionPatchResult{}, err
+	}
+	var preflight publicops.RevisionTransitionPatchResult
+	var preflightDone bool
+	_, err = RunTxRead(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (struct{}, error) {
+		unwrapped := unwrapUOW(uw)
+		runnerProvider, ok := unwrapped.(protectedMutationRunner)
+		if !ok {
+			return struct{}{}, fmt.Errorf("%w: unit of work has no transaction-local revision patch storage", publicops.ErrProtectedRecord)
+		}
+		var err error
+		preflight, preflightDone, err = storeops.PreflightRevisionTransitionPatchInTx(ctx, runnerProvider.protectedMutationRunner(), plan)
+		return struct{}{}, err
+	})
+	if err != nil {
+		return publicops.RevisionTransitionPatchResult{}, err
+	}
+	if preflightDone {
+		return preflight, nil
+	}
+	for attempt := 0; attempt < 3; attempt++ {
+		result, err := RunTxResult(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (publicops.RevisionTransitionPatchResult, string, error) {
+			if err := requireAuthorizedUOWMutation(ctx, uw, req.ProtectedPermit, "issue.revision_transition_patch", []string{plan.IssueID}, digest); err != nil {
+				return publicops.RevisionTransitionPatchResult{}, "", err
+			}
+			patcher, ok := uw.IssueUseCase().(domain.RevisionTransitionPatchUseCase)
+			if !ok {
+				return publicops.RevisionTransitionPatchResult{}, "", &storage.ErrUnsupported{Op: "RevisionTransitionPatch", Backend: "issue use case"}
+			}
+			transition, wrote, err := patcher.TransitionPatch(ctx, plan)
+			if err != nil || !wrote {
+				return transition, "", err
+			}
+			return transition, fmt.Sprintf("bd: revision transition patch %s", plan.ReceiptID), nil
+		})
+		if errors.Is(err, storeops.ErrRevisionTransitionReceiptRace) {
+			continue
+		}
+		return result, err
+	}
+	return publicops.RevisionTransitionPatchResult{}, fmt.Errorf("revision transition patch receipt %s did not converge after concurrent receipt creation: %w", plan.ReceiptID, publicops.ErrTransitionReceiptConflict)
+}
+
+func (r *revisionTransition) GetPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	if err := storage.ValidateRevisionTransitionReceiptID(receiptID); err != nil {
+		return nil, err
+	}
+	return RunTxRead(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (*publicops.RevisionTransitionPatchReceipt, error) {
+		patcher, ok := uw.IssueUseCase().(domain.RevisionTransitionPatchUseCase)
+		if !ok {
+			return nil, &storage.ErrUnsupported{Op: "RevisionTransitionPatchReceipt", Backend: "issue use case"}
+		}
+		return patcher.GetRevisionTransitionPatchReceipt(ctx, receiptID)
 	})
 }

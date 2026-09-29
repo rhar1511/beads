@@ -92,6 +92,15 @@ func requireProtectedUOWMutation(ctx context.Context, uw UnitOfWork, permit publ
 	return storageissueops.RequireProtectedMutation(ctx, provider.protectedMutationRunner(), permit, operation, ids, digest, explicitClass)
 }
 
+func requireAuthorizedUOWMutation(ctx context.Context, uw UnitOfWork, permit publicops.ProtectedMutationPermit, operation string, ids []string, digest string) error {
+	unwrapped := unwrapUOW(uw)
+	provider, ok := unwrapped.(protectedMutationRunner)
+	if !ok {
+		return fmt.Errorf("%w: unit of work has no transaction-local protected-record checks", publicops.ErrProtectedRecord)
+	}
+	return storageissueops.RequireAuthorizedMutation(ctx, provider.protectedMutationRunner(), permit, operation, ids, digest)
+}
+
 func classifyProtectedUOWRecord(ctx context.Context, uw UnitOfWork, id, class string) error {
 	unwrapped := unwrapUOW(uw)
 	provider, ok := unwrapped.(protectedMutationRunner)

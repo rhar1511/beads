@@ -351,6 +351,10 @@ func TestUnitOfWorkBypassesAreAccountedFor(t *testing.T) {
 			"behavior on both plumbings.",
 		"requireProtectedUOWMutation": "the protection guard reads classification and consumes a signed permit " +
 			"on the active transaction before a domain mutation. Those internal authority rows are not issue events.",
+		"requireAuthorizedUOWMutation": "the source-patch guard verifies and consumes the exact operation permit " +
+			"on the active transaction; its only direct write is internal permit-use evidence, not an issue event.",
+		"TransitionPatch": "patch preflight reads the exact source and parent receipt on the active transaction, " +
+			"while the mutation itself goes through the patch use case so the notifier sees the committed issue write.",
 		"classifyProtectedUOWRecord": "the protected classification is an internal authorization boundary written " +
 			"beside the issue create. It is deliberately absent from ordinary issue hook payloads.",
 		"protectedUOWRecords": "the deletion preflight reads internal classification state from the active transaction " +

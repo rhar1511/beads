@@ -177,6 +177,10 @@ func (e *AlreadyIdentifiedError) Unwrap() error { return ErrAlreadyIdentified }
 // precondition from other errors.
 var ErrVersionMismatch = errors.New("version mismatch")
 
+// ErrRevisionPatchPreconditionFailed is returned when the source revision is
+// current but one or more exact patch values no longer match the request.
+var ErrRevisionPatchPreconditionFailed = errors.New("revision patch precondition failed")
+
 // ErrTransitionReceiptConflict is returned when a receipt ID was already
 // committed for a different revision-transition request.
 var ErrTransitionReceiptConflict = errors.New("revision transition receipt conflict")

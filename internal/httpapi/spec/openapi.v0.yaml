@@ -3501,6 +3501,161 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issues/{id}:transitionPatch:
+    post:
+      operationId: transitionPatch
+      summary: Apply an atomic, receipt-chained issue patch
+      description: >-
+        Applies one exact compare-and-set patch to an issue. The request binds
+        the current signed revision to the `to_version` and digest of an
+        existing durable transition receipt, then checks every supplied
+        metadata, status, assignee, and label precondition in one transaction.
+        All requested fields, labels, the new backend-generated revision, and
+        the immutable receipt commit together. Any stale revision, failed field
+        precondition, or receipt-chain mismatch writes nothing.
+
+
+        Keep `receipt_id` stable across retries. After an unknown response,
+        read the exact patch receipt at
+        `/v0/beads/issue-transition-patch-receipts/{receipt_id}` before taking
+        another action. Reuse of an ID for a different canonical request is a
+        `409 transition_receipt_conflict`.
+
+
+        The `protected_permit` is an exact signed authorization for this
+        operation, issue, workspace, and canonical patch. HTTP bearer
+        authentication does not grant the mutation. Invalid or missing
+        authorization is refused without exposing permit details.
+
+
+        This route is unavailable unless migration 0072, the patch receipt
+        columns, protected-mutation schema and verifier, and the typed role are
+        all ready. It always requires a bearer token and matching
+        `Bd-Project-Id`.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionPatchRequest'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The patch applied or an exact prior receipt was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionPatchResponse'
+        '400':
+          description: Invalid or incomplete request, unknown member, or missing or mismatched project stamp.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No durable issue with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: >-
+            `precondition_failed` means the revision or an expected field was
+            stale; `transition_receipt_conflict` means the ID or prior receipt
+            does not match this request; `protected_record` means the exact
+            signed permit was refused without disclosing its details;
+            `unsupported_resource` means the target is a wisp. Every refusal
+            leaves source fields and the receipt table unchanged.
+          x-bd-codes:
+            - precondition_failed
+            - transition_receipt_conflict
+            - protected_record
+            - unsupported_resource
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration, protected-authority, or role readiness is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v0/beads/issue-transition-patch-receipts/{receipt_id}:
+    get:
+      operationId: getTransitionPatchReceipt
+      summary: Read an immutable atomic patch receipt
+      description: >-
+        Reads one exact patch receipt. Use it after an unknown response to
+        prove whether that request committed and to obtain the backend-written
+        `to_version` and receipt body for the next chain link. A missing receipt
+        does not authorize a different operation; the original exact request
+        may be retried with the same ID.
+
+
+        Always requires bearer authentication and a matching `Bd-Project-Id`.
+        The capability is published only with the patch route after migration
+        0072 and protected-mutation readiness pass.
+      parameters:
+        - name: receipt_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 191
+        - $ref: '#/components/parameters/ProjectID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The immutable patch receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionPatchReceipt'
+        '400':
+          description: Invalid receipt ID, unknown query parameter, or missing or mismatched project stamp.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No patch receipt with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration, protected-authority, or role readiness is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issue-transition-receipts/{receipt_id}:
     get:
       operationId: getTransitionReceipt
@@ -7588,7 +7743,8 @@ components:
             `memories.list`, `memories.get`, `memories.remember`,
             `memories.forget`, `events.list`, `events.watch`,
             `issues.casMetadata`, `issues.transitionMetadata`,
-            `issues.transitionReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `issues.batchApplyReceipt`, `project.enforce`,
+            `issues.transitionReceipt.get`, `issues.transitionPatch`,
+            `issues.transitionPatchReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `issues.batchApplyReceipt`, `project.enforce`,
             which announces that a `Bd-Project-Id` stamp for the wrong workspace
             is refused here rather than silently ignored, and `issues.protectedMutation`, which announces a startup-owned verifier and the durable permit-use table are ready. The list grows
             additively, and an operation never appears here unless it is fully
@@ -7605,6 +7761,10 @@ components:
             identity are ready.
             `issues.batchApplyReceipt` is advertised only when migration 0071,
             the durable result receipt table, and the batchApply role are ready.
+            The typed patch pair is advertised only after migration 0072, its
+            exact receipt columns, the patch role, and the protected-mutation
+            verifier are ready; both routes also require bearer authentication
+            and a project identity.
             This is how a client checks for an operation or a behavior — never
             the version string.
 
@@ -10717,6 +10877,178 @@ components:
           $ref: '#/components/schemas/MetadataValue'
         payload:
           $ref: '#/components/schemas/MetadataValue'
+
+    TransitionPatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [receipt_id, scope, kind, actor, expected_version, prior_receipt_id, prior_receipt_digest, patch, protected_permit]
+      properties:
+        receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+          description: Keep this exact ID for retry and lost-response recovery.
+        scope:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+        actor:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Caller-asserted audit actor, limited to 255 Unicode characters by the patch planner.
+        expected_version:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^-?[1-9][0-9]*$'
+          description: Canonical nonzero signed 64-bit revision token.
+        prior_receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+        prior_receipt_digest:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 digest of the exact prior durable receipt.
+        patch:
+          $ref: '#/components/schemas/TransitionIssuePatch'
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          x-max-utf8-bytes: 65536
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            Required exact signed authorization for this operation, issue,
+            workspace, and canonical patch. Bearer authentication alone does
+            not authorize the write. Storage verifies and consumes its replay
+            identity in the source-and-receipt transaction.
+
+    TransitionIssuePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        metadata:
+          type: array
+          description: >-
+            Metadata compare-and-set entries. Keys are canonicalized in sorted
+            order and may appear once. Omitted `expected` means the key must be
+            absent; present JSON `null` is distinct. Omitted `value` deletes the
+            key; present JSON `null` stores null.
+          items:
+            $ref: '#/components/schemas/TransitionMetadataPatch'
+        status:
+          $ref: '#/components/schemas/TransitionStatusPatch'
+        assignee:
+          $ref: '#/components/schemas/TransitionStringPatch'
+        labels:
+          $ref: '#/components/schemas/TransitionLabelsPatch'
+
+    TransitionMetadataPatch:
+      type: object
+      additionalProperties: false
+      required: [key]
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 255
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+
+    TransitionStringPatch:
+      type: object
+      additionalProperties: false
+      required: [expected, value]
+      properties:
+        expected:
+          type: string
+          maxLength: 255
+        value:
+          type: string
+          maxLength: 255
+
+    TransitionStatusPatch:
+      type: object
+      additionalProperties: false
+      required: [expected, value]
+      properties:
+        expected:
+          type: string
+          maxLength: 32
+        value:
+          type: string
+          maxLength: 32
+
+    TransitionLabelsPatch:
+      type: object
+      additionalProperties: false
+      required: [expected, value]
+      properties:
+        expected:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 255
+        value:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 255
+
+    TransitionPatchResponse:
+      type: object
+      required: [applied, replayed]
+      properties:
+        applied:
+          type: boolean
+        replayed:
+          type: boolean
+        receipt:
+          $ref: '#/components/schemas/TransitionPatchReceipt'
+
+    TransitionPatchReceipt:
+      type: object
+      required:
+        [receipt_id, issue_id, scope, kind, actor, expected_version, to_version, prior_receipt_id, prior_receipt_digest, patch]
+      properties:
+        receipt_id:
+          type: string
+        issue_id:
+          type: string
+        scope:
+          type: string
+        kind:
+          type: string
+        actor:
+          type: string
+        expected_version:
+          type: string
+          description: Canonical signed 64-bit revision required by this patch.
+        to_version:
+          type: string
+          description: Exact backend-generated revision committed with this patch.
+        prior_receipt_id:
+          type: string
+        prior_receipt_digest:
+          type: string
+        patch:
+          $ref: '#/components/schemas/TransitionIssuePatch'
 
     UpdateIssueRequest:
       type: object

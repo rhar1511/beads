@@ -46,6 +46,75 @@ func TestZeroRevisionTransitionReadinessIsUnknown(t *testing.T) {
 	if readiness.Ready() {
 		t.Fatal("zero-value readiness proof is ready")
 	}
+	if readiness.PatchReady() {
+		t.Fatal("zero-value readiness proof is patch-ready")
+	}
+}
+
+func TestPatchReadinessRequiresItsAdditiveMigrationAndColumns(t *testing.T) {
+	t.Run("revision-transition schema alone keeps patch hidden", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		expectReadinessVersions(mock, RevisionTransitionPatchMigration-1, RevisionTransitionIgnoredMigration)
+		expectNoLegacyTokens(mock)
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT receipt_id FROM issue_transition_receipts LIMIT 0")).
+			WillReturnRows(sqlmock.NewRows([]string{"receipt_id"}))
+		readiness, err := ProbeRevisionTransitionReadiness(context.Background(), db)
+		if err != nil {
+			t.Fatalf("probe: %v", err)
+		}
+		if !readiness.Ready() || readiness.PatchReady() {
+			t.Fatalf("readiness = %+v, want legacy API ready and patch unavailable", readiness)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("column probe fails closed", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		expectReadinessVersions(mock, RevisionTransitionPatchMigration, RevisionTransitionIgnoredMigration)
+		expectNoLegacyTokens(mock)
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT receipt_id FROM issue_transition_receipts LIMIT 0")).
+			WillReturnRows(sqlmock.NewRows([]string{"receipt_id"}))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT request_json, receipt_json FROM issue_transition_receipts LIMIT 0")).
+			WillReturnError(errMissingReadinessTable)
+		readiness, err := ProbeRevisionTransitionReadiness(context.Background(), db)
+		if err == nil || readiness.PatchReady() {
+			t.Fatalf("probe = %+v, %v; want unready with a column error", readiness, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("migration and columns verified", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		expectReadinessVersions(mock, RevisionTransitionPatchMigration, RevisionTransitionIgnoredMigration)
+		expectNoLegacyTokens(mock)
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT receipt_id FROM issue_transition_receipts LIMIT 0")).
+			WillReturnRows(sqlmock.NewRows([]string{"receipt_id"}))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT request_json, receipt_json FROM issue_transition_receipts LIMIT 0")).
+			WillReturnRows(sqlmock.NewRows([]string{"request_json", "receipt_json"}))
+		readiness, err := ProbeRevisionTransitionReadiness(context.Background(), db)
+		if err != nil || !readiness.PatchReady() {
+			t.Fatalf("probe = %+v, %v; want patch ready", readiness, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestRevisionTransitionReadinessRequiresBackfillAndReceiptTable(t *testing.T) {

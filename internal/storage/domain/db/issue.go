@@ -32,6 +32,7 @@ type issueSQLRepositoryImpl struct {
 }
 
 var _ domain.IssueSQLRepository = (*issueSQLRepositoryImpl)(nil)
+var _ domain.RevisionTransitionPatchRepository = (*issueSQLRepositoryImpl)(nil)
 
 // issueSelectColumns aliases the shared canonical column list; the scan side
 // delegates to issueops.ScanIssueFrom, which scans it positionally.
@@ -375,6 +376,15 @@ func (r *issueSQLRepositoryImpl) GetRevisionTransitionReceipt(ctx context.Contex
 		return nil, err
 	}
 	return issueops.GetRevisionTransitionReceiptInTx(ctx, r.runner, receiptID)
+}
+
+func (r *issueSQLRepositoryImpl) TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error) {
+	result, write, err := issueops.TransitionPatchInTx(ctx, r.runner, plan)
+	return result, write.Wrote, err
+}
+
+func (r *issueSQLRepositoryImpl) GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	return issueops.GetRevisionTransitionPatchReceiptInTx(ctx, r.runner, receiptID)
 }
 
 func (r *issueSQLRepositoryImpl) GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error) {

@@ -114,6 +114,14 @@ type IssueSQLRepository interface {
 	WakeExpiredDefers(ctx context.Context) (issues, wisps int, err error)
 }
 
+// RevisionTransitionPatchRepository is the additive repository capability for
+// atomic source patches. It is separate from IssueSQLRepository to preserve
+// compatibility with existing repository implementations.
+type RevisionTransitionPatchRepository interface {
+	TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error)
+	GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error)
+}
+
 type CloseRowParams struct {
 	Reason  string
 	Session string
@@ -392,6 +400,12 @@ type IssueUseCase interface {
 	PromoteWisp(ctx context.Context, id, actor string) error
 }
 
+// RevisionTransitionPatchUseCase is the additive UOW-facing patch capability.
+type RevisionTransitionPatchUseCase interface {
+	TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error)
+	GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error)
+}
+
 type CloseIssueParams struct {
 	Reason  string
 	Session string
@@ -532,6 +546,22 @@ func (u *issueUseCaseImpl) CompareAndSetMetadataKey(ctx context.Context, plan st
 // without changing its row-revision or receipt semantics.
 func (u *issueUseCaseImpl) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
 	return u.issueRepo.TransitionMetadata(ctx, plan)
+}
+
+func (u *issueUseCaseImpl) TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error) {
+	repository, ok := u.issueRepo.(RevisionTransitionPatchRepository)
+	if !ok {
+		return publicops.RevisionTransitionPatchResult{}, false, &storage.ErrUnsupported{Op: "RevisionTransitionPatch", Backend: "issue repository"}
+	}
+	return repository.TransitionPatch(ctx, plan)
+}
+
+func (u *issueUseCaseImpl) GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	repository, ok := u.issueRepo.(RevisionTransitionPatchRepository)
+	if !ok {
+		return nil, &storage.ErrUnsupported{Op: "RevisionTransitionPatchReceipt", Backend: "issue repository"}
+	}
+	return repository.GetRevisionTransitionPatchReceipt(ctx, receiptID)
 }
 
 // GetRevisionTransitionReceipt reads the durable receipt through this

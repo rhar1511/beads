@@ -700,6 +700,14 @@ func TestListenPublishesBothTransitionCapabilitiesOnlyWithReadinessProof(t *test
 }
 
 func readyTransitionReadinessProof(t *testing.T) schema.RevisionTransitionReadiness {
+	return readyTransitionReadinessAtVersion(t, schema.RevisionTransitionMainMigration)
+}
+
+func readyTransitionPatchReadinessProof(t *testing.T) schema.RevisionTransitionReadiness {
+	return readyTransitionReadinessAtVersion(t, schema.RevisionTransitionPatchMigration)
+}
+
+func readyTransitionReadinessAtVersion(t *testing.T, mainVersion int) schema.RevisionTransitionReadiness {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -707,20 +715,24 @@ func readyTransitionReadinessProof(t *testing.T) schema.RevisionTransitionReadin
 	}
 	defer db.Close()
 
-	expectHTTPAPIReadinessVersions(mock)
+	expectHTTPAPIReadinessVersions(mock, mainVersion)
 	for _, table := range []string{"issues", "wisps"} {
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT 1 FROM " + table + " WHERE row_lock = 0 LIMIT 1")).
 			WillReturnRows(sqlmock.NewRows([]string{"1"}))
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT receipt_id FROM issue_transition_receipts LIMIT 0")).
 		WillReturnRows(sqlmock.NewRows([]string{"receipt_id"}))
+	if mainVersion >= schema.RevisionTransitionPatchMigration {
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT request_json, receipt_json FROM issue_transition_receipts LIMIT 0")).
+			WillReturnRows(sqlmock.NewRows([]string{"request_json", "receipt_json"}))
+	}
 
 	readiness, err := schema.ProbeRevisionTransitionReadiness(context.Background(), db)
 	if err != nil {
 		t.Fatalf("probe readiness: %v", err)
 	}
-	if !readiness.Ready() {
-		t.Fatal("complete typed readiness proof is not ready")
+	if !readiness.Ready() || mainVersion >= schema.RevisionTransitionPatchMigration && !readiness.PatchReady() {
+		t.Fatalf("complete typed readiness proof is not ready: %+v", readiness)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("readiness probe did not check every prerequisite: %v", err)
@@ -728,12 +740,16 @@ func readyTransitionReadinessProof(t *testing.T) schema.RevisionTransitionReadin
 	return readiness
 }
 
-func expectHTTPAPIReadinessVersions(mock sqlmock.Sqlmock) {
+func expectHTTPAPIReadinessVersions(mock sqlmock.Sqlmock, mainVersions ...int) {
+	mainVersion := schema.RevisionTransitionMainMigration
+	if len(mainVersions) != 0 {
+		mainVersion = mainVersions[0]
+	}
 	for _, cursor := range []struct {
 		table   string
 		version int
 	}{
-		{table: "schema_migrations", version: schema.RevisionTransitionMainMigration},
+		{table: "schema_migrations", version: mainVersion},
 		{table: "ignored_schema_migrations", version: schema.RevisionTransitionIgnoredMigration},
 	} {
 		mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?")).

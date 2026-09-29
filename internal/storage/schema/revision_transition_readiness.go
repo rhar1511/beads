@@ -10,6 +10,7 @@ import (
 const (
 	RevisionTransitionMainMigration    = 68
 	RevisionTransitionIgnoredMigration = 27
+	RevisionTransitionPatchMigration   = 72
 )
 
 // RevisionTransitionReadiness is a startup proof that both migration planes,
@@ -20,12 +21,20 @@ type RevisionTransitionReadiness struct {
 	mainVersion    int
 	ignoredVersion int
 	verified       bool
+	patchVerified  bool
 }
 
 // Ready reports whether ProbeRevisionTransitionReadiness verified every
 // prerequisite for the transition/receipt API.
 func (r RevisionTransitionReadiness) Ready() bool {
 	return r.verified && r.mainVersion >= RevisionTransitionMainMigration && r.ignoredVersion >= RevisionTransitionIgnoredMigration
+}
+
+// PatchReady reports whether the additive atomic-patch receipt columns were
+// verified. It deliberately remains false for databases that are ready for
+// the compatible one-key transition API but have not applied migration 0072.
+func (r RevisionTransitionReadiness) PatchReady() bool {
+	return r.Ready() && r.patchVerified && r.mainVersion >= RevisionTransitionPatchMigration
 }
 
 // ProbeRevisionTransitionReadiness verifies the exact schema/data prerequisites
@@ -66,5 +75,16 @@ func ProbeRevisionTransitionReadiness(ctx context.Context, db DBConn) (RevisionT
 	if err := rows.Close(); err != nil {
 		return RevisionTransitionReadiness{}, fmt.Errorf("close issue transition receipt probe: %w", err)
 	}
-	return RevisionTransitionReadiness{mainVersion: mainVersion, ignoredVersion: ignoredVersion, verified: true}, nil
+	readiness := RevisionTransitionReadiness{mainVersion: mainVersion, ignoredVersion: ignoredVersion, verified: true}
+	if mainVersion >= RevisionTransitionPatchMigration {
+		patchRows, err := db.QueryContext(ctx, "SELECT request_json, receipt_json FROM issue_transition_receipts LIMIT 0")
+		if err != nil {
+			return RevisionTransitionReadiness{}, fmt.Errorf("verify atomic issue patch receipt columns: %w", err)
+		}
+		if err := patchRows.Close(); err != nil {
+			return RevisionTransitionReadiness{}, fmt.Errorf("close atomic issue patch receipt probe: %w", err)
+		}
+		readiness.patchVerified = true
+	}
+	return readiness, nil
 }
