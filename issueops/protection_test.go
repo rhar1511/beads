@@ -60,6 +60,31 @@ func TestProtectedMutationDigestClearsPermitAndBindsRequest(t *testing.T) {
 	}
 }
 
+func TestProtectedRevisionTransitionDigestMatchesControllerGolden(t *testing.T) {
+	expected := json.RawMessage(`"pending"`)
+	value := json.RawMessage(`"resolved"`)
+	digest, err := ProtectedMutationDigest(RevisionTransitionRequest{
+		ProtectedPermit: "excluded-permit",
+		ReceiptID:       "receipt-test",
+		IssueID:         "gc-record-1",
+		Scope:           "rig:fixture",
+		Kind:            "decision-frontier-record-metadata",
+		Actor:           "controller-test-actor",
+		ExpectedVersion: 7,
+		Key:             "gc.decision_frontier.state",
+		Expected:        &expected,
+		Value:           &value,
+		Payload:         json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("ProtectedMutationDigest revision transition: %v", err)
+	}
+	const want = "9dc1875d200aa59ac356d13e9ab59e6999c4789f3c9f7823ddcf347405f9dde0"
+	if digest != want {
+		t.Fatalf("protected revision-transition digest = %q, want controller golden %q", digest, want)
+	}
+}
+
 func TestApplyBatchRequestDigestBindsPersistedHiddenCreateInputs(t *testing.T) {
 	request := ApplyBatchRequest{
 		Actor:           "writer",
