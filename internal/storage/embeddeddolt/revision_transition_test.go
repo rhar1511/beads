@@ -20,12 +20,20 @@ const revisionTransitionTestKey = "gc_test_transition"
 
 func createRevisionTransitionIssue(t *testing.T, te *testEnv, ctx context.Context, metadata map[string]interface{}) (*types.Issue, int64) {
 	t.Helper()
+	var metadataJSON json.RawMessage
+	if metadata != nil {
+		encoded, err := json.Marshal(metadata)
+		if err != nil {
+			t.Fatalf("marshal fixture metadata: %v", err)
+		}
+		metadataJSON = encoded
+	}
 	issue := &types.Issue{
 		Title:     "revision transition fixture",
 		Status:    types.StatusOpen,
 		Priority:  2,
 		IssueType: types.TypeTask,
-		Metadata:  metadata,
+		Metadata:  metadataJSON,
 	}
 	if err := te.store.CreateIssue(ctx, issue, "revision-test"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)

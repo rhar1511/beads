@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -88,7 +89,7 @@ func TestRevisionTransitionPatchAppliesAllFieldsAndReplaysAfterRestart(t *testin
 	ctx := t.Context()
 	issue := &types.Issue{
 		Title: "atomic patch fixture", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		Assignee: "", Metadata: map[string]interface{}{"gc_route": "pending"}, Labels: []string{"keep", "old"},
+		Assignee: "", Metadata: json.RawMessage(`{"gc_route":"pending"}`), Labels: []string{"keep", "old"},
 	}
 	if err := te.store.CreateIssue(ctx, issue, "revision-test"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -97,10 +98,11 @@ func TestRevisionTransitionPatchAppliesAllFieldsAndReplaysAfterRestart(t *testin
 	te.queryScalar(t, ctx, "SELECT row_lock FROM issues WHERE id = ?", []any{issue.ID}, &initial)
 	parent := createPatchParentReceipt(t, te, ctx, issue, initial, "patch-parent-1")
 	request := revisionPatchRequest(t, parent, "patch-apply-1")
+	workflow := json.RawMessage(`{"name":"build"}`)
 	request.Patch = publicops.RevisionTransitionIssuePatch{
 		Metadata: []publicops.RevisionTransitionMetadataPatch{
 			{Key: "gc_route", Expected: transitionJSON("pending"), Value: transitionJSON("ready")},
-			{Key: "gc_workflow", Value: transitionJSON(`{"name":"build"}`)},
+			{Key: "gc_workflow", Value: &workflow},
 		},
 		Status:   &publicops.RevisionTransitionStringPatch{Expected: "open", Value: "in_progress"},
 		Assignee: &publicops.RevisionTransitionStringPatch{Expected: "", Value: "worker-1"},
@@ -123,7 +125,7 @@ func TestRevisionTransitionPatchAppliesAllFieldsAndReplaysAfterRestart(t *testin
 		t.Fatalf("GetIssue after patch: %v", err)
 	}
 	if storedIssue.RowVersion != receipt.ToVersion || storedIssue.Status != types.StatusInProgress || storedIssue.Assignee != "worker-1" ||
-		!jsonValuesEqual(t, storedIssue.Metadata["gc_route"], "ready") || !jsonValuesEqual(t, storedIssue.Metadata["gc_workflow"], map[string]interface{}{"name": "build"}) {
+		!jsonValuesEqual(t, revisionTransitionMetadataValue(t, storedIssue.Metadata, "gc_route"), "ready") || !jsonValuesEqual(t, revisionTransitionMetadataValue(t, storedIssue.Metadata, "gc_workflow"), map[string]interface{}{"name": "build"}) {
 		t.Fatalf("source after patch = %+v, receipt = %+v", storedIssue, receipt)
 	}
 	if got := storedIssue.Labels; len(got) != 2 || got[0] != "keep" || got[1] != "new" {
@@ -139,7 +141,11 @@ func TestRevisionTransitionPatchAppliesAllFieldsAndReplaysAfterRestart(t *testin
 	if err != nil || storedReceipt == nil || storedReceipt.ToVersion != receipt.ToVersion {
 		t.Fatalf("GetPatchReceipt = %+v, %v", storedReceipt, err)
 	}
-	if _, err := patcher.GetReceipt(ctx, request.ReceiptID); !errors.Is(err, publicops.ErrTransitionReceiptConflict) {
+	legacyRole, err := te.store.RevisionTransition()
+	if err != nil {
+		t.Fatalf("RevisionTransition for legacy receipt read: %v", err)
+	}
+	if _, err := legacyRole.GetReceipt(ctx, request.ReceiptID); !errors.Is(err, publicops.ErrTransitionReceiptConflict) {
 		t.Fatalf("legacy GetReceipt for patch ID = %v, want typed conflict", err)
 	}
 	if err := te.store.UpdateIssue(ctx, issue.ID, map[string]interface{}{"title": "later edit"}, "revision-test"); err != nil {
@@ -154,7 +160,7 @@ func TestRevisionTransitionPatchAppliesAllFieldsAndReplaysAfterRestart(t *testin
 	if err := te.store.Close(); err != nil {
 		t.Fatalf("close store before restart recovery: %v", err)
 	}
-	reopened, err := embeddeddolt.Open(ctx, te.dataDir, te.database, "main")
+	reopened, err := embeddeddolt.Open(ctx, filepath.Dir(te.dataDir), te.database, "main")
 	if err != nil {
 		t.Fatalf("reopen store for recovery: %v", err)
 	}
@@ -218,7 +224,7 @@ func TestRevisionTransitionPatchRefusesStaleAndFieldPreconditionsWithoutPartialW
 			ctx := t.Context()
 			issue := &types.Issue{
 				Title: "patch refusal fixture", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-				Metadata: map[string]interface{}{"gc_route": "pending"}, Labels: []string{"old"},
+				Metadata: json.RawMessage(`{"gc_route":"pending"}`), Labels: []string{"old"},
 			}
 			if err := te.store.CreateIssue(ctx, issue, "revision-test"); err != nil {
 				t.Fatalf("CreateIssue: %v", err)
@@ -243,8 +249,8 @@ func TestRevisionTransitionPatchRefusesStaleAndFieldPreconditionsWithoutPartialW
 			if current.Status != types.StatusOpen || current.Assignee != "" || len(current.Labels) != 1 || current.Labels[0] != "old" {
 				t.Fatalf("source after refused patch partially changed: %+v", current)
 			}
-			if !jsonValuesEqual(t, current.Metadata["gc_route"], "pending") {
-				t.Fatalf("metadata after refused patch = %v, want pending", current.Metadata["gc_route"])
+			if !jsonValuesEqual(t, revisionTransitionMetadataValue(t, current.Metadata, "gc_route"), "pending") {
+				t.Fatalf("metadata after refused patch = %s, want pending", current.Metadata)
 			}
 		})
 	}
@@ -274,7 +280,11 @@ func TestRevisionTransitionPatchRefusesWrongParentAndDigest(t *testing.T) {
 			}
 			assertTransitionReceiptCount(t, te, ctx, request.ReceiptID, 0)
 			after, err := te.store.GetIssue(ctx, issue.ID)
-			if err != nil || after.RowVersion != before.RowVersion || !jsonValuesEqual(t, after.Metadata["gc_route"], before.Metadata["gc_route"]) {
+			if err != nil || after.RowVersion != before.RowVersion || !jsonValuesEqual(
+				t,
+				revisionTransitionMetadataValue(t, after.Metadata, "gc_route"),
+				revisionTransitionMetadataValue(t, before.Metadata, "gc_route"),
+			) {
 				t.Fatalf("source changed after parent refusal: before=%+v after=%+v err=%v", before, after, err)
 			}
 		})
@@ -329,7 +339,11 @@ func TestRevisionTransitionPatchChainsFromExactPriorPatchReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIssue after chained patch: %v", err)
 	}
-	if stored.RowVersion != secondResult.Receipt.ToVersion || stored.Status != types.StatusInProgress || !jsonValuesEqual(t, stored.Metadata["gc_route"], "ready") {
+	if stored.RowVersion != secondResult.Receipt.ToVersion || stored.Status != types.StatusInProgress || !jsonValuesEqual(
+		t,
+		revisionTransitionMetadataValue(t, stored.Metadata, "gc_route"),
+		"ready",
+	) {
 		t.Fatalf("issue after chained patch = %+v, second receipt = %+v", stored, secondResult.Receipt)
 	}
 }
@@ -399,4 +413,20 @@ func jsonValuesEqual(t *testing.T, value any, want any) bool {
 		t.Fatalf("decode wanted value: %v", err)
 	}
 	return reflect.DeepEqual(actual, expected)
+}
+
+func revisionTransitionMetadataValue(t *testing.T, metadata json.RawMessage, key string) json.RawMessage {
+	t.Helper()
+	if len(metadata) == 0 {
+		t.Fatalf("metadata is empty; want key %q", key)
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(metadata, &values); err != nil {
+		t.Fatalf("decode issue metadata %s: %v", metadata, err)
+	}
+	value, ok := values[key]
+	if !ok {
+		t.Fatalf("metadata %s is missing key %q", metadata, key)
+	}
+	return value
 }
