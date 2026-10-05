@@ -22,6 +22,16 @@ There are two narrow Go escape hatches, selected by what must change:
   semantic differential, interruption/retry convergence, and a stated,
   repeatable production-shaped measurement.
 
+## Fork release reconciliation
+
+**The fork and v1.3.1 both used ignored migration 0026.** The fork's frozen
+`0026_add_wisps_current_revision.up.sql` remains unchanged. New ignored step
+`0027_reconcile_v131_local_schema.up.sql` is pending on both cursor-26 lineages:
+it forces the merge-aware dependency re-key pass before recording its marker
+and repeats the guarded wisp-column addition for release databases missing it.
+The embedded reconciliation regression covers both lineages and preserves wisp
+data; this reconciliation does not introduce a main-plane migration.
+
 ## Measured Dolt behaviours
 
 These were measured against real Dolt (2.1.2 and 2.2.3) and confirmed against

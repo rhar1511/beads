@@ -94,6 +94,7 @@ var roleContractCases = []roleContract{
 		RunBatchCreatorRecordsOneHistoryEntry,
 		RunBatchCreatorRecordsNoHistoryForAnEphemeralBatch,
 		RunBatchCreatorDoesNotMutateTheCallerRequest,
+		RunBatchCreatorEchoesSubSecondTimestamps,
 	),
 
 	roleCases("BlockingAnnotator", "BlockingAnnotator()", oncePerRole,
@@ -412,6 +413,7 @@ var roleContractCases = []roleContract{
 		RunLifecycleCreateRefusesAForeignIDPrefix,
 		RunLifecycleCreateInheritsParentLabels,
 		RunLifecycleCreateWritesEveryScalarField,
+		RunLifecycleCreateEchoesSubSecondTimestamps,
 	),
 
 	roleCases("LifecycleUpdate", "IssueLifecycle()", oncePerRole,
@@ -635,6 +637,11 @@ var roleContractCases = []roleContract{
 		RunSweeperEmptyMatchIsZeroAndNil,
 		RunSweeperRecordsExactlyOneHistoryEntry,
 		RunSweeperDoesNotMutateTheCallerRequest,
+		RunSweeperWispsPlaneClearsTheWholeWispsTable,
+		RunSweeperWispsPlaneRequiresAFilter,
+		RunSweeperProtectsLiveDependents,
+		RunSweeperProtectsLiveDependentsAcrossPlanes,
+		RunSweeperLimitTakesTheOldestClosedFirst,
 	),
 
 	roleCases("TreeWalker", "TreeWalker()", oncePerRole,

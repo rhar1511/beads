@@ -39,6 +39,23 @@ declare -ar EMBEDDED_DOLT_VERSIONS=(
     "v1.0.1"
     "v1.1.0"
     "v1.1.2"
+    "v1.2.2"
+)
+
+# Embedded-Dolt sources whose wisp plane is close enough to the 1.3.0 input
+# regimes to be worth seeding: v1.0.1 is the legacy single-target
+# wisp_dependencies shape with no ignored-migration cursor, while v1.1.0,
+# v1.1.2 and v1.2.2 are the post-split shape with the cursor parked at
+# ignored-0011. Both regimes are replayed over populated rows by the candidate's
+# main 0054-0066 + ignored 0012-0025 chain. v1.2.2 is the v1.1.2 tree re-tagged
+# by the recovery release, so it adds no new regime — it is here because it is
+# the tag people in the field actually upgrade from. Also gates the external
+# Dolt oracle download in migration-test.yml.
+declare -ar WISP_PLANE_VERSIONS=(
+    "v1.0.1"
+    "v1.1.0"
+    "v1.1.2"
+    "v1.2.2"
 )
 
 # The test server is an external compatibility fixture, not the runner's
@@ -101,6 +118,7 @@ declare -Ar STRICT_RELEASE_ASSETS=(
     ["v1.0.1|darwin|arm64"]="beads_1.0.1_darwin_arm64.tar.gz"
     ["v1.1.0|darwin|arm64"]="beads_1.1.0_darwin_arm64.tar.gz"
     ["v1.1.2|darwin|arm64"]="beads_1.1.2_darwin_arm64.tar.gz"
+    ["v1.2.2|linux|amd64"]="beads_1.2.2_linux_amd64.tar.gz"
 )
 declare -Ar STRICT_RELEASE_SHA256=(
     ["v0.17.0|linux|amd64"]="d4d08617a324c85b45c9628bc519d659a9ff9c7c37da67aa48727e0af7f19a75"
@@ -128,6 +146,7 @@ declare -Ar STRICT_RELEASE_SHA256=(
     ["v1.0.1|darwin|arm64"]="f9d5e878fbee8a7051289743e36e52b0b17f1058587170afab7f2d2a30f43199"
     ["v1.1.0|darwin|arm64"]="c42e24d83b258f7ba9f52a6d2d5f6b055869dfe7807165055988b12e7ea8c564"
     ["v1.1.2|darwin|arm64"]="9b0137a83a2afd343e2abd2a506be72ea032721000f76669c2cf81729e78501d"
+    ["v1.2.2|linux|amd64"]="8140098a51d3b81d5548d1c5e6db1a2d9930e5d141efe2a4bff7d079c4d321e8"
 )
 
 strict_release_asset() {
