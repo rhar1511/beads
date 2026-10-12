@@ -282,6 +282,14 @@ var routeTable = []route{
 		handler:     (*Server).handleGetIssue,
 	},
 	{
+		op:          OpSourceSnapshot,
+		method:      http.MethodGet,
+		pattern:     "/v0/beads/issues/{id}/sourceSnapshot",
+		capability:  "issues.sourceSnapshot",
+		implemented: true,
+		handler:     (*Server).handleSourceSnapshot,
+	},
+	{
 		op:     OpUpdateIssue,
 		method: http.MethodPatch,
 		// A PLAIN METHOD on the issue-detail path, not a custom method: partial

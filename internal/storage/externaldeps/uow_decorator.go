@@ -62,6 +62,9 @@ func (p *uowProvider) NewUOW(ctx context.Context) (uow.UnitOfWork, error) {
 // every command that reaches the proxied seam through an optional source.
 func (p *uowProvider) IssueLifecycle() (publicops.Lifecycle, error) { return uow.NewIssueOperations(p) }
 func (p *uowProvider) IssueReader() (publicops.Reader, error)       { return uow.NewIssueReader(p) }
+func (p *uowProvider) SourceSnapshotReader() (publicops.SourceSnapshotReader, error) {
+	return uow.NewSourceSnapshotReader(p)
+}
 func (p *uowProvider) IssueClaimer() (publicops.Claimer, error)     { return uow.NewIssueClaimer(p) }
 func (p *uowProvider) IssueRelations() (publicops.Relations, error) { return uow.NewIssueRelations(p) }
 func (p *uowProvider) EdgeReader() (publicops.EdgeReader, error)    { return uow.NewEdgeReader(p) }

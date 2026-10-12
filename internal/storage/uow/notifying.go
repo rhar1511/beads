@@ -220,6 +220,10 @@ func (p *notifyingProvider) IssueLifecycle() (publicops.Lifecycle, error) {
 
 func (p *notifyingProvider) IssueReader() (publicops.Reader, error) { return NewIssueReader(p) }
 
+func (p *notifyingProvider) SourceSnapshotReader() (publicops.SourceSnapshotReader, error) {
+	return NewSourceSnapshotReader(p)
+}
+
 func (p *notifyingProvider) IssueClaimer() (publicops.Claimer, error) { return NewIssueClaimer(p) }
 
 func (p *notifyingProvider) IssueRelations() (publicops.Relations, error) {

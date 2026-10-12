@@ -184,8 +184,11 @@ type Config struct {
 	// one reason — so the units of work they open land in that request's uow_ms
 	// (see Server.reader) — and a role reached this way opens none through this
 	// server, so a rebuild would buy nothing.
-	Reader  issueops.Reader
-	Claimer issueops.Claimer
+	Reader issueops.Reader
+	// SourceSnapshotReader is optional for store-backed deployments. A provider
+	// supplies the transactional implementation directly.
+	SourceSnapshotReader issueops.SourceSnapshotReader
+	Claimer              issueops.Claimer
 	// BatchCloser closes many issues as one transaction, behind
 	// POST /v0/beads/issues:batchClose. It is its own field rather than a mode
 	// of Lifecycle for the role's reason: the request is the transaction
@@ -345,32 +348,33 @@ type Server struct {
 	// reader(), claimer(), cycleDetector() and the rest of those accessors hand
 	// back on the store-shaped source; the field names differ from the method
 	// names because a struct cannot carry both.
-	issueReader       issueops.Reader
-	issueClaimer      issueops.Claimer
-	issueBatchCloser  issueops.BatchCloser
-	issueReadyClaimer issueops.ReadyClaimer
-	issueReleaser     issueops.Releaser
-	issueLifecycle    issueops.Lifecycle
-	settings          issueops.WorkspaceConfig
-	issueStats        issueops.StatsReporter
-	issueCycles       issueops.CycleDetector
-	issueEdges        issueops.EdgeReader
-	issueEdgeCounter  issueops.GraphCounter
-	issueRelations    issueops.Relations
-	issueCommenter    issueops.Commenter
-	issueBlocking     issueops.BlockingAnnotator
-	issueTree         issueops.TreeWalker
-	issueReadyCounter issueops.ReadyCounter
-	issueCounter      issueops.Counter
-	issueQuerier      issueops.Querier
-	issueSweeper      issueops.Sweeper
-	issueDeleter      issueops.Deleter
-	issueBatchCreator issueops.BatchCreator
-	issueDependencies issueops.DependencyEditor
-	issueMetadataCAS  issueops.MetadataCAS
-	issueBatchApplier issueops.BatchApplier
-	workspaceMemories memoryops.Memories
-	eventsJournal     storage.EventsJournalCursor
+	issueReader         issueops.Reader
+	issueSourceSnapshot issueops.SourceSnapshotReader
+	issueClaimer        issueops.Claimer
+	issueBatchCloser    issueops.BatchCloser
+	issueReadyClaimer   issueops.ReadyClaimer
+	issueReleaser       issueops.Releaser
+	issueLifecycle      issueops.Lifecycle
+	settings            issueops.WorkspaceConfig
+	issueStats          issueops.StatsReporter
+	issueCycles         issueops.CycleDetector
+	issueEdges          issueops.EdgeReader
+	issueEdgeCounter    issueops.GraphCounter
+	issueRelations      issueops.Relations
+	issueCommenter      issueops.Commenter
+	issueBlocking       issueops.BlockingAnnotator
+	issueTree           issueops.TreeWalker
+	issueReadyCounter   issueops.ReadyCounter
+	issueCounter        issueops.Counter
+	issueQuerier        issueops.Querier
+	issueSweeper        issueops.Sweeper
+	issueDeleter        issueops.Deleter
+	issueBatchCreator   issueops.BatchCreator
+	issueDependencies   issueops.DependencyEditor
+	issueMetadataCAS    issueops.MetadataCAS
+	issueBatchApplier   issueops.BatchApplier
+	workspaceMemories   memoryops.Memories
+	eventsJournal       storage.EventsJournalCursor
 
 	listener net.Listener
 	http     *http.Server
@@ -495,34 +499,35 @@ func Listen(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:               cfg,
-		provider:          cfg.Provider,
-		issueReader:       cfg.Reader,
-		issueClaimer:      cfg.Claimer,
-		issueBatchCloser:  cfg.BatchCloser,
-		issueReadyClaimer: cfg.ReadyClaimer,
-		issueReleaser:     cfg.Releaser,
-		issueLifecycle:    cfg.Lifecycle,
-		settings:          cfg.Settings,
-		issueStats:        cfg.Stats,
-		issueCycles:       cfg.CycleDetector,
-		issueEdges:        cfg.EdgeReader,
-		issueEdgeCounter:  cfg.GraphCounter,
-		issueRelations:    cfg.Relations,
-		issueCommenter:    cfg.Commenter,
-		issueBlocking:     cfg.BlockingAnnotator,
-		issueTree:         cfg.TreeWalker,
-		issueReadyCounter: cfg.ReadyCounter,
-		issueCounter:      cfg.Counter,
-		issueQuerier:      cfg.Querier,
-		issueSweeper:      cfg.Sweeper,
-		issueDeleter:      cfg.Deleter,
-		issueBatchCreator: cfg.BatchCreator,
-		issueDependencies: cfg.DependencyEditor,
-		issueMetadataCAS:  cfg.MetadataCAS,
-		issueBatchApplier: cfg.BatchApplier,
-		workspaceMemories: cfg.Memories,
-		eventsJournal:     cfg.EventsJournal,
+		cfg:                 cfg,
+		provider:            cfg.Provider,
+		issueReader:         cfg.Reader,
+		issueSourceSnapshot: cfg.SourceSnapshotReader,
+		issueClaimer:        cfg.Claimer,
+		issueBatchCloser:    cfg.BatchCloser,
+		issueReadyClaimer:   cfg.ReadyClaimer,
+		issueReleaser:       cfg.Releaser,
+		issueLifecycle:      cfg.Lifecycle,
+		settings:            cfg.Settings,
+		issueStats:          cfg.Stats,
+		issueCycles:         cfg.CycleDetector,
+		issueEdges:          cfg.EdgeReader,
+		issueEdgeCounter:    cfg.GraphCounter,
+		issueRelations:      cfg.Relations,
+		issueCommenter:      cfg.Commenter,
+		issueBlocking:       cfg.BlockingAnnotator,
+		issueTree:           cfg.TreeWalker,
+		issueReadyCounter:   cfg.ReadyCounter,
+		issueCounter:        cfg.Counter,
+		issueQuerier:        cfg.Querier,
+		issueSweeper:        cfg.Sweeper,
+		issueDeleter:        cfg.Deleter,
+		issueBatchCreator:   cfg.BatchCreator,
+		issueDependencies:   cfg.DependencyEditor,
+		issueMetadataCAS:    cfg.MetadataCAS,
+		issueBatchApplier:   cfg.BatchApplier,
+		workspaceMemories:   cfg.Memories,
+		eventsJournal:       cfg.EventsJournal,
 
 		sem:        make(chan struct{}, maxInflight),
 		semTimeout: semAcquireTimeout,
@@ -533,7 +538,7 @@ func Listen(cfg Config) (*Server, error) {
 
 		log:      log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
 		stdout:   cfg.Stdout,
-		ctxBody:  contextResponse(cfg.Workspace, cfg.SchemaVersion, Capabilities()),
+		ctxBody:  contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForSource(cfg)),
 		hosts:    newHostPolicy(ip, cfg.AllowedHosts),
 		auth:     cfg.Auth,
 		idPrefix: prefix,
@@ -630,6 +635,14 @@ func sourceRoles(cfg Config) []any {
 	return []any{cfg.Reader, cfg.Claimer, cfg.ReadyClaimer, cfg.Releaser, cfg.Lifecycle, cfg.BatchCloser, cfg.Settings, cfg.Stats, cfg.CycleDetector, cfg.EdgeReader, cfg.GraphCounter, cfg.Relations, cfg.Commenter, cfg.BlockingAnnotator, cfg.TreeWalker, cfg.ReadyCounter, cfg.Counter, cfg.Querier, cfg.Sweeper, cfg.Deleter, cfg.BatchCreator, cfg.DependencyEditor, cfg.BatchApplier, cfg.Memories, cfg.MetadataCAS}
 }
 
+func capabilitiesForSource(cfg Config) []string {
+	caps := Capabilities()
+	if cfg.Provider != nil || cfg.SourceSnapshotReader != nil {
+		return caps
+	}
+	return slices.DeleteFunc(caps, func(cap string) bool { return cap == "issues.sourceSnapshot" })
+}
+
 // roleSourceNames spells sourceRoles for the refusal message, in the same
 // order, so a caller reading the error learns the whole set it must pass.
 const roleSourceNames = "Reader, Claimer, ReadyClaimer, Releaser, Lifecycle, BatchCloser, Settings, Stats, CycleDetector, EdgeReader, GraphCounter, Relations, Commenter, BlockingAnnotator, TreeWalker, ReadyCounter, Counter, Querier, Sweeper, Deleter, BatchCreator, DependencyEditor, BatchApplier, Memories and MetadataCAS"
@@ -648,7 +661,7 @@ func anyRoleFiresHooks(cfg Config) bool {
 
 func checkDatabaseSource(cfg Config) error {
 	switch {
-	case cfg.Provider != nil && (anyRoleSet(cfg) || cfg.EventsJournal != nil):
+	case cfg.Provider != nil && (anyRoleSet(cfg) || cfg.SourceSnapshotReader != nil || cfg.EventsJournal != nil):
 		return errors.New("httpapi: both a unit-of-work provider and issue roles were set; pass exactly one database source")
 	case cfg.Provider == nil && !everyRoleSet(cfg):
 		return errors.New("httpapi: no database source: set Provider, or " + roleSourceNames + " together")

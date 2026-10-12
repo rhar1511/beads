@@ -344,13 +344,14 @@ var ErrBusy = errors.New("server busy")
 
 // Operation ids, matching the spec's operationId values exactly.
 const (
-	OpHealth        = "health"
-	OpGetContext    = "getContext"
-	OpListReadyWork = "listReadyWork"
-	OpGetStats      = "getStats"
-	OpListIssues    = "listIssues"
-	OpGetIssue      = "getIssue"
-	OpClaimIssue    = "claimIssue"
+	OpHealth         = "health"
+	OpGetContext     = "getContext"
+	OpListReadyWork  = "listReadyWork"
+	OpGetStats       = "getStats"
+	OpListIssues     = "listIssues"
+	OpGetIssue       = "getIssue"
+	OpSourceSnapshot = "sourceSnapshot"
+	OpClaimIssue     = "claimIssue"
 	// OpBatchCloseIssues closes many issues as one transaction, behind
 	// issueops.BatchCloser. It is the surface's ONLY operation whose 200 body
 	// carries refusals: the role is deliberately not all-or-nothing, so an id
@@ -625,7 +626,8 @@ var operationCodes = map[string][]Code{
 	// `include_comments` or `include_dependents` is a bad value on a parameter
 	// this server knows, not the document-level unknown-key rule this table
 	// omits.
-	OpGetIssue: {CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeBusy, CodeDBUnavailable, CodeInternal},
+	OpGetIssue:       {CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeBusy, CodeDBUnavailable, CodeInternal},
+	OpSourceSnapshot: {CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeBusy, CodeDBUnavailable, CodeInternal},
 	// No 400 of its own: the operation takes no parameters, so the only
 	// invalid_argument it can raise is the document-level unknown-query-key
 	// rule this table deliberately omits.

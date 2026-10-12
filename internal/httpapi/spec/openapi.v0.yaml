@@ -2357,6 +2357,46 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issues/{id}/sourceSnapshot:
+    get:
+      operationId: sourceSnapshot
+      summary: Read an issue and its exact outgoing dependency records
+      description: >-
+        Returns the issue, its opaque revision as a decimal string, and its
+        stored outgoing edges from one read transaction. Edges are returned
+        even when their target issue no longer exists. This operation is
+        available on transactional providers; check `issues.sourceSnapshot`
+        before calling it.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: One consistent source row and outgoing edge set.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issue, outgoing_dependencies]
+                properties:
+                  issue:
+                    $ref: '#/components/schemas/IssueDetails'
+                  outgoing_dependencies:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Dependency'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issues/{id}/related:
     get:
       operationId: listRelatedIssues
@@ -7275,6 +7315,7 @@ components:
             derived from its route table, and the server-wide BEHAVIORS it
             enforces. v0's operation vocabulary is `ready.list`, `ready.count`,
             `issues.list`, `issues.query`, `issues.count`, `issues.get`,
+            `issues.sourceSnapshot`,
             `issues.related`, `issues.create`, `issues.addComment`,
             `issues.batchClose`,
             `issues.claim`, `issues.claimNext`, `issues.release`,
@@ -7296,8 +7337,11 @@ components:
             behavior — never the version string.
 
 
-            THIS LIST IS BUILD-LEVEL, NOT WORKSPACE-LEVEL. It says which
-            operations this binary serves, and for every entry but two that is
+            THIS LIST IS BUILD-LEVEL, NOT WORKSPACE-LEVEL, except that
+            `issues.sourceSnapshot` requires a transactional provider or an
+            explicitly configured atomic snapshot reader. Store-backed servers
+            without one omit that token and refuse the route with 503.
+            For every other entry but two this list is
             the whole answer. `events.list` and `events.watch` are the
             exceptions: the durable events journal is a per-workspace setting
             that is OFF by default, so a server that advertises them may still
