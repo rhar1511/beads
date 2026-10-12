@@ -30,6 +30,15 @@ func exitCodeFromError(err error) (int, bool) {
 	return 0, false
 }
 
+// isReportedExit reports whether err is an already-rendered failure — the
+// *exitError every Handle*Error returns after writing the message (or the JSON
+// error envelope) itself. A caller that re-wraps one prints a second Error line
+// and, in --json mode, a plain line after the envelope.
+func isReportedExit(err error) bool {
+	_, reported := exitCodeFromError(err)
+	return reported
+}
+
 func activeWorkspaceNotFoundError() string {
 	return "no active beads workspace found"
 }
@@ -76,8 +85,16 @@ func buildJSONError(message, hint string) interface{} {
 	return inner
 }
 
+// buildJSONCapabilityError renders a typed refusal. {code, error, mutates} is a
+// frozen contract that downstream consumers parse; `reason` is additive and
+// appears only on refusals that came from the capability registry, which is why
+// it is omitted rather than emitted empty — a consumer that keys on its presence
+// must not be told "" by a runtime state error that has no policy reason.
 func buildJSONCapabilityError(e *ProxyCapabilityError) interface{} {
 	inner := map[string]interface{}{"error": e.Message, "code": e.Code, "mutates": e.Mutates}
+	if e.Reason != "" {
+		inner["reason"] = string(e.Reason)
+	}
 	if jsonEnvelopeEnabled() {
 		return map[string]interface{}{"schema_version": JSONSchemaVersion, "data": inner}
 	}

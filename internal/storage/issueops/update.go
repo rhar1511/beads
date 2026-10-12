@@ -577,6 +577,9 @@ func updateIssueAndExactLabelsInTx(ctx context.Context, tx DBTX, id string, upda
 			}
 			updateResult.IssueRowsChanged = !isWisp || recompute.IssueRowsChanged
 			updateResult.WispRowsChanged = isWisp || recompute.WispRowsChanged
+			if !newActive {
+				NoteStatusChangeBlockedRecheck(tx, id, newStatus, affectedIssues, affectedWisps)
+			}
 		}
 	}
 

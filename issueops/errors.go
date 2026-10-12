@@ -177,6 +177,22 @@ func (e *AlreadyIdentifiedError) Unwrap() error { return ErrAlreadyIdentified }
 // precondition from other errors.
 var ErrVersionMismatch = errors.New("version mismatch")
 
+// VersionMismatchError carries the tokens compared inside the mutation's
+// transaction. A caller can report the lost precondition without parsing prose
+// or performing a later read that might observe another writer's state.
+type VersionMismatchError struct {
+	IssueID         string
+	ExpectedVersion int64
+	CurrentVersion  int64
+}
+
+func (e *VersionMismatchError) Error() string {
+	return fmt.Sprintf("%v: expected %d, got %d", ErrVersionMismatch, e.ExpectedVersion, e.CurrentVersion)
+}
+
+// Unwrap preserves the existing errors.Is contract and human-readable message.
+func (e *VersionMismatchError) Unwrap() error { return ErrVersionMismatch }
+
 // ErrRevisionPatchPreconditionFailed is returned when the source revision is
 // current but one or more exact patch values no longer match the request.
 var ErrRevisionPatchPreconditionFailed = errors.New("revision patch precondition failed")

@@ -177,6 +177,7 @@ var beadDMLExemptions = map[string]string{
 	"BumpDependencySourceRevisionsForIDsInTx":               "constituent dependency-source invalidation; the calling graph mutation journals the affected sources",
 	"BumpDependencySourceRevisionsForTargetsInTx":           "constituent dependency-target invalidation; the calling rename, delete, or graph mutation journals the affected sources",
 	"BumpDependencySourceRevisionsForTargetsWithResultInTx": "result-bearing dependency-target invalidation helper; the calling mutation journals the affected sources",
+	"DeleteWispAuxRowsInTx":                                 "cleans up wisp label/event/comment/counter rows during a delete that journals the delete",
 
 	// (4) compaction maintenance — a lossy content rewrite outside the
 	// create/update/close/delete/dep/label op vocabulary. Carried from the

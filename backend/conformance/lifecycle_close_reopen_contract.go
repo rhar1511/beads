@@ -887,9 +887,7 @@ func RunLifecycleExpectedVersionIsCheckedBeforeTheNoOps(t *testing.T, ctx contex
 		_, err := fixture.Lifecycle.Close(ctx, publicops.CloseRequest{
 			Actor: "writer", IssueID: closedID, ExpectedVersion: &stale, Force: force,
 		})
-		if !errors.Is(err, publicops.ErrVersionMismatch) {
-			t.Fatalf("re-close of closed %s with a stale version (force = %t): err = %v, want ErrVersionMismatch", closedID, force, err)
-		}
+		assertVersionMismatchTokens(t, err, closedID, stale, before.RowLock)
 		lifecycleCloseReopenAssertRow(t, ctx, fixture, closedID, "after the stale-version re-close", before)
 		events.assertNoneAdded(t, "stale-version re-close")
 	}

@@ -9,7 +9,77 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/steveyegge/beads/internal/storage/schema"
 )
+
+// TestProxyMaintenanceAllowsTheSharedConsentVerb pins the capability fact the
+// #6575 proxied data-behind guidance is written against: the consent command
+// that guidance prescribes is NOT refused at the proxied front door.
+//
+// The capability registry keys on the full command path. It refuses the bare
+// `migrate` verb and `migrate hooks` / `migrate issues` / `migrate sync`, but
+// permits `migrate schema` — so that path passes
+// validateProxyRegistryBeforeProvider to `bd migrate schema`'s own proxied
+// arm, which reports the migration the provider open already applied under
+// this verb's consent.
+//
+// An earlier revision of that guidance asserted the opposite on three runtime
+// surfaces and nothing failed, because no test called this function with this
+// command. The wording is not cosmetic: forceOrEnvConsent honors `--force`
+// BEFORE the data-behind stop is routed, so an operator told "it is refused
+// here anyway" who types it to confirm takes the exact wedge the stop exists
+// to prevent.
+//
+// The command is resolved from the constant the gate prescribes rather than
+// retyped here, so drift on either side has to face this test.
+func TestProxyMaintenanceAllowsTheSharedConsentVerb(t *testing.T) {
+	oldJSON := jsonOutput
+	jsonOutput = true
+	t.Cleanup(func() { jsonOutput = oldJSON })
+
+	args := strings.Fields(strings.TrimPrefix(schema.SharedConsentCommandForced, "bd "))
+	target, _, err := rootCmd.Find(args)
+	if err != nil || target == rootCmd {
+		t.Fatalf("the gate prescribes %q, which does not resolve to a subcommand: %v",
+			schema.SharedConsentCommandForced, err)
+	}
+	path := strings.TrimSpace(strings.TrimPrefix(target.CommandPath(), rootCmd.Name()))
+	if path != "migrate schema" {
+		t.Fatalf("prescribed consent command resolves to path %q, want %q", path, "migrate schema")
+	}
+
+	var allowErr error
+	out := captureStdout(t, func() error {
+		allowErr = validateProxyRegistryBeforeProvider(target, ProxyTopologyManagedLocal)
+		return nil
+	})
+	if allowErr != nil {
+		t.Errorf("%q is refused before the provider (%v), but the #6575 proxied data-behind guidance tells the operator it can be run from this workspace",
+			path, allowErr)
+	}
+	if out != "" {
+		t.Errorf("a non-refusal still emitted a typed error: %s", out)
+	}
+
+	// The counterfactual, so "only the bare `bd migrate` verb is refused here"
+	// is a claim and not a vacuous one.
+	bare, _, err := rootCmd.Find([]string{"migrate"})
+	if err != nil || bare == rootCmd {
+		t.Fatalf("bd migrate does not resolve: %v", err)
+	}
+	var bareErr error
+	refusal := captureStdout(t, func() error {
+		bareErr = validateProxyRegistryBeforeProvider(bare, ProxyTopologyManagedLocal)
+		return nil
+	})
+	if bareErr == nil {
+		t.Fatal("bare `bd migrate` is no longer refused in proxied-server mode; the data-behind guidance names it as the one form that is")
+	}
+	if !strings.Contains(refusal, `"code": "proxy.migrate.unsupported"`) {
+		t.Errorf("bare migrate refusal = %q, want proxy.migrate.unsupported", refusal)
+	}
+}
 
 func TestProxyCapabilityMatrix(t *testing.T) {
 	for _, cap := range []ProxyCapability{ProxyCapReadonly, ProxyCapMaxRows} {
@@ -56,7 +126,7 @@ func TestProxyCapabilityCommandRows(t *testing.T) {
 		{"ready", "--max-rows", ProxyOutcomeRefused},
 		{"graph", "--max-rows", ProxyOutcomeRefused},
 		{"find-duplicates", "--max-rows", ProxyOutcomeRefused},
-		{"show", "--watch", ProxyOutcomeRefused},
+		{"show", "--watch", ProxyOutcomeHonored},
 		{"list", "--watch", ProxyOutcomeHonored},
 	}
 	for _, topology := range []ProxyTopology{ProxyTopologyManagedLocal, ProxyTopologyExternalTCP, ProxyTopologyExternalUnix} {
@@ -69,6 +139,11 @@ func TestProxyCapabilityCommandRows(t *testing.T) {
 	}
 }
 
+// TestProxyMaintenanceNestedPathsRefuseBeforeProvider proves the gate resolves
+// a PARENT+CHILD path, which is where a nested command used to slip through.
+// It runs on external-tcp because that is the topology on which every path
+// listed here still refuses: the backup family is honored on managed-local
+// since slice S3, and asserting a refusal there would be asserting the bug.
 func TestProxyMaintenanceNestedPathsRefuseBeforeProvider(t *testing.T) {
 	oldJSON := jsonOutput
 	jsonOutput = true
@@ -81,7 +156,7 @@ func TestProxyMaintenanceNestedPathsRefuseBeforeProvider(t *testing.T) {
 		root.AddCommand(parent)
 		parent.AddCommand(child)
 		out := captureStdout(t, func() error {
-			_ = validateProxyMaintenanceBeforeProvider(child)
+			_ = validateProxyRegistryBeforeProvider(child, ProxyTopologyExternalTCP)
 			return nil
 		})
 		if !strings.Contains(out, `"code":`) {
@@ -101,7 +176,7 @@ func TestProxyFormulaSwarmMergeSlotRefusals(t *testing.T) {
 			cmd.AddCommand(child)
 			cmd = child
 		}
-		err := validateProxyMaintenanceBeforeProvider(cmd)
+		err := validateProxyRegistryBeforeProvider(cmd, ProxyTopologyManagedLocal)
 		if err == nil {
 			t.Fatalf("%s unexpectedly allowed", path)
 		}
@@ -139,7 +214,7 @@ func TestProxyWorkflowRefusalContractAndNoMutation(t *testing.T) {
 			if !ok || row.Code != tc.code || row.Message != tc.message || row.ExitCode != 1 || row.Mutates {
 				t.Fatalf("row = %#v, ok=%v", row, ok)
 			}
-			var typed *ProxyCapabilityError = &ProxyCapabilityError{Code: row.Code, Message: row.Message, ExitCode: row.ExitCode, Mutates: row.Mutates}
+			typed := proxyCapabilityErrorFor(row)
 			if typed.Code != tc.code || typed.Message != tc.message || typed.ExitCode != 1 || typed.Mutates {
 				t.Fatalf("typed refusal = %#v", typed)
 			}
@@ -162,7 +237,7 @@ func TestProxyWorkflowRefusalContractAndNoMutation(t *testing.T) {
 			oldDidWrite := commandDidWrite.Load()
 			commandDidWrite.Store(false)
 			t.Cleanup(func() { commandDidWrite.Store(oldDidWrite) })
-			out := captureStdout(t, func() error { _ = validateProxyMaintenanceBeforeProvider(cmd); return nil })
+			out := captureStdout(t, func() error { _ = validateProxyRegistryBeforeProvider(cmd, ProxyTopologyManagedLocal); return nil })
 			var got map[string]any
 			if err := json.Unmarshal([]byte(out), &got); err != nil || got["code"] != tc.code || got["error"] != tc.message {
 				t.Fatalf("JSON refusal = %q (%v)", out, err)
@@ -181,8 +256,8 @@ func TestProxyWorkflowRefusalContractAndNoMutation(t *testing.T) {
 }
 
 func lookupProxyMaintenanceRuleForTest(path string) (proxyCapabilityRule, bool) {
-	rule, ok := proxyMaintenanceRefusals[path]
-	return rule, ok
+	row, ok := LookupCapabilityRow(path, "")
+	return row.Rule, ok
 }
 
 func TestProxyMaintenanceRefusalLeavesFilesUntouched(t *testing.T) {
@@ -199,7 +274,7 @@ func TestProxyMaintenanceRefusalLeavesFilesUntouched(t *testing.T) {
 	oldProvider := uowProvider
 	uowProvider = nil
 	t.Cleanup(func() { uowProvider = oldProvider })
-	err := validateProxyMaintenanceBeforeProvider(hooks)
+	err := validateProxyRegistryBeforeProvider(hooks, ProxyTopologyManagedLocal)
 	if err == nil {
 		t.Fatal("expected typed maintenance refusal")
 	}
@@ -215,17 +290,32 @@ func TestProxyMaintenanceRefusalLeavesFilesUntouched(t *testing.T) {
 	}
 }
 
+// newProxyFrontDoorCommand builds `bd <use> --<flag>` under a real root. The
+// root matters: the front door keys on a command's path below its root, so a
+// parentless command has no path and matches no rule — which is how a test
+// tree can report success for a refusal that never fired.
+func newProxyFrontDoorCommand(t *testing.T, use, flag string) *cobra.Command {
+	t.Helper()
+	root := &cobra.Command{Use: "bd"}
+	cmd := &cobra.Command{Use: use}
+	cmd.Flags().Bool(flag, false, "")
+	root.AddCommand(cmd)
+	if err := cmd.Flags().Set(flag, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if got := commandRegistryPath(cmd); got != use {
+		t.Fatalf("test command path = %q, want %q", got, use)
+	}
+	return cmd
+}
+
 func TestProxyCapabilityRefusalFrontDoorTextBeforeProvider(t *testing.T) {
 	oldJSON := jsonOutput
 	jsonOutput = false
 	t.Cleanup(func() { jsonOutput = oldJSON })
-	cmd := &cobra.Command{Use: "show"}
-	cmd.Flags().Bool("watch", false, "")
-	if err := cmd.Flags().Set("watch", "true"); err != nil {
-		t.Fatal(err)
-	}
+	cmd := newProxyFrontDoorCommand(t, "create", "repo")
 	got := captureStderr(t, func() { _ = validateProxyCapabilitiesBeforeProvider(cmd) })
-	if !strings.Contains(got, "watch mode not supported in proxied-server mode") {
+	if !strings.Contains(got, "--repo is not supported with --proxied-server") {
 		t.Fatalf("text refusal = %q", got)
 	}
 }
@@ -234,14 +324,12 @@ func TestProxyCapabilityRefusalFrontDoorJSONIncludesCode(t *testing.T) {
 	oldJSON := jsonOutput
 	jsonOutput = true
 	t.Cleanup(func() { jsonOutput = oldJSON })
-	cmd := &cobra.Command{Use: "show"}
-	cmd.Flags().Bool("watch", false, "")
-	_ = cmd.Flags().Set("watch", "true")
+	cmd := newProxyFrontDoorCommand(t, "create", "repo")
 	out := captureStdout(t, func() error {
 		_ = validateProxyCapabilitiesBeforeProvider(cmd)
 		return nil
 	})
-	if !strings.Contains(out, `"code": "proxy.watch.unsupported"`) {
+	if !strings.Contains(out, `"code": "proxy.repo.unsupported"`) {
 		t.Fatalf("JSON refusal = %q", out)
 	}
 }
@@ -259,6 +347,27 @@ func TestProxyCapabilityRefusalDoesNotNeedProvider(t *testing.T) {
 	})
 	if !strings.Contains(out, `"code": "proxy.repo.unsupported"`) {
 		t.Fatalf("refusal = %q", out)
+	}
+}
+
+// TestProxyFrontDoorAdmitsShowWatch pins that `bd show --watch` reaches the
+// proxied provider. It used to be refused here with proxy.watch.unsupported,
+// although the provider can answer the poll exactly as `list --watch` does.
+func TestProxyFrontDoorAdmitsShowWatch(t *testing.T) {
+	oldJSON := jsonOutput
+	jsonOutput = true
+	t.Cleanup(func() { jsonOutput = oldJSON })
+	cmd := newProxyFrontDoorCommand(t, "show", "watch")
+	var err error
+	out := captureStdout(t, func() error {
+		err = validateProxyCapabilitiesBeforeProvider(cmd)
+		return nil
+	})
+	if err != nil || strings.Contains(out, "proxy.watch.unsupported") {
+		t.Fatalf("front door refused show --watch: err=%v out=%q", err, out)
+	}
+	if err := AssertProxyCommandCapability("show", ProxyModeProxied, ProxyCapWatch); err != nil {
+		t.Fatalf("show --watch capability refused: %v", err)
 	}
 }
 

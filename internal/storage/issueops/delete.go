@@ -64,6 +64,7 @@ func DeleteIssueInTxWithResult(ctx context.Context, tx *sql.Tx, id string, actor
 		return false, fmt.Errorf("recompute is_blocked after delete for %s: %w", id, err)
 	}
 	issueRowsChanged = issueRowsChanged || blockedResult.IssueRowsChanged
+	NoteDeleteBlockedRecheck(tx, []string{id}, "", affectedIssues, affectedWisps)
 
 	return issueRowsChanged, nil
 }
@@ -110,6 +111,9 @@ func deleteIssueRowInTxWithResult(ctx context.Context, tx *sql.Tx, id string, is
 		if err != nil {
 			return false, err
 		}
+		if err := DeleteWispAuxRowsInTx(ctx, tx, []string{id}); err != nil {
+			return false, err
+		}
 	} else if err := DeleteLeaseInTx(ctx, tx, id); err != nil {
 		// A deleted issue holds no lease.
 		return false, err
@@ -118,6 +122,28 @@ func deleteIssueRowInTxWithResult(ctx context.Context, tx *sql.Tx, id string, is
 		return false, err
 	}
 	return issueRowsChanged, nil
+}
+
+// wispAuxCascadeTables lists the wisp auxiliary tables a wisp delete must also
+// clean up, mirroring internal/storage/schema/cli_migrations.go:300-315.
+// wisp_child_counters is keyed on parent_id (a wisp can be a parent whose
+// children hold the counter row); the other three are keyed on issue_id.
+// Some deployed stores enforce this via FK ON DELETE CASCADE and some do not
+// (be-zdqyl: the migration adding those FKs was never promoted out of
+// migrations/ignored/), so the delete paths must not rely on the database to
+// do it for them. wisp_dependencies is cleaned by DeleteWisp(s)FromDependenciesInTx.
+var wispAuxCascadeTables = []struct{ table, column string }{
+	{"wisp_labels", "issue_id"},
+	{"wisp_events", "issue_id"},
+	{"wisp_comments", "issue_id"},
+	{"wisp_child_counters", "parent_id"},
+}
+
+// DeleteWispAuxRowsInTx removes every row the given wisp ids own across
+// wispAuxCascadeTables. Shared by every wisp delete path (the DoltStore wisp
+// GC paths and deleteIssueRowInTx) so the table set cannot drift between them.
+func DeleteWispAuxRowsInTx(ctx context.Context, tx *sql.Tx, wispIDs []string) error {
+	return DeleteWispAuxiliaryRowsInTx(ctx, tx, wispIDs)
 }
 
 // DeletionSet is the EXACT set of rows one delete removes, split by the plane
@@ -176,12 +202,7 @@ func DeleteWispAuxiliaryRowsInTx(ctx context.Context, tx DBTX, ids []string) err
 			end = len(ids)
 		}
 		inClause, args := buildSQLInClause(ids[start:end])
-		for _, aux := range []struct{ table, column string }{
-			{"wisp_labels", "issue_id"},
-			{"wisp_events", "issue_id"},
-			{"wisp_comments", "issue_id"},
-			{"wisp_child_counters", "parent_id"},
-		} {
+		for _, aux := range wispAuxCascadeTables {
 			//nolint:gosec // G201: table/column are fixed literals; inClause has only placeholders.
 			if _, err := tx.ExecContext(ctx,
 				fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", aux.table, aux.column, inClause), args...); err != nil {
@@ -471,6 +492,7 @@ func DeleteResolvedSetInTx(ctx context.Context, tx *sql.Tx, set DeletionSet, dry
 	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
 		return nil, fmt.Errorf("recompute is_blocked after batch delete: %w", err)
 	}
+	NoteDeleteBlockedRecheck(tx, set.All, "", affectedIssues, affectedWisps)
 
 	return result, nil
 }

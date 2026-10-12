@@ -110,6 +110,11 @@ func TestQ43ServerModeTransitionConformance(t *testing.T) {
 			t.Errorf("stop disposable bd serve proxy: %v", err)
 		}
 	})
+	// The SQL proxy survives a bd serve restart. Own it here, rather than
+	// letting a short-lived serve process detach it and lose its Wait owner.
+	// Register after the shutdown postcheck so cleanup stops and waits this
+	// child before that postcheck can inspect its record.
+	privateProxy := q43StartPrivateProxy(t, bd, workspace, env, proxyRoot, doltPort)
 
 	issueID := strings.TrimSpace(q43Run(t, 2*time.Minute, env, workspace, bd,
 		"create", "--silent", "Q43 transition conformance", "-p", "2"))
@@ -199,6 +204,9 @@ func TestQ43ServerModeTransitionConformance(t *testing.T) {
 	baseURL = serve.baseURL()
 	client = q43Client(t, baseURL, project.ProjectID, database, http.DefaultClient)
 	q43AssertReadyContext(t, client, baseURL, project.ProjectID, database)
+	t.Run("private_proxy_remains_owned_across_serve_restart", func(t *testing.T) {
+		q43AssertOwnedProxyRunning(t, proxyRoot, privateProxy)
+	})
 	restartedReceipt, err := client.GetTransitionReceipt(t.Context(), request.ReceiptID)
 	if err != nil {
 		t.Fatalf("read Q43 receipt after clean bd serve restart: %v", err)
@@ -258,6 +266,21 @@ func TestQ43ServerModeTransitionConformance(t *testing.T) {
 	if got := q43AssertIssueEffect(t, baseURL, project.ProjectID, lostResponseID, lostResponseRequest); got != recovered.ToVersion {
 		t.Fatalf("issue revision after lost-response recovery = %d, want receipt to_version %d", got, recovered.ToVersion)
 	}
+	t.Run("private_proxy_is_waited_before_cleanup", func(t *testing.T) {
+		if err := serve.stop(); err != nil {
+			t.Fatalf("stop final bd serve before private proxy: %v", err)
+		}
+		q43AssertOwnedProxyRunning(t, proxyRoot, privateProxy)
+		if err := privateProxy.stop(60 * time.Second); err != nil {
+			t.Fatalf("stop and wait private proxy: %v", err)
+		}
+		if state := privateProxy.cmd.ProcessState; state == nil || !state.Exited() || state.ExitCode() != 0 {
+			t.Fatalf("private proxy Wait state = %v, want normal exit 0", state)
+		}
+		if running, pid := proxy.IsRunning(proxyRoot); running || pid != 0 {
+			t.Fatalf("private proxy discovery after Wait = (%v, %d), want (false, 0)", running, pid)
+		}
+	})
 }
 
 func q43DoltBinary() (string, error) {
@@ -288,12 +311,39 @@ func q43ProcessEnv(home, doltRoot string) []string {
 		"USERPROFILE="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(home, "xdg-config"),
 		"DOLT_ROOT_PATH="+doltRoot,
+		"DOLT_DISABLE_EVENT_FLUSH=1",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"BEADS_DOLT_AUTO_START=0",
 		"BEADS_NO_DAEMON=1",
 		"BD_DISABLE_METRICS=1",
 		"BD_DISABLE_EVENT_FLUSH=1",
 	)
+}
+
+// A private fixture must not inherit a real server/configuration or launch
+// Dolt's detached telemetry flusher after its owned server has been waited.
+// The executable regressions independently verify the actual child boundary.
+func TestQ43ProcessEnvOwnsPrivateTelemetryBoundary(t *testing.T) {
+	t.Setenv("DOLT_ROOT_PATH", "/foreign-root-must-not-be-used")
+	t.Setenv("DOLT_DISABLE_EVENT_FLUSH", "")
+	t.Setenv("BEADS_DOLT_AUTO_START", "1")
+	t.Setenv("BD_DISABLE_EVENT_FLUSH", "0")
+	home, root := filepath.Join(t.TempDir(), "home"), filepath.Join(t.TempDir(), "dolt-root")
+	env := q43ProcessEnv(home, root)
+	values, counts := map[string]string{}, map[string]int{}
+	for _, item := range env {
+		key, value, _ := strings.Cut(item, "=")
+		values[key], counts[key] = value, counts[key]+1
+	}
+	for key, want := range map[string]string{
+		"HOME": home, "DOLT_ROOT_PATH": root,
+		"DOLT_DISABLE_EVENT_FLUSH": "1", "BEADS_DOLT_AUTO_START": "0",
+		"BD_DISABLE_EVENT_FLUSH": "1", "BD_DISABLE_METRICS": "1",
+	} {
+		if values[key] != want || counts[key] != 1 {
+			t.Errorf("private %s = %q (%d copies), want exactly one %q", key, values[key], counts[key], want)
+		}
+	}
 }
 
 func q43SetEnv(env []string, values ...string) []string {
@@ -517,6 +567,51 @@ func q43WaitForDolt(t *testing.T, port int, process *q43ManagedProcess) {
 type q43ServeProcess struct {
 	process *q43ManagedProcess
 	addr    string
+}
+
+func q43StartPrivateProxy(t *testing.T, bd, workspace string, env []string, root string, doltPort int) *q43ManagedProcess {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("create private proxy root: %v", err)
+	}
+	cmd := exec.Command(bd, "db-proxy-child", "--root", root,
+		"--port", "0", "--idle-timeout", "-1ns", "--backend", "external",
+		"--external-host", "127.0.0.1", "--external-port", strconv.Itoa(doltPort))
+	cmd.Dir, cmd.Env = workspace, env
+	output := &q43LockedBuffer{}
+	process := q43StartManagedProcess(t, cmd, output, "private SQL proxy", 60*time.Second)
+	deadline := time.NewTimer(90 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if running, pid := proxy.IsRunning(root); running {
+			if pid != cmd.Process.Pid {
+				t.Fatalf("private proxy discovery names pid %d, want owned pid %d", pid, cmd.Process.Pid)
+			}
+			q43AssertOwnedProxyRunning(t, root, process)
+			return process
+		}
+		select {
+		case <-process.done:
+			t.Fatalf("private proxy exited before readiness: %v\n%s", process.waitErr, output.String())
+		case <-deadline.C:
+			t.Fatalf("private proxy did not become ready within 90s\n%s", output.String())
+		case <-ticker.C:
+		}
+	}
+}
+
+func q43AssertOwnedProxyRunning(t *testing.T, root string, process *q43ManagedProcess) {
+	t.Helper()
+	select {
+	case <-process.done:
+		t.Fatalf("owned private proxy exited early: %v", process.waitErr)
+	default:
+	}
+	if running, pid := proxy.IsRunning(root); !running || pid != process.cmd.Process.Pid {
+		t.Fatalf("private proxy discovery = (%v, %d), want owned running pid %d", running, pid, process.cmd.Process.Pid)
+	}
 }
 
 func q43StartServe(t *testing.T, bd, workspace string, env []string, tokenFile string) *q43ServeProcess {

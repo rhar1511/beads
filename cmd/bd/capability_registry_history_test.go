@@ -12,13 +12,17 @@ func TestHistoryCapabilityMatrixExactPaths(t *testing.T) {
 	if got, ok := LookupHistoryCapability("history"); !ok || got != HistoryProxySupported {
 		t.Fatalf("history = %q, %v; want proxy-supported", got, ok)
 	}
-	for _, path := range []string{"branch", "conflicts", "repo", "federation", "vc", "flatten", "dolt push", "dolt pull", "dolt commit", "dolt remote", "sync"} {
+	for _, path := range []string{"branch", "conflicts", "repo", "federation", "vc", "flatten", "dolt push", "dolt pull", "dolt remote", "sync"} {
 		if got, ok := LookupHistoryCapability(path); !ok || got != HistoryDirectOnly {
 			t.Errorf("%q = %q, %v; want direct-only", path, got, ok)
 		}
 	}
-	if got, ok := LookupHistoryCapability("dolt remote remove"); !ok || got != HistoryProxySupported {
-		t.Fatalf("dolt remote remove = %q, %v; want proxy-supported", got, ok)
+	// dolt commit is the flush point dolt.auto-commit=batch/off defers to
+	// (GH#4995), so it must stay reachable on the proxied route.
+	for _, path := range []string{"dolt remote remove", "dolt commit"} {
+		if got, ok := LookupHistoryCapability(path); !ok || got != HistoryProxySupported {
+			t.Fatalf("%s = %q, %v; want proxy-supported", path, got, ok)
+		}
 	}
 	for _, path := range []string{"dolt remote add", "dolt remote list", "dolt remote reset-data"} {
 		if got, ok := LookupHistoryCapability(path); !ok || got != HistoryDirectOnly {
@@ -31,7 +35,7 @@ func TestSyncRefusesBeforeProvider(t *testing.T) {
 	root := &cobra.Command{Use: "bd"}
 	cmd := &cobra.Command{Use: "sync"}
 	root.AddCommand(cmd)
-	err := validateProxyMaintenanceBeforeProvider(cmd)
+	err := validateProxyRegistryBeforeProvider(cmd, ProxyTopologyManagedLocal)
 	if err == nil {
 		t.Fatalf("sync refusal = %#v", err)
 	}
@@ -50,7 +54,6 @@ func TestHistoryDirectOnlyRefusalContract(t *testing.T) {
 		"flatten":                {"proxy.flatten.unsupported", "flatten is not supported in proxied-server mode"},
 		"dolt push":              {"proxy.dolt_push.unsupported", "dolt push is not supported in proxied-server mode"},
 		"dolt pull":              {"proxy.dolt_pull.unsupported", "dolt pull is not supported in proxied-server mode"},
-		"dolt commit":            {"proxy.dolt_commit.unsupported", "dolt commit is not supported in proxied-server mode"},
 		"dolt remote add":        {"proxy.dolt_remote.unsupported", "dolt remote add is not supported in proxied-server mode"},
 		"dolt remote list":       {"proxy.dolt_remote.unsupported", "dolt remote list is not supported in proxied-server mode"},
 		"dolt remote reset-data": {"proxy.dolt_remote.unsupported", "dolt remote reset-data is not supported in proxied-server mode"},
@@ -59,7 +62,7 @@ func TestHistoryDirectOnlyRefusalContract(t *testing.T) {
 	oldProvider := uowProvider
 	oldJSON := jsonOutput
 	t.Cleanup(func() { uowProvider = oldProvider; jsonOutput = oldJSON })
-	for _, path := range []string{"branch", "conflicts", "repo", "federation", "vc", "flatten", "dolt push", "dolt pull", "dolt commit", "dolt remote add", "sync"} {
+	for _, path := range []string{"branch", "conflicts", "repo", "federation", "vc", "flatten", "dolt push", "dolt pull", "dolt remote add", "sync"} {
 		parts := strings.Split(path, " ")
 		root := &cobra.Command{Use: "bd"}
 		cmd := &cobra.Command{Use: parts[0]}
@@ -71,7 +74,7 @@ func TestHistoryDirectOnlyRefusalContract(t *testing.T) {
 		}
 		uowProvider = nil
 		jsonOutput = true
-		out := captureStdout(t, func() error { _ = validateProxyMaintenanceBeforeProvider(cmd); return nil })
+		out := captureStdout(t, func() error { _ = validateProxyRegistryBeforeProvider(cmd, ProxyTopologyManagedLocal); return nil })
 		var got map[string]any
 		want := expected[path]
 		if err := json.Unmarshal([]byte(out), &got); err != nil || got["code"] != want.code || got["error"] != want.message || got["mutates"] != false {
@@ -94,7 +97,7 @@ func TestHistoryNestedFrontDoorsRefuseAndSupportedPathsPass(t *testing.T) {
 		"conflicts resolve": {"proxy.conflicts.unsupported", "conflicts resolve is not supported in proxied-server mode"},
 		"federation sync":   {"proxy.federation.unsupported", "federation sync is not supported in proxied-server mode"},
 	}
-	for _, path := range []string{"vc merge", "vc commit", "repo add", "conflicts resolve", "federation sync", "dolt remote remove"} {
+	for _, path := range []string{"vc merge", "vc commit", "repo add", "conflicts resolve", "federation sync", "dolt remote remove", "dolt commit"} {
 		parts := strings.Split(path, " ")
 		root := &cobra.Command{Use: "bd"}
 		cmd := &cobra.Command{Use: parts[0]}
@@ -104,8 +107,8 @@ func TestHistoryNestedFrontDoorsRefuseAndSupportedPathsPass(t *testing.T) {
 			cmd.AddCommand(child)
 			cmd = child
 		}
-		err := validateProxyMaintenanceBeforeProvider(cmd)
-		if path == "dolt remote remove" {
+		err := validateProxyRegistryBeforeProvider(cmd, ProxyTopologyManagedLocal)
+		if path == "dolt remote remove" || path == "dolt commit" {
 			if err != nil {
 				t.Fatalf("supported %s refused: %v", path, err)
 			}
@@ -118,9 +121,9 @@ func TestHistoryNestedFrontDoorsRefuseAndSupportedPathsPass(t *testing.T) {
 			t.Fatalf("%s exit=%v, want 1", path, err)
 		}
 		var got map[string]any
-		// validateProxyMaintenanceBeforeProvider renders the typed refusal to
+		// validateProxyRegistryBeforeProvider renders the typed refusal to
 		// stdout in JSON mode; the command must retain its nested path.
-		out := captureStdout(t, func() error { _ = validateProxyMaintenanceBeforeProvider(cmd); return nil })
+		out := captureStdout(t, func() error { _ = validateProxyRegistryBeforeProvider(cmd, ProxyTopologyManagedLocal); return nil })
 		if err := json.Unmarshal([]byte(out), &got); err != nil {
 			t.Fatalf("%s refusal JSON: %v (%q)", path, err, out)
 		}
@@ -132,7 +135,7 @@ func TestHistoryNestedFrontDoorsRefuseAndSupportedPathsPass(t *testing.T) {
 	root := &cobra.Command{Use: "bd"}
 	history := &cobra.Command{Use: "history"}
 	root.AddCommand(history)
-	if err := validateProxyMaintenanceBeforeProvider(history); err != nil {
+	if err := validateProxyRegistryBeforeProvider(history, ProxyTopologyManagedLocal); err != nil {
 		t.Fatalf("history --events supported path refused: %v", err)
 	}
 }

@@ -150,6 +150,54 @@ func TestRequireProtectedMutationConsumesReplayIdentityInActiveTransaction(t *te
 	}
 }
 
+// A fresh-snapshot blocked-state repair must not erase the preceding write's
+// permit-use flag before that write publishes its replay record to Dolt history.
+func TestBlockedRecheckPreservesCommittedPermitPublication(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT issue_id FROM protected_issue_records WHERE protection_class <> '' AND issue_id IN (?) ORDER BY issue_id")).
+		WithArgs("protected").
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id"}).AddRow("protected"))
+	mock.ExpectExec(`INSERT INTO protected_mutation_permit_uses\s+\(audience, replay_id\) VALUES \(\?, \?\)`).
+		WithArgs("workspace-audience", "replay-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	verifier := protectedMutationVerifierFunc(func(context.Context, publicops.ProtectedMutationPermit, publicops.ProtectedMutationScope) (publicops.ProtectedMutationVerification, error) {
+		return publicops.ProtectedMutationVerification{ReplayID: "replay-1"}, nil
+	})
+	ctx := WithProtectedMutationVerifier(t.Context(), verifier, "workspace-audience", "project-a", "database-a")
+	if err := RequireProtectedMutation(ctx, tx, "permit", "issue.close", []string{"protected"}, "digest", ""); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectCommit()
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	recheck, cancel := BlockedRecheckContext(ctx)
+	defer cancel()
+	ResetProtectedMutationAttempt(recheck)
+	if !ProtectedMutationPermitUseWritten(ctx) {
+		t.Fatal("post-commit recheck erased the committed write's permit publication obligation")
+	}
+	if ProtectedMutationPermitUseWritten(recheck) {
+		t.Fatal("post-commit recheck inherited the preceding transaction's permit use")
+	}
+	if !ProtectedMutationAuthorityConfigured(recheck) {
+		t.Fatal("post-commit recheck lost its store authority binding")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRequireProtectedMutationFailsClosedWithoutVerifier(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

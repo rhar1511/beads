@@ -159,6 +159,7 @@ func TestRecordingIssueUseCaseCoversItsSurface(t *testing.T) {
 			"PreviewDeleteWisp":            reads,
 			"SearchIssueIDs":               reads,
 			"SearchIssues":                 reads,
+			"SearchWispsPlane":             reads,
 			"SearchIssuesWithCounts":       reads,
 			"GetRevisionTransitionReceipt": reads,
 			"GetBatchApplyReceipt":         reads,

@@ -851,9 +851,8 @@ func RunLifecycleUpdateConditionalGuardsGateOrdinaryEdits(t *testing.T, ctx cont
 	staleVersion := before.RowVersion - 1
 	staleVersionEdit := priorityEdit(0)
 	staleVersionEdit.ExpectedVersion = &staleVersion
-	if _, err := fixture.Lifecycle.Update(ctx, staleVersionEdit); !errors.Is(err, storage.ErrVersionMismatch) {
-		t.Fatalf("edit guarded on a stale version: err = %v, want ErrVersionMismatch", err)
-	}
+	_, staleErr := fixture.Lifecycle.Update(ctx, staleVersionEdit)
+	assertVersionMismatchTokens(t, staleErr, id, staleVersion, before.RowVersion)
 	assertLifecycleUpdateRowUnchanged(t, ctx, fixture, id, "after the stale version guard", before)
 	events.assert(t, "stale version guard", 0)
 

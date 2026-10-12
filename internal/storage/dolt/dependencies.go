@@ -110,6 +110,8 @@ func (s *DoltStore) RemoveDependencyWithOptions(ctx context.Context, issueID, de
 			defer func() { _ = tx.Rollback() }()
 			clearJournalScope := s.scopeEventsJournalTransaction(tx)
 			defer clearJournalScope()
+			clearRecheckScope := issueops.ScopeBlockedRecheckTransaction(tx)
+			defer clearRecheckScope()
 			_, issueRowsChanged, err := issueops.RemoveDependencyWithRevisionInTx(ctx, tx, issueID, dependsOnID, actor, rmOpts.EmitEvent)
 			if err != nil {
 				return err
@@ -117,6 +119,8 @@ func (s *DoltStore) RemoveDependencyWithOptions(ctx context.Context, issueID, de
 			if err := s.commitSQLTx(ctx, "commit remove wisp dependency", tx); err != nil {
 				return err
 			}
+			pending := issueops.TakeBlockedRecheck(tx)
+			defer s.settleBlockedRecheck(ctx, pending)
 			if issueRowsChanged {
 				return s.doltAddAndCommit(ctx, []string{"issues"}, "dependency: remove wisp edge "+issueID+" -> "+dependsOnID)
 			}
@@ -131,6 +135,8 @@ func (s *DoltStore) RemoveDependencyWithOptions(ctx context.Context, issueID, de
 
 		clearJournalScope := s.scopeEventsJournalTransaction(tx)
 		defer clearJournalScope()
+		clearRecheckScope := issueops.ScopeBlockedRecheckTransaction(tx)
+		defer clearRecheckScope()
 
 		result, err := issueops.RemoveDependencyInTxWithResult(ctx, tx, issueID, dependsOnID, actor, rmOpts.EmitEvent)
 		if err != nil {
@@ -140,6 +146,10 @@ func (s *DoltStore) RemoveDependencyWithOptions(ctx context.Context, issueID, de
 		if err := s.commitSQLTx(ctx, "sql commit", tx); err != nil {
 			return err
 		}
+		// The removal is durable; its dependents are settled after this
+		// removal's own Dolt commit so the recheck's commit follows it.
+		pending := issueops.TakeBlockedRecheck(tx)
+		defer s.settleBlockedRecheck(ctx, pending)
 		if !result.Changed {
 			return nil
 		}
