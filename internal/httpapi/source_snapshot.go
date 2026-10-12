@@ -40,8 +40,8 @@ func (s *Server) handleGetSourceSnapshot(w http.ResponseWriter, r *http.Request)
 		s.failErr(w, r, err)
 		return
 	}
-	if snapshot == nil || snapshot.Issue == nil {
-		s.failErr(w, r, errors.New("source snapshot: role returned no durable issue row"))
+	if snapshot == nil || snapshot.Issue == nil || snapshot.Issue.ID != id {
+		s.failErr(w, r, errors.New("source snapshot: role returned no matching durable issue row"))
 		return
 	}
 	details := types.NewIssueDetails(*snapshot.Issue)

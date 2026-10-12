@@ -759,7 +759,7 @@ func expectHTTPAPIReadinessVersions(mock sqlmock.Sqlmock, mainVersions ...int) {
 		if cursor.table != "ignored_schema_migrations" {
 			continue
 		}
-		for _, table := range []string{"wisps", "wisp_dependencies"} {
+		for _, table := range []string{"wisps", "wisp_dependencies", "events", "bd_events_journal", "bd_events_seq"} {
 			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM INFORMATION_SCHEMA\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \?`).
 				WithArgs(table).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 		}
