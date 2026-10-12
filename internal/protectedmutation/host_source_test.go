@@ -14,11 +14,11 @@ func TestFileHostAuthoritySourceLoadsColocatedFilesAndPinsBindingConfig(t *testi
 		t.Fatal(err)
 	}
 	config := HostAuthorityConfig{
-		SchemaVersion: HostAuthoritySchemaV1,
-		Audience:      "audience-a",
-		ProjectID:     "project-a",
-		Database:      "database-a",
-		KeyringFile:   "keys.json",
+		SchemaVersion:   HostAuthoritySchemaV1,
+		Audience:        "audience-a",
+		ProjectID:       "project-a",
+		Database:        "database-a",
+		KeyringFile:     "keys.json",
 		RevocationsFile: "revocations.json",
 	}
 	writeHostJSON(t, filepath.Join(directory, "authority.json"), config)
