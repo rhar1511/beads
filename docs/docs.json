@@ -332,6 +332,7 @@
           "reference/protected-mutation-authority",
           "reference/advanced",
           "reference/json-schema",
+          "reference/conditional-writes",
           "reference/events-journal",
           "reference/observability",
           "reference/troubleshooting",

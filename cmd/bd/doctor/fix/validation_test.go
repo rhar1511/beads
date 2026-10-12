@@ -253,9 +253,11 @@ func TestChildParentDependencies_FixesBadDeps(t *testing.T) {
 	}
 	beforeRevisions := make(map[string]sql.NullInt64)
 	for _, id := range []string{"bd-abc.1", "bd-abc.1.2"} {
-		if err := store.UnderlyingDB().QueryRow("SELECT row_lock FROM issues WHERE id = ?", id).Scan(&beforeRevisions[id]); err != nil {
+		var before sql.NullInt64
+		if err := store.UnderlyingDB().QueryRow("SELECT row_lock FROM issues WHERE id = ?", id).Scan(&before); err != nil {
 			t.Fatal(err)
 		}
+		beforeRevisions[id] = before
 	}
 
 	// Run fix

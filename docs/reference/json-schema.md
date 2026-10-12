@@ -209,7 +209,7 @@ items, plus:
 
 Ordinary guarded writes use `--if-revision`; their mismatch envelope uses
 numeric signed 64-bit `expected_revision` and `current_revision` fields.
-See [Conditional issue writes](conditional-writes.md) for exit codes and
+See [Conditional issue writes](/reference/conditional-writes) for exit codes and
 the distinction between a policy refusal and unsupported capability.
 
 ### `import --json`
