@@ -19,7 +19,12 @@ import (
 // the gate takes away is doing it quietly: an addition must name a real method,
 // carry a reason, and land in a diff a reviewer reads. It converts silence into
 // an argument someone has to make.
-var uncoveredRoleMethods = map[string]string{}
+var uncoveredRoleMethods = map[string]string{
+	// Source snapshots are an optional UOW capability, not a role served by
+	// every storage leg. Its contract runs through storagecontract and the
+	// UOW provider's TestSourceSnapshotContract.
+	"issueops.SourceSnapshotReader.ReadSourceSnapshot": "optional UOW capability exercised by storagecontract.RunSourceSnapshotReturnsTheIssueAndExactOutgoingEdges",
+}
 
 // TestEveryRoleMethodHasAContractCase is the exhaustiveness gate on the role
 // tier: every method of every interface the public facade declares must be
