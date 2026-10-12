@@ -1,4 +1,4 @@
-package conformance
+package storagecontract
 
 import (
 	"context"
@@ -15,9 +15,9 @@ type SourceSnapshotFixture struct {
 	AddDependency func(context.Context, *types.Dependency, string) error
 }
 
-// RunSourceSnapshotReturnsTheIssueAndExactOutgoingEdges exercises the public
-// role with a real stored edge. The result must contain the source row and the
-// edge record, rather than a hydrated copy of the target issue.
+// RunSourceSnapshotReturnsTheIssueAndExactOutgoingEdges exercises the optional
+// source-snapshot capability with a real stored edge. The result must contain
+// the source row and edge record, rather than a hydrated target issue.
 func RunSourceSnapshotReturnsTheIssueAndExactOutgoingEdges(t *testing.T, ctx context.Context, fixture SourceSnapshotFixture) {
 	t.Helper()
 	source := fixture.IssuePrefix + "-snapshot-source"

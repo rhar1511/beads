@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/steveyegge/beads/internal/storage/storagecontract"
 )
 
 func TestSourceSnapshotContract(t *testing.T) {
@@ -19,7 +19,7 @@ func TestSourceSnapshotContract(t *testing.T) {
 		t.Fatalf("SourceSnapshotReader: %v", err)
 	}
 	kit := newUOWRoleFixtureKit(provider, "snapshot")
-	conformance.RunSourceSnapshotReturnsTheIssueAndExactOutgoingEdges(t, ctx, conformance.SourceSnapshotFixture{
+	storagecontract.RunSourceSnapshotReturnsTheIssueAndExactOutgoingEdges(t, ctx, storagecontract.SourceSnapshotFixture{
 		IssuePrefix: kit.IssuePrefix, Reader: reader,
 		CreateIssue: kit.CreateIssue, AddDependency: kit.AddDependency,
 	})
