@@ -26,6 +26,21 @@ func sessionDatabaseMock(t *testing.T, answer any) (*sql.DB, sqlmock.Sqlmock) {
 	return db, mock
 }
 
+// The ordinary single-session open must reject a scoped gateway before schema
+// initialization touches the database it actually selected. No schema queries
+// or writes are expected, even when the caller is not in team-server mode.
+func TestInitProbedSchemaRejectsWrongDatabaseBeforeInitialization(t *testing.T) {
+	db, mock := sessionDatabaseMock(t, "team_a")
+	provider := &doltSQLProvider{db: db}
+	err := initProbedSchema(context.Background(), provider, "team_b")
+	if err == nil || !strings.Contains(err.Error(), `not the requested "team_b"`) {
+		t.Fatalf("initProbedSchema() = %v, want database mismatch", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAssertSessionDatabase(t *testing.T) {
 	ctx := context.Background()
 

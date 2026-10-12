@@ -178,6 +178,7 @@ type DependencySQLRepository interface {
 	CycleThroughEdges(ctx context.Context, edges [][2]string) (string, error)
 	GetDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
 	GetDurableDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
+	GetExternalBlockingDependencyRecords(ctx context.Context) (map[string][]*types.Dependency, error)
 	GetWispDependencyRecordsForIDs(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error)
 
 	// WispSourceIDs returns the subset of ids that are currently wisps, in one
@@ -244,6 +245,7 @@ type DependencyUseCase interface {
 	// Callers use it after independently proving that every source is durable,
 	// so an ID collision with the wisp plane cannot redirect the read.
 	GetDurableIssueDependencyRecords(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
+	GetExternalBlockingDependencyRecords(ctx context.Context) (map[string][]*types.Dependency, error)
 
 	GetWispDependencyRecords(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error)
 	// WispSourceIDs classifies IDs by storage plane inside the current unit of
@@ -831,6 +833,14 @@ func (u *dependencyUseCaseImpl) GetDurableIssueDependencyRecords(ctx context.Con
 	out, err := u.depRepo.GetDurableDependencyRecordsForIssues(ctx, issueIDs)
 	if err != nil {
 		return nil, fmt.Errorf("GetDurableIssueDependencyRecords: %w", err)
+	}
+	return out, nil
+}
+
+func (u *dependencyUseCaseImpl) GetExternalBlockingDependencyRecords(ctx context.Context) (map[string][]*types.Dependency, error) {
+	out, err := u.depRepo.GetExternalBlockingDependencyRecords(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GetExternalBlockingDependencyRecords: %w", err)
 	}
 	return out, nil
 }

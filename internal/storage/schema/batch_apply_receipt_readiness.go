@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const BatchApplyReceiptMainMigration = 71
+const BatchApplyReceiptMainMigration = 72
 
 // BatchApplyReceiptReadiness is a startup proof that the durable result
 // receipt table is ready. Its zero value is deliberately not ready.
@@ -18,7 +18,7 @@ type BatchApplyReceiptReadiness struct {
 }
 
 // Ready reports whether ProbeBatchApplyReceiptReadiness verified migration
-// 0071 and the receipt table.
+// 0072 and the receipt table.
 func (r BatchApplyReceiptReadiness) Ready() bool {
 	return r.verified && r.mainVersion >= BatchApplyReceiptMainMigration
 }

@@ -21,7 +21,7 @@ import (
 
 // Real-Dolt coverage for the merge-aware dependency-id re-key
 // (rekeyDependencyIDs, internal/storage/schema/dep_id_backfill.go) and its
-// completion marker, ignored migration 0026 (gastownhall/beads#5268).
+// completion marker, ignored migration 0027 (gastownhall/beads#5268).
 //
 // Why this cannot be a sqlmock test. The bug IS Dolt's primary-key enforcement:
 // the old row-at-a-time rewrite issued statements a statement-echo mock happily
@@ -29,14 +29,68 @@ import (
 // key given" and leaves the table half-re-keyed. The same reason
 // migrate_wisp_dep_forward_repair_test.go exists. These tests also exercise
 // properties of MigrateUp's step ORDER rather than of any single statement: that
-// a pending 0026 forces a pass on a database whose main cursor is already at
-// latest, that an aborted re-key leaves 0026 unrecorded so the next open retries,
+// a pending 0027 forces a pass on a database whose main cursor is already at
+// latest, that an aborted re-key leaves 0027 unrecorded so the next open retries,
 // and that the ON UPDATE CASCADE on the typed target columns is what makes a
 // plain rename leave a stale primary key behind.
 
-// depRekeyMarkerVersion is ignored migration 0026, the clone-local marker whose
+// depRekeyMarkerVersion is ignored migration 0027, the clone-local marker whose
 // pending state forces the one repair pass.
-const depRekeyMarkerVersion = 26
+const depRekeyMarkerVersion = 27
+
+// Both cursor-26 lineages need the new step: the fork already has the wisp
+// column but still owes the re-key; the release has the re-key marker but lacks
+// the fork's clone-local column. Preserve existing wisp data in both cases.
+func TestEmbeddedV131ReconciliationFromBothIgnored26Lineages(t *testing.T) {
+	requireEmbedded(t)
+	for _, lineage := range []struct {
+		name string
+		hash string
+	}{
+		{"fork", "1fb8331d5f84c6b32c55f3e4beb993ab0e22832e938edbf04a9afaf5164fe82c"},
+		{"release", "dc5c1b9a74e42184451796068ecba1ca11d8ebd0fe7e8c4bd4900d0cfee30446"},
+	} {
+		t.Run(lineage.name, func(t *testing.T) {
+			ctx := t.Context()
+			dataDir := seedMigratedStore(t, ctx)
+			conn, closeConn := openDepConn(t, ctx, dataDir)
+			seedIssue(t, ctx, conn, "src")
+			seedIssue(t, ctx, conn, "tgt")
+			seedWisp(t, ctx, conn, "w1")
+			seedDependency(t, ctx, conn, "random-issue-row", "src", strptr("tgt"), nil, nil)
+			seedDependency(t, ctx, conn, depid.New("src", "tgt"), "src", nil, nil, strptr("tgt"))
+			commitSeed(t, ctx, conn, "test: cursor-26 lineage before fork/release reconciliation")
+			unrecordIgnoredVersionsFrom(t, ctx, conn, depRekeyMarkerVersion)
+			mustExecConn(t, ctx, conn, "UPDATE ignored_schema_migrations SET content_hash = ? WHERE version = 26", lineage.hash)
+			if lineage.name == "release" {
+				mustExecConn(t, ctx, conn, "ALTER TABLE wisps DROP COLUMN current_revision")
+			}
+			closeConn()
+
+			conn, _ = openDepConn(t, ctx, dataDir)
+			if _, err := schema.MigrateUp(ctx, conn); err != nil {
+				t.Fatalf("MigrateUp from %s ignored26: %v", lineage.name, err)
+			}
+			want := []depRow{{id: depid.New("src", "tgt"), issueID: "src", dependsOnIssueID: "tgt"}}
+			if got := readDeps(t, ctx, conn); !slices.Equal(got, want) {
+				t.Fatalf("dependencies = %v, want %v", got, want)
+			}
+			if got := scalarInt(t, ctx, conn, "SELECT current_revision FROM wisps WHERE id = 'w1'"); got != 1 {
+				t.Fatalf("preserved wisp revision = %d, want 1", got)
+			}
+			if !ignoredVersionRecorded(t, ctx, conn, depRekeyMarkerVersion) {
+				t.Fatal("reconciliation migration was not recorded")
+			}
+			var historicalHash string
+			if err := conn.QueryRowContext(ctx, "SELECT content_hash FROM ignored_schema_migrations WHERE version = 26").Scan(&historicalHash); err != nil {
+				t.Fatal(err)
+			}
+			if historicalHash != lineage.hash {
+				t.Fatalf("historical ignored26 hash = %q, want preserved %q", historicalHash, lineage.hash)
+			}
+		})
+	}
+}
 
 // TestDepRekeyMarkerIsLatestIgnored keeps the fixtures in this file honest. They
 // force the repair pass by unrecording the marker, which only works while the
@@ -46,7 +100,7 @@ const depRekeyMarkerVersion = 26
 func TestDepRekeyMarkerIsLatestIgnored(t *testing.T) {
 	if got := schema.LatestIgnoredVersion(); got != depRekeyMarkerVersion {
 		t.Fatalf("latest ignored migration is %d, not the dep-rekey marker %d; "+
-			"if you added ignored %d, point depRekeyMarkerVersion at 0026 anyway and confirm "+
+			"if you added ignored %d, point depRekeyMarkerVersion at 0027 anyway and confirm "+
 			"unrecordIgnoredVersionsFrom still leaves the marker pending", got, depRekeyMarkerVersion, got)
 	}
 }
@@ -272,7 +326,7 @@ func TestEmbeddedRenameKeepsDependencyIDsDeterministic(t *testing.T) {
 
 // TestEmbeddedDepRekeyRefusesToWriteIntoDirtyDependencies covers the
 // marker-versus-guard hazard. MigrateUp's changed-signature guard runs AFTER
-// ignoredSource.migrate has durably recorded 0026, so a re-key that wrote into a
+// ignoredSource.migrate has durably recorded 0027, so a re-key that wrote into a
 // pre-existing dirty table would fail the open once and then never retry: the
 // heal would sit uncommitted and ride an unrelated user commit. The re-key
 // refuses at plan time instead -- nothing written, marker unrecorded -- and the
@@ -333,7 +387,7 @@ func TestEmbeddedDepRekeyRefusesToWriteIntoDirtyDependencies(t *testing.T) {
 
 // TestEmbeddedDepRekeyAbortLeavesMarkerUnrecorded pins the retry guarantee that
 // the marker's position in MigrateUp buys: a re-key that cannot converge fails
-// the pass BEFORE ignoredSource.migrate records 0026, so the database does not
+// the pass BEFORE ignoredSource.migrate records 0027, so the database does not
 // claim it migrated and the next open tries again. This is the property whose
 // absence turned #5268 from a loud error into silent half-applied state.
 //
@@ -537,7 +591,7 @@ ORDER BY issue_id, id`)
 // version upward, reproducing the state a clone is in before it has run the
 // marker's pass. It deletes a RANGE rather than the single row because the
 // cursor is COALESCE(MAX(version), 0) and migrate only applies versions above
-// it: with a later ignored migration present, dropping only 0026 would leave the
+// it: with a later ignored migration present, dropping only 0027 would leave the
 // cursor at latest and the pass would silently never run. The cursor table is
 // dolt-ignored, so this needs no commit.
 func unrecordIgnoredVersionsFrom(t *testing.T, ctx context.Context, conn *sql.Conn, version int) {

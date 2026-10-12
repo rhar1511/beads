@@ -34,7 +34,7 @@ const depDeleteChunk = 50
 // It is typed because a repair pass must not brick reads: embeddeddolt's
 // non-strict opens (read-only commands, working-set reconcile) tolerate it and
 // continue, the same way they tolerate DirtyTablesError. Nothing is lost by
-// continuing — the 0026 marker stays unrecorded, so the next open retries.
+// continuing — the 0027 marker stays unrecorded, so the next open retries.
 type DependencyRekeyConflictError struct {
 	Table  string
 	Detail string
@@ -73,7 +73,7 @@ func (e *DependencyRekeyConflictError) Error() string {
 // Both rows derive the same id, so the old row-at-a-time rewrite aborted the
 // second UPDATE with "duplicate primary key given" partway through the table.
 // planDependencyRekey now merges those duplicates instead, and ignored migration
-// 0026 is the completion marker that makes the pass run once on every existing
+// 0027 is the completion marker that makes the pass run once on every existing
 // clone — including one already at the latest main version that a pre-1.3.0
 // binary left half-rekeyed — and re-run on the next open if it ever aborts.
 //
@@ -87,7 +87,7 @@ func (e *DependencyRekeyConflictError) Error() string {
 // when the pass started. Writing the re-key into one of them would entangle
 // migration output with uncommitted user data — the hazard changedDirtyTableSignatures
 // exists to catch — but that guard runs AFTER ignoredSource.migrate has durably
-// recorded the 0026 marker, so it would fail the open once and never retry,
+// recorded the 0027 marker, so it would fail the open once and never retry,
 // leaving the heal to ride an unrelated user commit. Refusing here instead, at
 // plan time, keeps the contract: nothing written, marker unrecorded, retried on
 // the next open once the user commits or discards the working set.

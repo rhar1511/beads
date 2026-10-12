@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	RevisionTransitionMainMigration    = 68
-	RevisionTransitionIgnoredMigration = 27
-	RevisionTransitionPatchMigration   = 72
+	RevisionTransitionMainMigration    = 69
+	RevisionTransitionIgnoredMigration = 28
+	RevisionTransitionPatchMigration   = 73
 )
 
 // RevisionTransitionReadiness is a startup proof that both migration planes,
@@ -32,7 +32,7 @@ func (r RevisionTransitionReadiness) Ready() bool {
 
 // PatchReady reports whether the additive atomic-patch receipt columns were
 // verified. It deliberately remains false for databases that are ready for
-// the compatible one-key transition API but have not applied migration 0072.
+// the compatible one-key transition API but have not applied migration 0073.
 func (r RevisionTransitionReadiness) PatchReady() bool {
 	return r.Ready() && r.patchVerified && r.mainVersion >= RevisionTransitionPatchMigration
 }
@@ -56,9 +56,9 @@ func ProbeRevisionTransitionReadiness(ctx context.Context, db DBConn) (RevisionT
 		return RevisionTransitionReadiness{mainVersion: mainVersion, ignoredVersion: ignoredVersion}, nil
 	}
 
-	// The version cursors are not enough by themselves: the 0067/0027
+	// The version cursors are not enough by themselves: the 0068/0028
 	// backfills must have left no legacy zero token, and the table created by
-	// 0068 must actually be queryable.
+	// 0069 must actually be queryable.
 	for _, table := range []string{"issues", "wisps"} {
 		var found int
 		query := fmt.Sprintf("SELECT 1 FROM %s WHERE row_lock = 0 LIMIT 1", table)

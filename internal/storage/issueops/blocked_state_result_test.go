@@ -105,3 +105,58 @@ func TestRunMarkUnmarkBatchedInTxPropagatesRowsAffectedErrors(t *testing.T) {
 		})
 	}
 }
+
+// Batched blocked-state writes have one revision argument followed by six
+// copies of the ID list. Repeating the token with each list breaks real SQL
+// execution; dropping it leaves derived changes invisible to revision fences.
+type distinctBlockedRevision struct{ seen map[int64]bool }
+
+func (m distinctBlockedRevision) Match(value driver.Value) bool {
+	token, ok := value.(int64)
+	if !ok || token == 0 || m.seen[token] {
+		return false
+	}
+	m.seen[token] = true
+	return true
+}
+
+func TestBlockedBatchRevisionBindings(t *testing.T) {
+	for _, plane := range []struct{ name, alias, mark, unmark string }{
+		{"issues", "i", markBlockedTemplateForIssues(), unmarkBlockedTemplateForIssues()},
+		{"wisps", "w", markBlockedTemplateForWisps(), unmarkBlockedTemplateForWisps()},
+	} {
+		for _, markOnly := range []bool{false, true} {
+			name := plane.name + "/recompute"
+			if markOnly {
+				name = plane.name + "/mark"
+			}
+			t.Run(name, func(t *testing.T) {
+				mock, db := newBlockedStateResultMock(t)
+				revision := distinctBlockedRevision{seen: make(map[int64]bool)}
+				args := []driver.Value{revision}
+				for range batchTemplateOccurrences {
+					args = append(args, "first", "second")
+				}
+				prefix := "UPDATE " + plane.name + " " + plane.alias + " SET " + plane.alias + ".is_blocked = "
+				suffix := ", " + plane.alias + ".row_lock = ?, " + plane.alias + ".updated_at = " + plane.alias + ".updated_at"
+				mock.ExpectExec(regexp.QuoteMeta(prefix + "1" + suffix)).WithArgs(args...).WillReturnResult(sqlmock.NewResult(0, 1))
+				if !markOnly {
+					mock.ExpectExec(regexp.QuoteMeta(prefix + "0" + suffix)).WithArgs(args...).WillReturnResult(sqlmock.NewResult(0, 1))
+				}
+				ids := []string{"first", "second"}
+				var changed int64
+				var err error
+				want := int64(2)
+				if markOnly {
+					changed, err = runMarkBatchedInTx(context.Background(), db, plane.mark, ids)
+					want = 1
+				} else {
+					changed, err = runMarkUnmarkBatchedInTx(context.Background(), db, plane.mark, plane.unmark, ids)
+				}
+				if err != nil || changed != want {
+					t.Fatalf("changed=%d err=%v, want %d changed rows", changed, err, want)
+				}
+			})
+		}
+	}
+}

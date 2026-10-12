@@ -1,4 +1,13 @@
--- Ignored migration 0026: clone-local marker that forces one dependency-id
+-- Fork/release reconciliation: both branches previously used ignored version
+-- 0026, for wisps.current_revision (fork) and dependency re-key (v1.3.1).
+-- Keep the fork's frozen 0026 intact. A fresh 0027 is pending on BOTH cursor-26
+-- lineages, so MigrateUp runs the merge-aware re-key before recording this step.
+-- Repeat the guarded column addition to heal a release clone that consumed its
+-- own 0026 without ever acquiring the fork's clone-local wisps column. On a fork
+-- clone the column already exists and the guard makes this a no-op.
+-- This step must stay unrecorded if either the re-key or column repair fails.
+--
+-- Ignored migration 0027: clone-local marker that forces one dependency-id
 -- re-key pass with the duplicate-edge merge (gastownhall/beads#5268).
 --
 -- rekeyDependencyIDs (internal/storage/schema/dep_id_backfill.go) converges the
@@ -34,3 +43,18 @@
 --
 -- The marker itself changes nothing.
 SELECT 1;
+
+SET @needs_add = IF(
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wisps') > 0
+    AND
+    (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'wisps'
+          AND COLUMN_NAME = 'current_revision') = 0,
+    1, 0
+);
+SET @sql = IF(@needs_add = 1,
+    'ALTER TABLE wisps ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1',
+    'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

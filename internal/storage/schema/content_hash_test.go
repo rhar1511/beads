@@ -95,15 +95,15 @@ func TestAllMigrationsSQLRecordsContentHashes(t *testing.T) {
 	}
 
 	if tables := queryDoltCSV(t, dir, "SHOW TABLES LIKE 'issue_transition_receipts'"); len(tables) != 1 {
-		t.Fatalf("migration 0068 did not create issue_transition_receipts; rows=%v", tables)
+		t.Fatalf("migration 0069 did not create issue_transition_receipts; rows=%v", tables)
 	}
-	downSQL, err := os.ReadFile("migrations/0068_create_issue_transition_receipts.down.sql")
+	downSQL, err := os.ReadFile("migrations/0069_create_issue_transition_receipts.down.sql")
 	if err != nil {
-		t.Fatalf("read migration 0068 down SQL: %v", err)
+		t.Fatalf("read migration 0069 down SQL: %v", err)
 	}
 	runDoltSQL(t, dir, string(downSQL))
 	if tables := queryDoltCSV(t, dir, "SHOW TABLES LIKE 'issue_transition_receipts'"); len(tables) != 0 {
-		t.Fatalf("migration 0068 down left issue_transition_receipts behind; rows=%v", tables)
+		t.Fatalf("migration 0069 down left issue_transition_receipts behind; rows=%v", tables)
 	}
 }
 

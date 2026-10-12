@@ -201,6 +201,9 @@ func addDependencyInTx(ctx context.Context, tx *sql.Tx, dep *types.Dependency, a
 	if dep == nil {
 		return false, fmt.Errorf("dependency must not be nil")
 	}
+	if strings.HasPrefix(dep.DependsOnID, "external:") && dep.Type == types.DepParentChild {
+		return false, fmt.Errorf("external capability dependencies cannot use parent-child edges")
+	}
 	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "dependency.add", []string{dep.IssueID, dep.DependsOnID}); err != nil {
 		return false, err
 	}

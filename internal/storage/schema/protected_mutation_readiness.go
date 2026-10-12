@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const ProtectedMutationMainMigration = 70
+const ProtectedMutationMainMigration = 71
 
 // ProtectedMutationReadiness is a startup proof that the explicit record
 // classification and one-time permit-use tables are present. Its zero value

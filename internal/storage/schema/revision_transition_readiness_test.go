@@ -17,8 +17,8 @@ func TestRevisionTransitionReadinessRequiresBothMigrationPlanes(t *testing.T) {
 		mainVersion int
 		ignoredVer  int
 	}{
-		{name: "main aggregate backfill absent", mainVersion: 67, ignoredVer: RevisionTransitionIgnoredMigration},
-		{name: "ignored zero-token backfill absent", mainVersion: RevisionTransitionMainMigration, ignoredVer: 26},
+		{name: "main receipt migration absent", mainVersion: RevisionTransitionMainMigration - 1, ignoredVer: RevisionTransitionIgnoredMigration},
+		{name: "ignored zero-token backfill absent", mainVersion: RevisionTransitionMainMigration, ignoredVer: RevisionTransitionIgnoredMigration - 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
@@ -198,12 +198,7 @@ func expectVersionCursor(mock sqlmock.Sqlmock, table string, version int) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(MAX(version), 0) FROM " + table)).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(version))
 	if table == "ignored_schema_migrations" {
-		for _, sentinel := range []string{"wisps", "wisp_dependencies"} {
-			mock.ExpectQuery(`SELECT COUNT\(\*\) FROM INFORMATION_SCHEMA\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \?`).
-				WithArgs(sentinel).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-		}
-		mock.ExpectQuery(`SELECT COUNT\(\*\) FROM INFORMATION_SCHEMA\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = \? AND COLUMN_NAME = \?`).
-			WithArgs("leases", "granted_node").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+		expectIgnoredSentinelProbes(mock, true)
 	}
 }
 

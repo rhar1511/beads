@@ -807,7 +807,7 @@ func migrateUpAfterReconcile(ctx context.Context, db DBConn, seedChanged bool) (
 	// here, after the schema migrations (0050 has asserted the canonical schema),
 	// and only on a pass where migration work was needed.
 	//
-	// #5268: ignored migration 0026 is what makes "migration work was needed"
+	// #5268: ignored migration 0027 is what makes "migration work was needed"
 	// true one more time on every existing clone, so the now merge-aware re-key
 	// reaches the databases a pre-1.3.0 binary left half-re-keyed at the latest
 	// main version. It is also why this call sits ABOVE ignoredSource.migrate:
@@ -1877,7 +1877,7 @@ func runMigrations(ctx context.Context, db DBConn, src migrationSource, minVersi
 
 		fmt.Fprintf(stderr, "Applying migration %04d: %s…\n", mf.version, humanMigrationName(mf.name))
 		start := time.Now()
-		if err := execMigrationBody(ctx, db, string(data)); err != nil {
+		if err := execMigration(ctx, db, src, mf, data); err != nil {
 			return count, fmt.Errorf("migration %s: %w", mf.name, err)
 		}
 		sum := sha256.Sum256(data)
