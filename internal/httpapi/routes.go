@@ -290,6 +290,14 @@ var routeTable = []route{
 		handler:     (*Server).handleSourceSnapshot,
 	},
 	{
+		op:          OpGetTransitionReceipt,
+		method:      http.MethodGet,
+		pattern:     "/v0/beads/issue-transition-receipts/{receiptID}",
+		capability:  "issues.transitionReceipt.get",
+		implemented: true,
+		handler:     (*Server).handleGetTransitionReceipt,
+	},
+	{
 		op:     OpUpdateIssue,
 		method: http.MethodPatch,
 		// A PLAIN METHOD on the issue-detail path, not a custom method: partial
@@ -564,6 +572,16 @@ var routeTable = []route{
 		capability:   "issues.casMetadata",
 		implemented:  true,
 		handler:      (*Server).handleCompareAndSetMetadata,
+	},
+	{
+		op:           OpTransitionMetadata,
+		method:       http.MethodPost,
+		pattern:      customMethodPattern,
+		specPath:     "/v0/beads/issues/{id}:transitionMetadata",
+		customMethod: ":transitionMetadata",
+		capability:   "issues.transitionMetadata",
+		implemented:  true,
+		handler:      (*Server).handleTransitionMetadata,
 	},
 	{
 		op:     OpReopenIssue,

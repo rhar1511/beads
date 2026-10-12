@@ -423,7 +423,7 @@ func TestSpecDefaultsMatchSharedConstants(t *testing.T) {
 // lowerCamel verb — is what every token on this surface is, and it is narrow
 // enough that no other backticked word in that paragraph can be mistaken for
 // one.
-var capabilityToken = regexp.MustCompile("`([a-z]+\\.[a-zA-Z]+)`")
+var capabilityToken = regexp.MustCompile("`([a-z]+(?:\\.[a-zA-Z]+)+)`")
 
 // TestSpecCapabilityVocabularyMatchesTheRouteTable is the gate for the ONE
 // piece of per-operation plumbing that had no gate.

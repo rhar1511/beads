@@ -637,10 +637,12 @@ func sourceRoles(cfg Config) []any {
 
 func capabilitiesForSource(cfg Config) []string {
 	caps := Capabilities()
-	if cfg.Provider != nil || cfg.SourceSnapshotReader != nil {
-		return caps
-	}
-	return slices.DeleteFunc(caps, func(cap string) bool { return cap == "issues.sourceSnapshot" })
+	return slices.DeleteFunc(caps, func(cap string) bool {
+		if cfg.Provider == nil && (cap == "issues.transitionMetadata" || cap == "issues.transitionReceipt.get") {
+			return true
+		}
+		return cfg.Provider == nil && cfg.SourceSnapshotReader == nil && cap == "issues.sourceSnapshot"
+	})
 }
 
 // roleSourceNames spells sourceRoles for the refusal message, in the same

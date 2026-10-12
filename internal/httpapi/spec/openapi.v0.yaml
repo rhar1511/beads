@@ -2397,6 +2397,85 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issue-transition-receipts/{receiptID}:
+    get:
+      operationId: getTransitionReceipt
+      summary: Read a committed metadata transition receipt
+      description: >-
+        Finds the immutable receipt by its workspace-unique id. A 404 means
+        no receipt with that id committed. Available only on transactional
+        providers advertising `issues.transitionReceipt.get`.
+      parameters:
+        - name: receiptID
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The committed receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataTransitionReceipt'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v0/beads/issues/{id}:transitionMetadata:
+    post:
+      operationId: transitionMetadata
+      summary: Advance one metadata key and commit a recovery receipt
+      description: >-
+        Fences a single issue metadata transition on its opaque row revision
+        and expected key value. The marker and immutable receipt commit in one
+        transaction. An exact retry of a committed request returns the same
+        receipt with replayed true; reuse of a receipt id for another request
+        is refused. Omitted expected or value means an absent key, whereas
+        JSON null is present. This operation does not authorize protected
+        mutations. Available only on transactional providers advertising
+        `issues.transitionMetadata`.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+      security:
+        - bearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetadataTransitionRequest'
+      responses:
+        '200':
+          description: Applied transition or exact replay.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataTransitionResult'
+        '400':
+          $ref: '#/components/responses/InvalidArgument'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The revision, expected marker, or receipt identity did not match.
+          x-bd-codes: [precondition_failed]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issues/{id}/related:
     get:
       operationId: listRelatedIssues
@@ -7315,7 +7394,8 @@ components:
             derived from its route table, and the server-wide BEHAVIORS it
             enforces. v0's operation vocabulary is `ready.list`, `ready.count`,
             `issues.list`, `issues.query`, `issues.count`, `issues.get`,
-            `issues.sourceSnapshot`,
+            `issues.sourceSnapshot`, `issues.transitionMetadata`,
+            `issues.transitionReceipt.get`,
             `issues.related`, `issues.create`, `issues.addComment`,
             `issues.batchClose`,
             `issues.claim`, `issues.claimNext`, `issues.release`,
@@ -7339,8 +7419,10 @@ components:
 
             THIS LIST IS BUILD-LEVEL, NOT WORKSPACE-LEVEL, except that
             `issues.sourceSnapshot` requires a transactional provider or an
-            explicitly configured atomic snapshot reader. Store-backed servers
-            without one omit that token and refuse the route with 503.
+            explicitly configured atomic snapshot reader. The two transition
+            capabilities require a transactional provider. Servers without
+            these sources omit the respective tokens and refuse the routes
+            with 503.
             For every other entry but two this list is
             the whole answer. `events.list` and `events.watch` are the
             exceptions: the durable events journal is a per-workspace setting
@@ -10216,6 +10298,58 @@ components:
         Where a member of this type is OMITTED, the key is absent; where it is
         present holding `null`, the key exists and holds null. Those are
         different states and this surface reports both.
+
+    MetadataTransitionRequest:
+      type: object
+      additionalProperties: false
+      required: [receipt_id, scope, kind, actor, expected_version, key]
+      properties:
+        receipt_id: {type: string, minLength: 1, maxLength: 255}
+        scope: {type: string, minLength: 1, maxLength: 255}
+        kind: {type: string, minLength: 1, maxLength: 255}
+        actor: {type: string, minLength: 1, maxLength: 255}
+        expected_version:
+          type: string
+          description: Opaque issue revision, encoded as a signed decimal string.
+        key: {type: string, minLength: 1, maxLength: 255}
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+        payload:
+          $ref: '#/components/schemas/MetadataValue'
+
+    MetadataTransitionReceipt:
+      type: object
+      additionalProperties: false
+      required: [receipt_id, issue_id, scope, kind, actor, expected_version, to_version, key, payload]
+      properties:
+        receipt_id: {type: string}
+        issue_id: {type: string}
+        scope: {type: string}
+        kind: {type: string}
+        actor: {type: string}
+        expected_version: {type: string}
+        to_version: {type: string}
+        key: {type: string}
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+        payload:
+          $ref: '#/components/schemas/MetadataValue'
+
+    MetadataTransitionResult:
+      type: object
+      additionalProperties: false
+      required: [applied, replayed]
+      properties:
+        applied: {type: boolean}
+        replayed: {type: boolean}
+        current:
+          $ref: '#/components/schemas/MetadataValue'
+        receipt:
+          $ref: '#/components/schemas/MetadataTransitionReceipt'
 
     CompareAndSetMetadataRequest:
       type: object
