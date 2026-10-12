@@ -92,16 +92,11 @@ func TestEmbeddedV131ReconciliationFromBothIgnored26Lineages(t *testing.T) {
 	}
 }
 
-// TestDepRekeyMarkerIsLatestIgnored keeps the fixtures in this file honest. They
-// force the repair pass by unrecording the marker, which only works while the
-// pass is genuinely pending afterwards. If a later ignored migration lands, this
-// fails first with an actionable message instead of the marker-driven tests
-// failing with assertions that indict the repair code.
-func TestDepRekeyMarkerIsLatestIgnored(t *testing.T) {
-	if got := schema.LatestIgnoredVersion(); got != depRekeyMarkerVersion {
-		t.Fatalf("latest ignored migration is %d, not the dep-rekey marker %d; "+
-			"if you added ignored %d, point depRekeyMarkerVersion at 0027 anyway and confirm "+
-			"unrecordIgnoredVersionsFrom still leaves the marker pending", got, depRekeyMarkerVersion, got)
+// The fixtures unrecord every ignored version from the frozen marker onward,
+// so both reconciliation27 and the following admission backfill28 stay pending.
+func TestDepRekeyMarkerRemainsBeforeAdmissionBackfill(t *testing.T) {
+	if got := schema.LatestIgnoredVersion(); got != schema.RevisionTransitionIgnoredMigration || depRekeyMarkerVersion != 27 || depRekeyMarkerVersion >= got {
+		t.Fatalf("latest ignored migration=%d, dep-rekey marker=%d; want frozen marker27 followed by admission backfill%d", got, depRekeyMarkerVersion, schema.RevisionTransitionIgnoredMigration)
 	}
 }
 

@@ -190,8 +190,14 @@ func writeTestProtectedMutationConfig(t *testing.T, directory, projectID, databa
 
 func writeTestProtectedMutationAuthorityFiles(t *testing.T, directory, projectID, database string) string {
 	t.Helper()
+	path, _ := writeTestProtectedMutationAuthorityAndKey(t, directory, projectID, database)
+	return path
+}
+
+func writeTestProtectedMutationAuthorityAndKey(t *testing.T, directory, projectID, database string) (string, ed25519.PrivateKey) {
+	t.Helper()
 	configPath := writeTestProtectedMutationConfig(t, directory, projectID, database)
-	permitPublic, _, err := ed25519.GenerateKey(rand.Reader)
+	permitPublic, permitPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +234,7 @@ func writeTestProtectedMutationAuthorityFiles(t *testing.T, directory, projectID
 		Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(revocationPrivate, signingBytes)),
 	}
 	writeTestAuthorityJSON(t, filepath.Join(directory, "revocations.json"), signed)
-	return configPath
+	return configPath, permitPrivate
 }
 
 func writeTestAuthorityJSON(t *testing.T, path string, value any) {

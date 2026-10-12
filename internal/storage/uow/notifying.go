@@ -1005,6 +1005,29 @@ func (u *recordingIssueUC) TransitionMetadata(ctx context.Context, plan storage.
 	return result, wrote, nil
 }
 
+// TransitionPatch preserves the optional atomic patch capability and records
+// the committed issue update with the same semantics as metadata transitions.
+func (u *recordingIssueUC) TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error) {
+	patcher, ok := u.IssueUseCase.(domain.RevisionTransitionPatchUseCase)
+	if !ok {
+		return publicops.RevisionTransitionPatchResult{}, false, &storage.ErrUnsupported{Op: "RevisionTransitionPatch", Backend: "notifying issue use case"}
+	}
+	result, wrote, err := patcher.TransitionPatch(ctx, plan)
+	if err != nil || !wrote {
+		return result, wrote, err
+	}
+	u.rec.record(opUpdate, u.snap.issue(ctx, plan.IssueID))
+	return result, wrote, nil
+}
+
+func (u *recordingIssueUC) GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	patcher, ok := u.IssueUseCase.(domain.RevisionTransitionPatchUseCase)
+	if !ok {
+		return nil, &storage.ErrUnsupported{Op: "RevisionTransitionPatchReceipt", Backend: "notifying issue use case"}
+	}
+	return patcher.GetRevisionTransitionPatchReceipt(ctx, receiptID)
+}
+
 // ReleaseIssue records an update for a release that landed.
 //
 // It is DECLARED rather than inherited, which is the whole reason this method
