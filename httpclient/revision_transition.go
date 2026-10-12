@@ -405,11 +405,11 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 	requestClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	response, err := requestClient.Do(request)
+	response, err := requestClient.Do(request) //nolint:gosec // G704: host comes from validated client configuration; request IDs only enter escaped paths and redirects are disabled.
 	if err != nil {
 		return nil, fmt.Errorf("httpclient: %s %s: %w", method, path, err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	maxBodyBytes := maxSuccessBodyBytes
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		maxBodyBytes = maxProblemBodyBytes

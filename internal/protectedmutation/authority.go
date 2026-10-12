@@ -234,7 +234,7 @@ func (v *Verifier) Verify(ctx context.Context, permit issueops.ProtectedMutation
 	if !ed25519.Verify(key.public, append([]byte(PermitSigningDomain), payload...), signature) {
 		return issueops.ProtectedMutationVerification{}, ErrBadSignature
 	}
-	if _, _, err := validateFreshness(claims.IssuedAt, claims.ExpiresAt, maxPermitAge, v.options.Now()); err != nil {
+	if err := validateFreshness(claims.IssuedAt, claims.ExpiresAt, maxPermitAge, v.options.Now()); err != nil {
 		return issueops.ProtectedMutationVerification{}, err
 	}
 	if claims.Audience != v.options.Audience || claims.Audience != want.Audience {
@@ -357,7 +357,7 @@ func verifyRevocations(envelope SignedRevocations, generation uint64, keys map[s
 	if list.ProjectID != options.ProjectID || list.Database != options.Database {
 		return nil, ErrWorkspace
 	}
-	if _, _, err := validateFreshness(list.IssuedAt, list.ExpiresAt, maxRevocationAge, now); err != nil {
+	if err := validateFreshness(list.IssuedAt, list.ExpiresAt, maxRevocationAge, now); err != nil {
 		return nil, err
 	}
 	revoked := make(map[string]struct{}, len(list.RevokedReplayIDs))
@@ -514,25 +514,25 @@ func canonicalIDs(values []string, limit int, requireNonEmpty bool) ([]string, e
 	return result, nil
 }
 
-func validateFreshness(issuedText, expiresText string, maxAge time.Duration, now time.Time) (time.Time, time.Time, error) {
+func validateFreshness(issuedText, expiresText string, maxAge time.Duration, now time.Time) error {
 	issued, err := parseCanonicalTime(issuedText)
 	if err != nil {
-		return time.Time{}, time.Time{}, err
+		return err
 	}
 	expires, err := parseCanonicalTime(expiresText)
 	if err != nil {
-		return time.Time{}, time.Time{}, err
+		return err
 	}
 	if !expires.After(issued) || expires.Sub(issued) > maxAge || now.Sub(issued) > maxAge+clockSkew {
-		return time.Time{}, time.Time{}, ErrExpired
+		return ErrExpired
 	}
 	if now.Add(clockSkew).Before(issued) {
-		return time.Time{}, time.Time{}, ErrNotYetValid
+		return ErrNotYetValid
 	}
 	if !now.Add(-clockSkew).Before(expires) {
-		return time.Time{}, time.Time{}, ErrExpired
+		return ErrExpired
 	}
-	return issued, expires, nil
+	return nil
 }
 
 func parseCanonicalTime(value string) (time.Time, error) {

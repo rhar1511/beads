@@ -71,15 +71,15 @@ func NewProtectedMutationAuthority(
 	readiness schema.ProtectedMutationReadiness,
 ) (ProtectedMutationAuthority, error) {
 	if isNilProtectedMutationVerifier(verifier) || !readiness.Ready() ||
-		!validProtectedBinding(audience, 255) || !validProtectedBinding(projectID, 255) || !validProtectedBinding(database, 255) {
+		!validProtectedBinding(audience) || !validProtectedBinding(projectID) || !validProtectedBinding(database) {
 		return ProtectedMutationAuthority{}, errors.New("httpapi: protected mutation authority requires a verifier, audience, project, database, and ready schema")
 	}
 	return ProtectedMutationAuthority{verifier: verifier, audience: audience, projectID: projectID, database: database, readiness: readiness}, nil
 }
 
 func (a ProtectedMutationAuthority) ready() bool {
-	return !isNilProtectedMutationVerifier(a.verifier) && validProtectedBinding(a.audience, 255) &&
-		validProtectedBinding(a.projectID, 255) && validProtectedBinding(a.database, 255) && a.readiness.Ready()
+	return !isNilProtectedMutationVerifier(a.verifier) && validProtectedBinding(a.audience) &&
+		validProtectedBinding(a.projectID) && validProtectedBinding(a.database) && a.readiness.Ready()
 }
 
 func (a ProtectedMutationAuthority) configured() bool {
@@ -90,8 +90,8 @@ func (a ProtectedMutationAuthority) matchesWorkspace(projectID, database string)
 	return a.projectID == projectID && a.database == database
 }
 
-func validProtectedBinding(value string, maxBytes int) bool {
-	if value == "" || strings.TrimSpace(value) != value || len(value) > maxBytes || !utf8.ValidString(value) {
+func validProtectedBinding(value string) bool {
+	if value == "" || strings.TrimSpace(value) != value || len(value) > 255 || !utf8.ValidString(value) {
 		return false
 	}
 	for _, r := range value {

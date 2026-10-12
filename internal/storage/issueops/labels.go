@@ -141,7 +141,7 @@ func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID,
 	if err := types.CheckFieldLen("label", label); err != nil {
 		return false, err
 	}
-	_, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
+	labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
 	if err != nil {
 		return false, err
 	}
@@ -186,7 +186,7 @@ func RemoveLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issue
 	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.label_remove", []string{issueID}); err != nil {
 		return false, err
 	}
-	_, labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
+	labelTable, eventTable, err := resolveLabelTables(ctx, tx, labelTable, eventTable, issueID)
 	if err != nil {
 		return false, err
 	}
@@ -219,20 +219,20 @@ func RemoveLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issue
 	return changed, nil
 }
 
-func resolveLabelTables(ctx context.Context, tx DBTX, labelTable, eventTable, issueID string) (string, string, string, error) {
+func resolveLabelTables(ctx context.Context, tx DBTX, labelTable, eventTable, issueID string) (string, string, error) {
 	if (labelTable == "labels" && eventTable == "wisp_events") || (labelTable == "wisp_labels" && eventTable == "events") {
-		return "", "", "", fmt.Errorf("label tables disagree: %s and %s", labelTable, eventTable)
+		return "", "", fmt.Errorf("label tables disagree: %s and %s", labelTable, eventTable)
 	}
 	isWisp := labelTable == "wisp_labels" || eventTable == "wisp_events"
 	if labelTable == "" && eventTable == "" {
 		isWisp = IsActiveWispInTx(ctx, tx, issueID)
 	}
-	issueTable, resolvedLabel, resolvedEvent, _ := WispTableRouting(isWisp)
+	_, resolvedLabel, resolvedEvent, _ := WispTableRouting(isWisp)
 	if labelTable == "" {
 		labelTable = resolvedLabel
 	}
 	if eventTable == "" {
 		eventTable = resolvedEvent
 	}
-	return issueTable, labelTable, eventTable, nil
+	return labelTable, eventTable, nil
 }
