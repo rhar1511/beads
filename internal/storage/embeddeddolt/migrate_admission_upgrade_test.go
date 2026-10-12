@@ -3,6 +3,7 @@
 package embeddeddolt_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,5 +84,39 @@ func TestEmbeddedAdmissionUpgradeFrom66AndRestore(t *testing.T) {
 	}
 	if got := scalarInt(t, ctx, conn, "SELECT COUNT(*) FROM dependencies WHERE id = 'legacy-edge'"); got != 1 {
 		t.Fatalf("restored original edge=%d", got)
+	}
+}
+
+// Installing a revision token is bookkeeping, not a user edit. Execute the
+// exact backfill SQL against real ON UPDATE columns on both storage planes.
+func TestEmbeddedRevisionBackfillsPreserveEditTimes(t *testing.T) {
+	requireEmbedded(t)
+	ctx := t.Context()
+	dataDir := seedMigratedStore(t, ctx)
+	conn, _ := openDepConn(t, ctx, dataDir)
+	seedIssue(t, ctx, conn, "edit-source")
+	seedWisp(t, ctx, conn, "edit-wisp")
+	for _, tc := range []struct {
+		table, id, migration string
+		ignored              bool
+	}{
+		{"issues", "edit-source", "0068_backfill_aggregate_row_lock.up.sql", false},
+		{"wisps", "edit-wisp", "0028_backfill_wisp_aggregate_row_lock.up.sql", true},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			mustExecConn(t, ctx, conn, fmt.Sprintf("UPDATE %s SET row_lock = 0, created_at = '2020-01-02 03:04:05', updated_at = '2020-01-03 04:05:06' WHERE id = ?", tc.table), tc.id)
+			migrationSQL := schema.MigrationSQL
+			if tc.ignored {
+				migrationSQL = schema.IgnoredMigrationSQL
+			}
+			sql, err := migrationSQL(tc.migration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execFrozenGuard(t, ctx, conn, sql)
+			if got := scalarInt(t, ctx, conn, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE row_lock = 1 AND created_at = '2020-01-02 03:04:05' AND updated_at = '2020-01-03 04:05:06'", tc.table)); got != 1 {
+				t.Fatalf("%s backfill did not preserve creation/edit timestamps while installing the revision", tc.table)
+			}
+		})
 	}
 }
