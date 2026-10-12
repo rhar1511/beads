@@ -13,6 +13,11 @@ import "testing"
 // simply stop being part of what an external backend is held to, which is the
 // suite-level shape of a test that cannot fail.
 var roleContractCases = []roleContract{
+	roleCases("Admission", "SourceSnapshotReader(), RevisionTransition() with RevisionTransitionPatcher, and trusted ProtectedMutationVerifier", oncePerRole,
+		func(b RoleContractBundle) func(t *testing.T) *AdmissionFixture { return b.Admission },
+		RunAdmissionPersistsSignedPatchAndImmutableReceipts,
+	),
+
 	roleCases("BatchApply", "BatchApplier()", oncePerRole,
 		func(b RoleContractBundle) func(t *testing.T) *BatchApplyFixture { return b.BatchApply },
 		RunBatchApplyAppliesEveryItemInDeclarationOrder,
