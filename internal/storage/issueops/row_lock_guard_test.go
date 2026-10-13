@@ -57,27 +57,10 @@ var issueTableWriteRe = regexp.MustCompile("(?i)\\b(?:UPDATE|INSERT\\s+INTO)\\s+
 // (persistence.go's `INSERT INTO %s (%s) SELECT %s FROM %s ...`) has SELECT.
 var sqlWriteKeywordRe = regexp.MustCompile(`(?i)\b(?:SET|VALUES|SELECT)\b`)
 
-// auxOrExemptMarkers identify a matched write that legitimately does NOT stamp
-// row_lock. The exemption set is main's freshRowLock invariant (lease.go):
-// row_lock guards status/assignee/started_at against the reclaim/close races,
-// and paths touching only orthogonal cells are safe to merge with a reclaim.
+// auxOrExemptMarkers identify a matched write that targets an auxiliary table
+// rather than an issues/wisps aggregate row. Every actual issue-row write,
+// including derived is_blocked updates, must stamp the aggregate revision.
 //
-//   - is_blocked: the denormalized is_blocked recompute deliberately preserves
-//     updated_at (blocked_state.go x4, dependencies.go, domain/db/dependency.go)
-//     and must not remint row_lock either — an aux-marker refresh that bumped
-//     the token would clobber a concurrent whole-row CAS (ExpectedVersion) for
-//     no content change. Analysis absorbed from gastownhall/beads#4682.
-//     (The PR's other exemption, the lease heartbeat, is moot on main: since
-//     bd-lrgn1 heartbeats live entirely in the ephemeral leases table and never
-//     touch the issues row.)
-//   - "compaction_level = ": compaction apply/restore rewrites bookkeeping and
-//     compacted body text only — cells the reclaim/close races don't care
-//     about, exempted by name in the freshRowLock invariant. The assignment
-//     form (not the bare column name) keeps the create INSERT, whose column
-//     list also names compaction_level, checkable.
-//   - "SET id = ?": rename (updateIssueIDInTx/updateWispIDInTx) is the only
-//     writer of the primary key, exempted by name in the freshRowLock
-//     invariant.
 //   - "SELECT %s FROM": the persistence move's fully-templated aux-table copy
 //     (INSERT INTO %s (%s) SELECT %s FROM %s ...) — it copies snapshot/event
 //     side tables verbatim; the issues/wisps row itself is re-inserted through
@@ -88,75 +71,25 @@ var sqlWriteKeywordRe = regexp.MustCompile(`(?i)\b(?:SET|VALUES|SELECT)\b`)
 //     presence proves a non-issue table.
 //
 // If a future write trips this guard: stamp row_lock with freshRowLock() (or
-// RowLockClause()) when it is a real issues/wisps content write; add the
-// distinguishing column/marker here — with the WHY — when it is a new
-// auxiliary-table or deliberately-orthogonal write.
-//
-// A marker match is refused outright, regardless of which marker fired, when
-// the write's own SET clause assigns status, assignee, or started_at — the
-// three columns the freshRowLock invariant exists to guard (lease.go). Those
-// markers are legitimate only because is_blocked/compaction/rename writes
-// never touch that trio; a hypothetical future write that assigned e.g.
-// status in the same statement as an is_blocked-marked WHERE predicate must
-// still stamp. See setClauseAssignsLifecycleField.
+// RowLockClause()) when it writes an issues/wisps row; add a distinguishing
+// column here — with the WHY — only when a new auxiliary-table write shares
+// the templated table-name shape.
 var auxOrExemptMarkers = []string{
-	"is_blocked",          // is_blocked recompute (exempt by design)
-	"compaction_level = ", // compaction bookkeeping/restore (exempt by design)
-	"SET id = ?",          // rename: primary-key rewrite (exempt by design)
-	"SELECT %s FROM",      // persistence move's verbatim aux-table copy
-	"issue_id",            // events / dependencies / comments / snapshots FK
-	"depends_on",          // dependency edge + retarget writes
-	"parent_id",           // child_counters
-	"last_child",          // child_counters
-	"event_type",          // events / wisp_events
+	"SELECT %s FROM", // persistence move's verbatim aux-table copy
+	"issue_id",       // events / dependencies / comments / snapshots FK
+	"depends_on",     // dependency edge + retarget writes
+	"parent_id",      // child_counters
+	"last_child",     // child_counters
+	"event_type",     // events / wisp_events
 }
 
-// funcNameExemptions are functions whose issues/wisps write is deliberately
-// exempt from the row_lock stamp requirement, keyed by the enclosing
-// function's identity rather than by a substring marker in the SQL text.
+// TestAllIssueRowWritesStampRowLock is the source-completeness guard for the
+// packages it inventories: every issues/wisps SQL write in issueops,
+// domain/db, and versioncontrolops stamps row_lock. Behavioral backend tests
+// cover orchestration outside these SQL-owning packages.
 //
-// This is a DIFFERENT mechanism from auxOrExemptMarkers, and deliberately
-// bypasses setClauseAssignsLifecycleField's refusal: that refusal exists
-// because a text marker can be matched incidentally (e.g. in a WHERE clause
-// unrelated to the exemption's real reason), so a marker match must not wave
-// through a write whose SET clause happens to also assign a lifecycle
-// column. A function-name match carries no such risk — it names one specific,
-// reviewed function, not a string that could recur by coincidence — so it is
-// allowed to exempt a write even when that write's SET clause is fully
-// %s-templated and could, at runtime, assign status/assignee/started_at.
-//
-// Add an entry here only for a write that is genuinely correct without a
-// fresh stamp — never as a shortcut past a write that should stamp but
-// doesn't.
-var funcNameExemptions = map[string]string{
-	// resolveOneConflictRow's `theirs` branch (conflicts.go) is whole-row
-	// adoption for `bd conflicts resolve --theirs`: every their_* column,
-	// including their row_lock, is copied verbatim over ours. The resulting
-	// row IS their row, byte for byte, so their row_lock already vouches for
-	// exactly this content — the same "settled row equals a parent, that
-	// parent's token still vouches for it" argument automerge.go's
-	// mergeIssuesConflictRow makes for the no-op (nothing written) case.
-	// Reminting here would be pointless content-wise and would let a stale
-	// ExpectedVersion CAS reject a row it should still recognize.
-	"resolveOneConflictRow": "whole-row `theirs` adoption: the adopted row_lock already vouches for the (identical) adopted content",
-}
-
-// TestAllIssueRowWritesStampRowLock is the load-bearing completeness guard for
-// the freshRowLock invariant: it proves, at build time, that EVERY issues/wisps
-// row write across both whole-row write stacks (issueops and the proxied
-// internal/storage/domain/db) either stamps a fresh row_lock or matches a
-// documented exemption. A forgotten write path is a test failure, catching an
-// accidental reintroduction of the zombie-merge bug before it ships.
-//
-// This does not mean every documented exemption is itself free of a stale-CAS
-// hole in RowVersion — two of them knowingly are one: compaction rewrites
-// bookkeeping and compacted body text while deliberately preserving row_lock
-// (documented at storage.go:319-325, the same "lifecycle/ownership only"
-// contract this guard enforces), and a rename (updateIssueIDInTx) changes the
-// primary key without reminting the old row's token — but that is safe by
-// construction: the CAS predicate is keyed on id, so a stale ExpectedVersion
-// read against the pre-rename id matches no row at all rather than winning
-// against renamed content.
+// Auxiliary-table writers are covered behaviorally by the aggregate revision
+// mutation matrix because their SQL does not target issues/wisps directly.
 func TestAllIssueRowWritesStampRowLock(t *testing.T) {
 	// versioncontrolops is included alongside issueops and the proxied
 	// domain/db: it writes issues/wisps rows too, both from automerge's
@@ -194,6 +127,62 @@ func TestAllIssueRowWritesStampRowLock(t *testing.T) {
 		t.Fatal("guard verified zero issue-table writes — the scan regex or directory set is wrong")
 	}
 	t.Logf("verified %d issues/wisps row writes across both stacks stamp row_lock", checked)
+}
+
+// TestAllAuxiliaryAggregateWritersTouchRowVersion complements the SQL-row scan
+// above by pinning the known SQL-owning chokepoints for labels, comments and
+// dependency edges. It is an explicit inventory, not discovery of future
+// writers; the real-backend mutation matrix provides the supported-surface
+// check. Design adapted from Julian Knutsen's completeness guards in
+// gastownhall/beads#4682 and #4697.
+func TestAllAuxiliaryAggregateWritersTouchRowVersion(t *testing.T) {
+	writers := map[string][]string{
+		"labels.go":       {"AddLabelInTx", "RemoveLabelInTx"},
+		"comments.go":     {"addIssueCommentInTx", "AddCommentEventInTx"},
+		"dependencies.go": {"addDependencyInTx", "removeDependencyInTx"},
+		filepath.Join("..", "domain", "db", "label.go"):      {"Insert", "Delete"},
+		filepath.Join("..", "domain", "db", "comment.go"):    {"InsertRecord"},
+		filepath.Join("..", "domain", "db", "dependency.go"): {"Insert", "Delete"},
+	}
+	for path, names := range writers {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, src, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, name := range names {
+			var found, touched bool
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Name.Name != name || fn.Body == nil {
+					continue
+				}
+				found = true
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					call, ok := node.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					switch callee := call.Fun.(type) {
+					case *ast.Ident:
+						touched = callee.Name == "TouchRowVersionInTx" || callee.Name == "BumpIssueRevisionInTx" || touched
+					case *ast.SelectorExpr:
+						touched = callee.Sel.Name == "TouchRowVersionInTx" || callee.Sel.Name == "BumpIssueRevisionInTx" || touched
+					}
+					return true
+				})
+			}
+			if !found {
+				t.Errorf("%s: aggregate writer %s not found; update the completeness inventory", path, name)
+			} else if !touched {
+				t.Errorf("%s: aggregate writer %s does not touch RowVersion", path, name)
+			}
+		}
+	}
 }
 
 // scanIssueWriteRowLockStamps parses one Go source file and returns the number
@@ -253,13 +242,10 @@ func scanIssueWriteRowLockStamps(t *testing.T, path string, src []byte) (checked
 				continue
 			}
 
-			if why, exempt := funcNameExemptions[fn.Name.Name]; exempt {
-				_ = why // documented at the definition; nothing to check further
+			if hasAnyMarker(stmt, auxOrExemptMarkers) {
+				// These markers identify auxiliary tables; every issue row,
+				// including derived is_blocked writes, must stamp row_lock.
 				continue
-			}
-
-			if hasAnyMarker(stmt, auxOrExemptMarkers) && !setClauseAssignsLifecycleField(stmt) {
-				continue // auxiliary table or documented exemption: no stamp
 			}
 			checked++
 
@@ -276,7 +262,7 @@ func scanIssueWriteRowLockStamps(t *testing.T, path string, src []byte) (checked
 				violations = append(violations, path+": "+funcDisplayName(fn)+
 					" performs an issues/wisps row write that does not stamp row_lock:\n\t"+
 					firstSQLLine(stmt)+
-					"\nEvery issues/wisps content write must mint a fresh token via freshRowLock()/RowLockClause() (see the freshRowLock invariant in lease.go), or carry a documented exemption marker.")
+					"\nEvery issues/wisps row write must mint a fresh token via freshRowLock()/RowLockClause() (see the freshRowLock invariant in lease.go).")
 			}
 		}
 		return true
@@ -308,24 +294,6 @@ func setClause(stmt string) string {
 		clause = clause[:w[0]]
 	}
 	return clause
-}
-
-// lifecycleFieldAssignRe matches an assignment to one of the three columns
-// the freshRowLock invariant (lease.go) exists to guard: status, assignee,
-// started_at (see storage.go's ExpectedVersion doc). A write assigning any of
-// these must stamp row_lock regardless of an aux/exempt marker matched
-// elsewhere in the statement.
-var lifecycleFieldAssignRe = regexp.MustCompile(`(?i)\b(?:status|assignee|started_at)\s*=`)
-
-// setClauseAssignsLifecycleField reports whether stmt's SET clause (not its
-// WHERE predicate) assigns status, assignee, or started_at. Used to refuse an
-// aux/exempt marker match outright when the write is really a lifecycle
-// write that merely happens to share a marker word — e.g. a hypothetical
-// `UPDATE issues SET status = ?, assignee = NULL WHERE is_blocked = 0` must
-// not be waved through by the is_blocked marker just because that word
-// appears in WHERE.
-func setClauseAssignsLifecycleField(stmt string) bool {
-	return lifecycleFieldAssignRe.MatchString(setClause(stmt))
 }
 
 // setClauseHasPercentSPlaceholder reports whether stmt's SET clause itself
@@ -546,17 +514,39 @@ func w(id string, err error) error {
 		t.Errorf("error-format string: got checked=%d violations=%v; want checked=0 violations=none", n, v)
 	}
 
-	// A lifecycle write (assigns status/assignee) must not escape via an
-	// aux/exempt marker matched only in its WHERE predicate (finding 2): a
-	// hypothetical `... WHERE is_blocked = 0` must not wave through a status
-	// change the way the real is_blocked-recompute exemption (which never
-	// assigns status/assignee/started_at) legitimately does.
+	// A lifecycle write must not escape through a marker that appears only in
+	// its WHERE predicate. Derived is_blocked is itself an aggregate field and
+	// every write to it must also stamp row_lock.
 	lifecycleEscapeAttempt := []byte(`package p
 func w(tx T, id, s string) {
 	tx.ExecContext(ctx, "UPDATE issues SET status = ?, assignee = NULL WHERE is_blocked = 0", s, id)
 }`)
 	if n, v := scanIssueWriteRowLockStamps(t, "lifecycle.go", lifecycleEscapeAttempt); n != 1 || len(v) != 1 {
 		t.Errorf("lifecycle write behind an is_blocked WHERE marker: got checked=%d violations=%d; want checked=1 violations=1 (a marker in WHERE must not exempt a SET that assigns status/assignee/started_at)", n, len(v))
+	}
+
+	contentEscapeAttempt := []byte(`package p
+func w(tx T, id, title string) {
+	tx.ExecContext(ctx, "UPDATE issues SET title = ? WHERE is_blocked = 0", title, id)
+}`)
+	if n, v := scanIssueWriteRowLockStamps(t, "content.go", contentEscapeAttempt); n != 1 || len(v) != 1 {
+		t.Errorf("content write behind an is_blocked WHERE marker: got checked=%d violations=%d; want checked=1 violations=1", n, len(v))
+	}
+
+	derivedUnstamped := []byte(`package p
+func w(tx T, id string) {
+	tx.ExecContext(ctx, "UPDATE issues SET is_blocked = 1 WHERE id = ?", id)
+}`)
+	if n, v := scanIssueWriteRowLockStamps(t, "derived-unstamped.go", derivedUnstamped); n != 1 || len(v) != 1 {
+		t.Errorf("unstamped derived is_blocked write: got checked=%d violations=%d; want checked=1 violations=1", n, len(v))
+	}
+
+	derivedStamped := []byte(`package p
+func w(tx T, id string) {
+	tx.ExecContext(ctx, "UPDATE issues SET is_blocked = 1, row_lock = ? WHERE id = ?", freshRowLock(), id)
+}`)
+	if n, v := scanIssueWriteRowLockStamps(t, "derived-stamped.go", derivedStamped); n != 1 || len(v) != 0 {
+		t.Errorf("stamped derived is_blocked write: got checked=%d violations=%v; want checked=1 violations=none", n, v)
 	}
 
 	// finding 3: the stamp check used to be computed once per FUNCTION, so an
@@ -657,27 +647,24 @@ func w(tx T, id, s, table string) {
 		t.Errorf("no stamp evidence anywhere in file: got checked=%d violations=%d; want checked=1 violations=1 (an unrelated setColumn call must not satisfy the cross-function fallback)", n, len(v))
 	}
 
-	// funcNameExemptions is keyed to the enclosing function's identity, not a
-	// text marker, so it must exempt the exact named function (conflicts.go's
-	// whole-row `theirs` adoption) even though its SET clause could assign
-	// status/assignee at runtime...
-	exemptByName := []byte(`package p
+	// Function names do not exempt row writes. The production conflict
+	// resolution path stamps its adopted row explicitly, so a synthetic
+	// unstamped write under the same function name must fail this guard.
+	unstampedConflictAdoption := []byte(`package p
 func resolveOneConflictRow(tx T, id, s, table string) {
 	tx.ExecContext(ctx, fmt.Sprintf("UPDATE %s SET status = ?, assignee = ? WHERE id = ?", table), s, id)
 }`)
-	if n, v := scanIssueWriteRowLockStamps(t, "exemptbyname.go", exemptByName); n != 0 || len(v) != 0 {
-		t.Errorf("resolveOneConflictRow func-name exemption: got checked=%d violations=%v; want checked=0 violations=none (a whole-row-adoption write named by function identity must be exempt)", n, v)
+	if n, v := scanIssueWriteRowLockStamps(t, "unstamped-conflict-adoption.go", unstampedConflictAdoption); n != 1 || len(v) != 1 {
+		t.Errorf("unstamped resolveOneConflictRow write: got checked=%d violations=%d; want checked=1 violations=1", n, len(v))
 	}
 
-	// ...but must NOT exempt a differently-named function with the identical
-	// write shape: the exemption is the specific reviewed function, not the
-	// SQL shape.
+	// The same unstamped shape must fail under any function name.
 	notExemptByName := []byte(`package p
 func someOtherWrite(tx T, id, s, table string) {
 	tx.ExecContext(ctx, fmt.Sprintf("UPDATE %s SET status = ?, assignee = ? WHERE id = ?", table), s, id)
 }`)
 	if n, v := scanIssueWriteRowLockStamps(t, "notexemptbyname.go", notExemptByName); n != 1 || len(v) != 1 {
-		t.Errorf("non-exempt function with the same write shape: got checked=%d violations=%d; want checked=1 violations=1 (the exemption must be keyed to the specific function name, not the SQL shape)", n, len(v))
+		t.Errorf("same unstamped shape under another function name: got checked=%d violations=%d; want checked=1 violations=1", n, len(v))
 	}
 }
 

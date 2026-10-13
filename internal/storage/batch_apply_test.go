@@ -278,6 +278,46 @@ func TestPlanApplyBatchResolvesKeysBackwardOnly(t *testing.T) {
 	}
 }
 
+func TestPlanApplyBatchProtectedScopeRequiresExplicitIDsForEveryCreate(t *testing.T) {
+	ordinaryStandalone := planApplyRequest(planApplyCreate("standalone"))
+	if _, err := PlanApplyBatch(ordinaryStandalone); err != nil {
+		t.Fatalf("ordinary generated-ID standalone create: %v", err)
+	}
+	protectedStandalone := ordinaryStandalone
+	protectedStandalone.ProtectedPermit = "opaque-permit"
+	if _, err := PlanApplyBatch(protectedStandalone); !errors.Is(err, issueops.ErrProtectedRecord) {
+		t.Fatalf("protected generated-ID standalone create error = %v, want ErrProtectedRecord", err)
+	}
+	protectedInvalidStandalone := planApplyRequest(planApplyCreate("standalone"))
+	protectedInvalidStandalone.ProtectedPermit = "opaque-permit"
+	protectedInvalidStandalone.Items[0].Create.Issue.ID = " bd-standalone"
+	if _, err := PlanApplyBatch(protectedInvalidStandalone); !errors.Is(err, issueops.ErrProtectedRecord) {
+		t.Fatalf("protected untrimmed standalone ID error = %v, want ErrProtectedRecord", err)
+	}
+
+	ordinaryCreateLink := planApplyRequest(
+		planApplyCreate("created"),
+		planApplyDep(issueops.Ref{ID: "bd-source"}, issueops.Ref{Key: "created"}, types.DepRelatesTo, ""),
+	)
+	if _, err := PlanApplyBatch(ordinaryCreateLink); err != nil {
+		t.Fatalf("ordinary generated-ID create/link: %v", err)
+	}
+	protectedCreateLink := ordinaryCreateLink
+	protectedCreateLink.ProtectedPermit = "opaque-permit"
+	if _, err := PlanApplyBatch(protectedCreateLink); !errors.Is(err, issueops.ErrProtectedRecord) {
+		t.Fatalf("protected generated-ID create/link error = %v, want ErrProtectedRecord", err)
+	}
+
+	protectedCreateLink.Items = []issueops.ApplyItem{
+		planApplyCreate("created"),
+		planApplyDep(issueops.Ref{ID: "bd-source"}, issueops.Ref{Key: "created"}, types.DepRelatesTo, ""),
+	}
+	protectedCreateLink.Items[0].Create.Issue.ID = "bd-created"
+	if _, err := PlanApplyBatch(protectedCreateLink); err != nil {
+		t.Fatalf("protected explicit-ID create/link: %v", err)
+	}
+}
+
 // TestPlanApplyBatchMetadataRefsReachAnyDirection pins the ONE exception to the
 // backward rule, and it is the measured shape rather than a generalization: a
 // plan whose first step records the id of a row a later step mints (the retry

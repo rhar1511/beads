@@ -32,6 +32,7 @@ type issueSQLRepositoryImpl struct {
 }
 
 var _ domain.IssueSQLRepository = (*issueSQLRepositoryImpl)(nil)
+var _ domain.RevisionTransitionPatchRepository = (*issueSQLRepositoryImpl)(nil)
 
 // issueSelectColumns aliases the shared canonical column list; the scan side
 // delegates to issueops.ScanIssueFrom, which scans it positionally.
@@ -55,6 +56,9 @@ var updateFieldColumnRename = map[string]string{
 func (r *issueSQLRepositoryImpl) Insert(ctx context.Context, issue *types.Issue, actor string, opts domain.InsertIssueOpts) error {
 	if issue == nil {
 		return errors.New("db: Insert: issue must not be nil")
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.create", issueops.CreateMutationResourceIDs([]*types.Issue{issue})); err != nil {
+		return err
 	}
 
 	normalizeIssueTimestamps(issue)
@@ -97,6 +101,9 @@ func (r *issueSQLRepositoryImpl) Insert(ctx context.Context, issue *types.Issue,
 }
 
 func (r *issueSQLRepositoryImpl) InsertBatch(ctx context.Context, issues []*types.Issue, actor string, opts domain.InsertIssueOpts) error {
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.create", issueops.CreateMutationResourceIDs(issues)); err != nil {
+		return err
+	}
 	for _, issue := range issues {
 		if err := r.Insert(ctx, issue, actor, opts); err != nil {
 			return err
@@ -121,6 +128,13 @@ func (r *issueSQLRepositoryImpl) PromoteFromEphemeral(ctx context.Context, id, a
 }
 
 func (r *issueSQLRepositoryImpl) MovePersistence(ctx context.Context, id string, mode types.PersistenceMode, actor string) (bool, error) {
+	resourceIDs, err := issueops.DependencyEndpointsForIDsInTx(ctx, r.runner, []string{id})
+	if err != nil {
+		return false, fmt.Errorf("db: MovePersistence %s: resolve dependency endpoints: %w", id, err)
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.persistence_move", resourceIDs); err != nil {
+		return false, err
+	}
 	issue, err := issueops.GetIssueInTx(ctx, r.runner, id)
 	if err != nil {
 		return false, fmt.Errorf("db: MovePersistence %s: get issue: %w", id, err)
@@ -138,6 +152,9 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 	}
 	if len(updates) == 0 {
 		return nil
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.update", []string{id}); err != nil {
+		return err
 	}
 	updates = cloneUpdateFields(updates)
 	// Pop the close-policy override before anything reads the map as a set of
@@ -350,6 +367,41 @@ func (r *issueSQLRepositoryImpl) CompareAndSetMetadataKey(ctx context.Context, p
 	return result, write.Wrote, err
 }
 
+// TransitionMetadata runs the same transaction body used by both direct store
+// backends and reports whether it wrote durable tables for the UOW commit.
+func (r *issueSQLRepositoryImpl) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
+	result, write, err := issueops.TransitionMetadataInTx(ctx, r.runner, plan)
+	return result, write.Wrote, err
+}
+
+func (r *issueSQLRepositoryImpl) GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error) {
+	if err := storage.ValidateRevisionTransitionReceiptID(receiptID); err != nil {
+		return nil, err
+	}
+	return issueops.GetRevisionTransitionReceiptInTx(ctx, r.runner, receiptID)
+}
+
+func (r *issueSQLRepositoryImpl) TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error) {
+	result, write, err := issueops.TransitionPatchInTx(ctx, r.runner, plan)
+	return result, write.Wrote, err
+}
+
+func (r *issueSQLRepositoryImpl) GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	return issueops.GetRevisionTransitionPatchReceiptInTx(ctx, r.runner, receiptID)
+}
+
+func (r *issueSQLRepositoryImpl) GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error) {
+	return issueops.GetBatchApplyReceiptInTx(ctx, r.runner, receiptID)
+}
+
+func (r *issueSQLRepositoryImpl) StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error) {
+	canonical, err := issueops.StoreBatchApplyReceiptInTx(ctx, r.runner, plan, result)
+	if err != nil {
+		return publicops.ApplyBatchResult{}, false, err
+	}
+	return canonical, true, nil
+}
+
 // ReleaseIssue runs the SHARED claim-release body, unwrapped.
 //
 // It is the whole of this leg's implementation, and that is the point: the two
@@ -395,6 +447,9 @@ func coerceStatus(v any) types.Status {
 func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, opts domain.IssueTableOpts) (domain.ClaimRowResult, error) {
 	if id == "" {
 		return domain.ClaimRowResult{}, errors.New("db: Claim: id must not be empty")
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "issue.claim", []string{id}); err != nil {
+		return domain.ClaimRowResult{}, err
 	}
 	// The CAS below writes assignee = actor. actor is user-settable (--actor /
 	// BEADS_ACTOR), so bound it against the VARCHAR(255) assignee column up front
@@ -761,6 +816,7 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 	// RowVersion CAS token is stale-zero on read — the backend-divergent break
 	// the RowVersion contract (types.Issue.RowVersion) forbids. The duplicate-key
 	// path rewrites it too so an upsert also advances the token.
+	rowVersion := issueops.FreshRowLock()
 	_, err := runner.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (
 			id, content_hash, title, description, design, acceptance_criteria, notes,
@@ -815,11 +871,15 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 		issue.EventKind, issue.Actor, issue.Target, issue.Payload,
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), formatJSONStringArray(issue.Waiters),
 		issue.DueAt, issue.DeferUntil, jsonMetadata(issue.Metadata),
-		issueops.FreshRowLock(), nullString(string(issue.StorageClass.Normalize())),
+		rowVersion, nullString(string(issue.StorageClass.Normalize())),
 	)
 	if err != nil {
 		return fmt.Errorf("db: insert into %s: %w", table, err)
 	}
+	// This upsert always assigns VALUES(row_lock), so the generated value is the
+	// stored value; unlike the classic stale-guarded import path, no incumbent
+	// token can survive a successful statement.
+	issue.RowVersion = rowVersion
 	return nil
 }
 
@@ -958,6 +1018,11 @@ func (r *issueSQLRepositoryImpl) Delete(ctx context.Context, id string, opts dom
 	if opts.UseWispsTable {
 		table = "wisps"
 	}
+	if !opts.UseWispsTable {
+		if err := issueops.BumpDependencySourceRevisionsForTargetsInTx(ctx, r.runner, []string{id}); err != nil {
+			return fmt.Errorf("db: IssueSQLRepository.Delete %s: bump dependency sources: %w", id, err)
+		}
+	}
 	// Edges are journaled before the row goes, while its snapshot can still be
 	// read.
 	if err := issueops.RecordDependencyRemovalsForIssuesInTx(ctx, r.runner, []string{id}, actor); err != nil {
@@ -998,6 +1063,11 @@ func (r *issueSQLRepositoryImpl) DeleteByIDs(ctx context.Context, ids []string, 
 	actualIDs, err := issueops.ExistingIssueIDsInTableInTx(ctx, r.runner, table, ids)
 	if err != nil {
 		return 0, fmt.Errorf("db: IssueSQLRepository.DeleteByIDs resolve existing ids: %w", err)
+	}
+	if !opts.UseWispsTable {
+		if err := issueops.BumpDependencySourceRevisionsForTargetsInTx(ctx, r.runner, actualIDs); err != nil {
+			return 0, fmt.Errorf("db: IssueSQLRepository.DeleteByIDs bump dependency sources: %w", err)
+		}
 	}
 	// Edges are journaled before the rows go, while their source snapshots can
 	// still be read.

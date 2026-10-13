@@ -335,17 +335,45 @@ type UpdateResult struct {
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func UpdateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string) (*UpdateResult, error) {
-	return updateIssueInTx(ctx, tx, id, updates, actor, true)
+	return updateIssueInTx(ctx, tx, id, updates, actor, true, nil)
+}
+
+// updateIssueWithRowLockInTx applies normal update semantics while setting an
+// exact, caller-minted row_lock token. The revision-transition operation uses
+// this so it can store the value actually written in its durable receipt.
+// Ordinary updates continue to mint their own token through UpdateIssueInTx.
+func updateIssueWithRowLockInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, rowLock int64) (*UpdateResult, error) {
+	if rowLock == 0 {
+		return nil, fmt.Errorf("%w: row_lock revision must be nonzero", storage.ErrValidation)
+	}
+	return updateIssueInTx(ctx, tx, id, updates, actor, true, &rowLock)
 }
 
 // UpdateIssueWithoutEventInTx applies normal update semantics without recording
 // an intermediate event. Demotion uses this to preserve the historical event
 // stream: create/update history is copied, then a single demotion event is added.
 func UpdateIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string) (*UpdateResult, error) {
-	return updateIssueInTx(ctx, tx, id, updates, actor, false)
+	return updateIssueInTx(ctx, tx, id, updates, actor, false, nil)
 }
 
-func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool) (*UpdateResult, error) {
+func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool, exactRowLock *int64) (*UpdateResult, error) {
+	return updateIssueAndExactLabelsInTx(ctx, tx, id, updates, actor, recordEvent, exactRowLock, nil)
+}
+
+// updateIssueWithRowLockAndExactLabelsInTx applies scalar/metadata fields and
+// an optional exact labels set as one issue mutation. The caller supplies the
+// exact row revision that is recorded in its durable transition receipt.
+func updateIssueWithRowLockAndExactLabelsInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, exactLabels *[]string, actor string, rowLock int64) (*UpdateResult, error) {
+	if rowLock == 0 {
+		return nil, fmt.Errorf("%w: row_lock revision must be nonzero", storage.ErrValidation)
+	}
+	return updateIssueAndExactLabelsInTx(ctx, tx, id, updates, actor, true, &rowLock, exactLabels)
+}
+
+func updateIssueAndExactLabelsInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool, exactRowLock *int64, exactLabels *[]string) (*UpdateResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.update", []string{id}); err != nil {
+		return nil, err
+	}
 	updates = cloneUpdateFields(updates)
 	// Pop the override before anything reads the map as a set of columns. It
 	// has to come out ahead of the no-op filter too: the filter keeps every key
@@ -355,7 +383,7 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 
 	// Route to correct table.
 	isWisp := IsActiveWispInTx(ctx, tx, id)
-	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
+	issueTable, labelTable, eventTable, _ := WispTableRouting(isWisp)
 
 	// Read the pre-update row inside the transaction and fold any
 	// read-merge-write operations (metadata edits, note appends) into concrete
@@ -392,7 +420,8 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	if err != nil {
 		return nil, err
 	}
-	if len(updates) == 0 {
+	labelsChanged := exactLabels != nil && !sameIssueLabels(oldIssue.Labels, *exactLabels)
+	if len(updates) == 0 && !labelsChanged {
 		return &UpdateResult{OldIssue: oldIssue, IsWisp: isWisp, Changed: false}, nil
 	}
 
@@ -480,7 +509,11 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	// different columns of the same row (see lease.go). This is the "every
 	// mutating path writes row_lock" invariant the lease scheme depends on.
 	setClauses = append(setClauses, "row_lock = ?")
-	args = append(args, freshRowLock())
+	if exactRowLock == nil {
+		args = append(args, freshRowLock())
+	} else {
+		args = append(args, *exactRowLock)
+	}
 
 	args = append(args, id)
 
@@ -495,10 +528,20 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 			return nil, err
 		}
 	}
+	if labelsChanged {
+		if err := setExactIssueLabelsInTx(ctx, tx, labelTable, eventTable, id, oldIssue.Labels, *exactLabels, actor); err != nil {
+			return nil, err
+		}
+	}
 
 	if recordEvent {
 		oldData, _ := json.Marshal(oldIssue)
-		newData, _ := json.Marshal(updates)
+		eventUpdates := updates
+		if labelsChanged {
+			eventUpdates = cloneUpdateFields(updates)
+			eventUpdates["labels"] = append([]string(nil), (*exactLabels)...)
+		}
+		newData, _ := json.Marshal(eventUpdates)
 		eventType := DetermineEventType(oldIssue, updates)
 
 		if err := RecordFullEventInTable(ctx, tx, eventTable, id, eventType, actor, string(oldData), string(newData)); err != nil {
@@ -548,6 +591,80 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		return nil, err
 	}
 	return updateResult, nil
+}
+
+func sameIssueLabels(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func setExactIssueLabelsInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID string, current, next []string, actor string) error {
+	currentSet := make(map[string]struct{}, len(current))
+	nextSet := make(map[string]struct{}, len(next))
+	for _, label := range current {
+		currentSet[label] = struct{}{}
+	}
+	for _, label := range next {
+		nextSet[label] = struct{}{}
+	}
+	for _, label := range current {
+		if _, keep := nextSet[label]; keep {
+			continue
+		}
+		if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.label_remove", []string{issueID}); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE issue_id = ? AND label = ?`, labelTable), issueID, label)
+		if err != nil {
+			return fmt.Errorf("remove exact label %q: %w", label, err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("remove exact label %q: rows affected: %w", label, err)
+		}
+		if rows != 1 {
+			return fmt.Errorf("remove exact label %q: changed %d rows, want 1", label, rows)
+		}
+		if err := InsertDerivedEvent(ctx, tx, eventTable, AuxEvent{
+			IssueID: issueID, EventType: types.EventLabelRemoved, Actor: actor,
+			Comment: str("Removed label: " + label),
+		}); err != nil {
+			return fmt.Errorf("record exact label removal %q: %w", label, err)
+		}
+	}
+	for _, label := range next {
+		if _, exists := currentSet[label]; exists {
+			continue
+		}
+		if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.label_add", []string{issueID}); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, fmt.Sprintf(`INSERT INTO %s (issue_id, label) VALUES (?, ?)`, labelTable), issueID, label)
+		if err != nil {
+			return fmt.Errorf("add exact label %q: %w", label, err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("add exact label %q: rows affected: %w", label, err)
+		}
+		if rows != 1 {
+			return fmt.Errorf("add exact label %q: changed %d rows, want 1", label, rows)
+		}
+		if err := InsertDerivedEvent(ctx, tx, eventTable, AuxEvent{
+			IssueID: issueID, EventType: types.EventLabelAdded, Actor: actor,
+			Comment: str("Added label: " + label),
+		}); err != nil {
+			return fmt.Errorf("record exact label addition %q: %w", label, err)
+		}
+	}
+	return nil
 }
 
 func cloneUpdateFields(updates map[string]interface{}) map[string]interface{} {

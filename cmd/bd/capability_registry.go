@@ -622,6 +622,11 @@ func validateProxyRegistryBeforeProvider(cmd *cobra.Command, topology ProxyTopol
 	if cmd == nil {
 		return nil
 	}
+	// Conditional lifecycle writes require the local transactional roles.
+	// Refuse before opening a proxy or starting its managed provider.
+	if cmd.Flags().Lookup("if-revision") != nil && cmd.Flags().Changed("if-revision") {
+		return reportRevisionUnsupported("--if-revision is not supported in proxied-server mode")
+	}
 	// `compact` is the one rule that a flag VALUE decides rather than a flag's
 	// presence, so it cannot be expressed as an arg-set row. `bd compact` and
 	// `bd rules compact` have no --dolt flag at all and are never refused here;

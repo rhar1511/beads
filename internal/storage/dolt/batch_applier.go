@@ -3,6 +3,8 @@ package dolt
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 
 	"github.com/steveyegge/beads/internal/storage"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
@@ -45,6 +47,24 @@ var _ issueops.BatchApplier = (*batchApplier)(nil)
 // path has no verify-by-re-read recovery. A nil return is therefore not a retry
 // signal: the mutations already applied, and retrying would double-apply.
 func (o *batchApplier) ApplyBatch(ctx context.Context, request issueops.ApplyBatchRequest) (issueops.ApplyBatchResult, error) {
+	if request.ReceiptID != "" {
+		digest, err := storage.BatchApplyReceiptDigest(request)
+		if err != nil {
+			return issueops.ApplyBatchResult{}, err
+		}
+		var replay issueops.ApplyBatchResult
+		var found bool
+		if err := o.store.withReadTx(ctx, func(tx *sql.Tx) error {
+			var err error
+			replay, found, err = storageissueops.PreflightBatchApplyReceiptInTx(ctx, tx, request.ReceiptID, digest)
+			return err
+		}); err != nil {
+			return issueops.ApplyBatchResult{}, err
+		}
+		if found {
+			return replay, nil
+		}
+	}
 	plan, err := storage.PlanApplyBatch(request)
 	if err != nil {
 		return issueops.ApplyBatchResult{}, err
@@ -60,6 +80,24 @@ func (o *batchApplier) ApplyBatch(ctx context.Context, request issueops.ApplyBat
 		return write.Tables, storageissueops.ApplyBatchCommitMessage(plan, attempt, write), nil
 	})
 	if err != nil {
+		if plan.ReceiptID != "" {
+			var winner issueops.ApplyBatchResult
+			var found bool
+			reconcileErr := o.store.withReadTx(ctx, func(tx *sql.Tx) error {
+				var readErr error
+				winner, found, readErr = storageissueops.PreflightBatchApplyReceiptInTx(ctx, tx, plan.ReceiptID, plan.RequestDigest)
+				return readErr
+			})
+			if reconcileErr != nil {
+				return issueops.ApplyBatchResult{}, reconcileErr
+			}
+			if found {
+				return winner, nil
+			}
+			if errors.Is(err, storageissueops.ErrBatchApplyReceiptRace) {
+				return issueops.ApplyBatchResult{}, fmt.Errorf("batch apply receipt %s raced but no committed winner was visible: %w", plan.ReceiptID, err)
+			}
+		}
 		return issueops.ApplyBatchResult{}, err
 	}
 	return result, nil

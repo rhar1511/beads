@@ -55,6 +55,11 @@ func (u *baseUOW) Commit(ctx context.Context, message string) error {
 	return u.tx.Commit(ctx, message)
 }
 
+// protectedMutationRunner exposes the active transaction only to internal
+// protected-record checks. UnitOfWork's public interface stays unchanged, and
+// decorators are peeled only by the protected mutation helpers in this package.
+func (u *baseUOW) protectedMutationRunner() db.Runner { return u.tx.Runner() }
+
 func (u *baseUOW) Close(ctx context.Context) {
 	u.tx.RollbackUnlessCommitted(ctx)
 }
@@ -90,6 +95,7 @@ func (u *baseUOW) IssueUseCase() domain.IssueUseCase {
 			db.NewEventsSQLRepository(runner),
 			u.LabelUseCase(),
 			u.DependencyUseCase(),
+			protectedResolvedDeletionHook(runner),
 		)
 	}
 	return u.issueUseCase

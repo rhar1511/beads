@@ -31,6 +31,9 @@ type BatchContext struct {
 	// issue for a result the caller discards. Singular creates leave this
 	// false so they keep reconciling immediately, per-issue.
 	SkipChildCounterReconcile bool
+	// SkipRowVersionReadback lets the batch entry point defer each issue's
+	// readback until all cross-issue dependencies have been persisted.
+	SkipRowVersionReadback bool
 }
 
 // NewBatchContext reads config from the database and returns a BatchContext.
@@ -107,6 +110,9 @@ func mergeChangedTables(dst map[string]bool, src map[string]bool) map[string]boo
 
 func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, issue *types.Issue, actor string) (CreateIssueResult, error) {
 	var result CreateIssueResult
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.create", CreateMutationResourceIDs([]*types.Issue{issue})); err != nil {
+		return result, err
+	}
 	if err := PrepareIssueForInsert(issue, bc.CustomStatuses, bc.CustomTypes); err != nil {
 		return result, err
 	}
@@ -204,6 +210,11 @@ func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, i
 			return result, err
 		}
 	}
+	if !bc.SkipRowVersionReadback {
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT row_lock FROM %s WHERE id = ?", issueTable), issue.ID).Scan(&issue.RowVersion); err != nil {
+			return result, fmt.Errorf("read final row version for %s: %w", issue.ID, err)
+		}
+	}
 	return result, nil
 }
 
@@ -292,6 +303,9 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 			return CreateIssuesResult{}, err
 		}
 	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.create", CreateMutationResourceIDs(issues)); err != nil {
+		return CreateIssuesResult{}, err
+	}
 
 	// This function already runs a slice-wide ReconcileChildCounters below,
 	// covering every accepted issue; skip the redundant per-issue reconcile.
@@ -299,6 +313,7 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 	// reconcile behavior.
 	batch := *bc
 	batch.SkipChildCounterReconcile = true
+	batch.SkipRowVersionReadback = true
 
 	result := CreateIssuesResult{}
 	accepted := issues[:0:0]
@@ -343,7 +358,34 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 	if recomputed.WispRowsChanged {
 		result.markChanged("wisps")
 	}
+	// Auxiliary aggregate writes (notably dependency creation) may remint the
+	// token after the row insert. Return the final in-transaction token on each
+	// caller-owned Issue so an immediate guarded mutation does not start stale.
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		table, _ := TableRouting(issue)
+		//nolint:gosec // G201: table comes from TableRouting.
+		if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT row_lock FROM %s WHERE id = ?", table), issue.ID).Scan(&issue.RowVersion); err != nil {
+			return CreateIssuesResult{}, fmt.Errorf("read final row version for %s: %w", issue.ID, err)
+		}
+	}
 	return result, nil
+}
+
+func CreateMutationResourceIDs(issues []*types.Issue) []string {
+	var ids []string
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		ids = append(ids, issue.ID)
+		for _, dependency := range issue.Dependencies {
+			ids = append(ids, dependency.IssueID, dependency.DependsOnID)
+		}
+	}
+	return ids
 }
 
 // CreateIssueDirtyTables returns the regular Dolt tables CreateIssueInTx may
@@ -844,6 +886,9 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			continue
 		}
 		for _, dep := range issue.Dependencies {
+			if dep.IssueID != "" && dep.IssueID != issue.ID {
+				return result, fmt.Errorf("%w: create dependency source %s must match created issue %s", storage.ErrValidation, dep.IssueID, issue.ID)
+			}
 			// Default IssueID to the owning issue when not pre-set (e.g.,
 			// markdown bulk create where the ID is auto-generated).
 			if dep.IssueID == "" {
@@ -933,6 +978,17 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			}
 			if rowsAffected > 0 {
 				result.markChanged(item.depTable)
+				if item.depTable == "dependencies" {
+					// A dependency is part of its permanent source's work snapshot.
+					// Import can merge aux data onto an existing row even when the
+					// incoming issue timestamp is tied or older, so remint the owner
+					// token only after a genuinely inserted edge. The enclosing create
+					// transaction also owns the issues table stage.
+					if err := BumpIssueRevisionInTx(ctx, tx, dep.IssueID, false); err != nil {
+						return result, fmt.Errorf("bump dependency source revision for %s: %w", dep.IssueID, err)
+					}
+					result.markChanged("issues")
+				}
 				result.persistedDependencies = append(result.persistedDependencies, persistedDependency{
 					source:     dep.IssueID,
 					target:     dep.DependsOnID,

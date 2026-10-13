@@ -44,7 +44,8 @@ func leaseTTL(ctx context.Context) time.Duration {
 
 // freshRowLock returns a random non-zero int64 for the row_lock cell.
 //
-// row_lock is the keystone of dead-worker recovery on Dolt. Dolt has no real
+// row_lock is the aggregate revision and the keystone of dead-worker recovery
+// on Dolt. Dolt has no real
 // row locking and merges concurrent commits cell-by-cell, so two transactions
 // that touch DIFFERENT cells of the same issue row (a reclaim writing status,
 // a close writing closed_at) merge silently instead of conflicting — which
@@ -57,34 +58,18 @@ func leaseTTL(ctx context.Context) time.Duration {
 // column default) so a freshly-claimed row is always distinguishable from a
 // never-touched one.
 //
-// INVARIANT: any path that mutates status, assignee, or started_at on an
-// in_progress issue MUST rewrite row_lock — that is the set the reclaim/close
-// races care about (claim, close, updateIssueInTx, reclaim, unclaim all do).
-// Paths that touch only orthogonal cells (is_blocked, compaction_level,
-// dependency metadata, rename, or reopen — which acts on closed rows) are safe
-// to merge with a reclaim and intentionally do NOT rewrite it. Heartbeats no
-// longer touch the issues row at all (bd-lrgn1): the lease lives in the
+// INVARIANT: every supported change to a representable issue aggregate field
+// MUST rewrite row_lock. This includes scalar and lifecycle fields, labels,
+// outgoing dependency edges, derived is_blocked state, compaction/restoration,
+// and rename. Exact no-ops do not rewrite it. Comments and metadata changes
+// also remint the token even when the current Gas City WorkDigest omits the
+// changed comment or a decision-frontier hold/receipt metadata key. Those are
+// conservative invalidations: keeping the token rule independent of metadata
+// keys avoids a caller-specific filter silently missing a real work change.
+// Heartbeats do not touch the issue row (bd-lrgn1): the lease lives in the
 // ephemeral leases table, where a racing heartbeat and reclaim contend on the
-// SAME lease row and conflict without any help. Adding a new path that sets
-// status/assignee outside updateIssueInTx without rewriting row_lock would
-// silently reintroduce the zombie-merge bug.
-//
-// The exemptions are load-bearing in the OTHER direction too (analysis
-// absorbed from gastownhall/beads#4682, Julian Knutsen): row_lock doubles as
-// the RowVersion optimistic-concurrency token (types.Issue.RowVersion), so a
-// path that reminted it WITHOUT changing the content a CAS holder cares about
-// would spuriously fail honest ExpectedVersion checks. The is_blocked
-// recompute is the canonical case: it is a denormalized aux-marker refresh
-// that already goes out of its way to preserve updated_at
-// (blocked_state.go), and bumping the token there would clobber a concurrent
-// whole-row CAS over a cell derived from OTHER rows. (The PR's second
-// exemption of this kind, the lease heartbeat, no longer arises here — since
-// bd-lrgn1 heartbeats never touch the issues row at all.) So the invariant
-// cuts both ways: status/ownership writes MUST remint, aux-marker writes MUST
-// NOT. The remint direction is enforced at build time by
-// TestAllIssueRowWritesStampRowLock (row_lock_guard_test.go), whose exemption
-// markers are the machine-readable form of this list — widen the stamping
-// policy there first, not by ad-hoc stamps.
+// same lease row. Every row writer, including derived-state recomputation, is
+// checked by TestAllIssueRowWritesStampRowLock (row_lock_guard_test.go).
 func freshRowLock() int64 {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -116,6 +101,30 @@ func RowLockClause() (string, []interface{}) {
 // like the classic insert (see the freshRowLock invariant and types.Issue.RowVersion).
 func FreshRowLock() int64 {
 	return freshRowLock()
+}
+
+// TouchRowVersionInTx remints the aggregate revision for issueID in the same
+// transaction as an auxiliary-table mutation. issueTable is the already
+// resolved "issues" or "wisps" plane that owns the auxiliary row; resolving it
+// again on another Dolt session can route a wisp mutation to the durable plane.
+// Call it only after a genuine mutation; no-ops keep the token stable.
+func TouchRowVersionInTx(ctx context.Context, tx DBTX, issueTable, issueID string) error {
+	if issueTable != "issues" && issueTable != "wisps" {
+		return fmt.Errorf("touch row version for %s: invalid issue table %q", issueID, issueTable)
+	}
+	//nolint:gosec // G201: issueTable is validated above.
+	result, err := tx.ExecContext(ctx, fmt.Sprintf("UPDATE %s SET row_lock = ?, updated_at = updated_at WHERE id = ?", issueTable), freshRowLock(), issueID)
+	if err != nil {
+		return fmt.Errorf("touch row version for %s: %w", issueID, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("touch row version for %s: rows affected: %w", issueID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: issue %s", storage.ErrNotFound, issueID)
+	}
+	return nil
 }
 
 // LeaseTTL is the exported form of leaseTTL: it resolves the lease TTL for the
@@ -300,6 +309,9 @@ func RestoreLeaseOnImportInTx(ctx context.Context, tx DBTX, issue *types.Issue, 
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func HeartbeatIssueInTx(ctx context.Context, tx DBTX, id, actor string) error {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.heartbeat", []string{id}); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	// granted_node is backfilled, never overwritten: a lease row whose
 	// provenance is unknown (granted before ignored migration 0016, or before
@@ -727,6 +739,13 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 
 	if len(stale) == 0 {
 		return nil, nil
+	}
+	staleIDs := make([]string, 0, len(stale))
+	for _, candidate := range stale {
+		staleIDs = append(staleIDs, candidate.ID)
+	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.reclaim", staleIDs); err != nil {
+		return nil, err
 	}
 
 	var reclaimed []types.ReclaimedLease

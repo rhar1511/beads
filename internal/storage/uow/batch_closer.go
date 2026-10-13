@@ -2,6 +2,7 @@ package uow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/steveyegge/beads/internal/storage/domain"
@@ -61,6 +62,17 @@ func (o *batchCloser) CloseBatch(ctx context.Context, request publicops.CloseBat
 	}
 
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.CloseBatchResult, string, error) {
+		digest, err := publicops.ProtectedMutationDigest(request)
+		if err != nil {
+			return publicops.CloseBatchResult{}, "", err
+		}
+		ids := make([]string, 0, len(request.Items))
+		for _, item := range request.Items {
+			ids = append(ids, item.IssueID)
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, request.ProtectedPermit, "issue.batch_close", ids, digest, ""); err != nil && !errors.Is(err, publicops.ErrProtectedRecord) {
+			return publicops.CloseBatchResult{}, "", err
+		}
 		result := publicops.CloseBatchResult{Outcomes: make([]publicops.CloseOutcome, len(request.Items))}
 		landed := 0
 		for i, item := range request.Items {
@@ -89,6 +101,21 @@ func (o *batchCloser) CloseBatch(ctx context.Context, request publicops.CloseBat
 // it. The resolve and the close share the batch's transaction, so the
 // is_blocked guard the checked close runs has no read-then-write window.
 func closeBatchItem(ctx context.Context, uw UnitOfWork, request publicops.CloseBatchRequest, item publicops.BatchCloseItem) publicops.CloseOutcome {
+	closeRequest := publicops.CloseRequest{
+		Actor:           request.Actor,
+		ProtectedPermit: request.ProtectedPermit,
+		IssueID:         item.IssueID,
+		Reason:          item.Reason,
+		Session:         request.Session,
+		Force:           request.Force,
+	}
+	digest, err := publicops.ProtectedMutationDigest(closeRequest)
+	if err != nil {
+		return publicops.CloseOutcome{IssueID: item.IssueID, Err: err}
+	}
+	if err := requireProtectedUOWMutation(ctx, uw, request.ProtectedPermit, "issue.close", []string{item.IssueID}, digest, ""); err != nil {
+		return publicops.CloseOutcome{IssueID: item.IssueID, Err: err}
+	}
 	current, isWisp, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), item.IssueID)
 	if err != nil {
 		return publicops.CloseOutcome{IssueID: item.IssueID, Err: err}

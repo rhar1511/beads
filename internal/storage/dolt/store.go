@@ -1173,6 +1173,7 @@ func (s *DoltStore) withRetryTx(ctx context.Context, fn func(tx *sql.Tx) error) 
 	}
 	var pending issueops.BlockedRecheck
 	if err := backoff.Retry(func() error {
+		issueops.ResetProtectedMutationAttempt(ctx)
 		var err error
 		pending, err = s.commitWriteTx(ctx, fn)
 		if err == nil {
@@ -1241,6 +1242,11 @@ func (s *DoltStore) commitWriteTx(ctx context.Context, fn func(tx *sql.Tx) error
 	if s.closed.Load() {
 		return issueops.BlockedRecheck{}, ErrStoreClosed
 	}
+	// Authorization cache entries are valid only inside one SQL transaction.
+	// Callers may reuse a context across requests, so clear any prior success
+	// before opening a new write transaction. Retry wrappers also reset before
+	// each attempt; the duplicate reset happens before the body and is harmless.
+	issueops.ResetProtectedMutationAttempt(ctx)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return issueops.BlockedRecheck{}, fmt.Errorf("begin write tx: %w", err)

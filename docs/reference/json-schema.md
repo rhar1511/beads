@@ -207,6 +207,11 @@ items, plus:
   nonzero and `comments` was left out of the response (no `--include-comments`).
   Absent when comments were included or when there are none to omit (ga-clgh)
 
+Ordinary guarded writes use `--if-revision`; their mismatch envelope uses
+numeric signed 64-bit `expected_revision` and `current_revision` fields.
+See [Conditional issue writes](/reference/conditional-writes) for exit codes and
+the distinction between a policy refusal and unsupported capability.
+
 ### `import --json`
 
 Returns a summary object when `--json` is active:

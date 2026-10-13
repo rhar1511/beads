@@ -71,6 +71,26 @@ func (c checkedReader) Get(ctx context.Context, req issueops.GetRequest) (*issue
 	return details, err
 }
 
+type checkedSourceSnapshotReader struct {
+	inner issueops.SourceSnapshotReader
+}
+
+func (c checkedSourceSnapshotReader) ReadSourceSnapshot(ctx context.Context, id string) (*issueops.SourceSnapshot, error) {
+	snapshot, err := c.inner.ReadSourceSnapshot(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil || snapshot.Issue == nil || snapshot.Issue.ID != id || snapshot.Issue.RowVersion == 0 || snapshot.OutgoingDependencies == nil {
+		return nil, fmt.Errorf("source snapshot: role returned an incomplete durable snapshot")
+	}
+	for i, edge := range snapshot.OutgoingDependencies {
+		if edge == nil || edge.IssueID != id {
+			return nil, fmt.Errorf("source snapshot: role returned an invalid outgoing dependency at index %d", i)
+		}
+	}
+	return snapshot, nil
+}
+
 // checkedBatchCreator is the creator the batch-create handler is handed.
 //
 // The response body carries issue VALUES where the role answers with pointers,

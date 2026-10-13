@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -78,6 +79,9 @@ func (r *dependencySQLRepositoryImpl) Insert(ctx context.Context, dep *types.Dep
 	if dep.DependsOnID == "" {
 		return errors.New("db: DependencySQLRepository.Insert: DependsOnID must not be empty")
 	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "dependency.add", []string{dep.IssueID, dep.DependsOnID}); err != nil {
+		return err
+	}
 	if dep.IssueID == dep.DependsOnID {
 		// Lead with the sentinel so this defensive repo-layer guard renders like
 		// every other self-dep site ("cannot add self-dependency: X cannot depend
@@ -109,21 +113,45 @@ func (r *dependencySQLRepositoryImpl) Insert(ctx context.Context, dep *types.Dep
 	}
 	table := pickDepTable(opts.UseWispsTable)
 
-	var existingType string
+	var existingType, existingMetadata string
 	err := r.runner.QueryRowContext(ctx,
 		//nolint:gosec // G201: table and depTargetExpr are hardcoded constants
-		fmt.Sprintf("SELECT type FROM %s WHERE issue_id = ? AND %s = ?", table, depTargetExpr),
+		fmt.Sprintf("SELECT type, COALESCE(metadata, '{}') FROM %s WHERE issue_id = ? AND %s = ?", table, depTargetExpr),
 		dep.IssueID, dep.DependsOnID,
-	).Scan(&existingType)
+	).Scan(&existingType, &existingMetadata)
 	switch {
 	case err == nil:
 		if existingType == string(dep.Type) {
+			existingValue, requestedValue := json.RawMessage(existingMetadata), json.RawMessage(metadata)
+			equal, err := storage.MetadataValuesEqual(&existingValue, &requestedValue)
+			if err != nil {
+				return fmt.Errorf("db: DependencySQLRepository.Insert: compare metadata: %w", err)
+			}
+			if equal {
+				return nil
+			}
 			//nolint:gosec // G201: table and depTargetExpr are hardcoded constants
 			if _, err := r.runner.ExecContext(ctx,
 				fmt.Sprintf("UPDATE %s SET metadata = ? WHERE issue_id = ? AND %s = ?", table, depTargetExpr),
 				metadata, dep.IssueID, dep.DependsOnID,
 			); err != nil {
 				return fmt.Errorf("db: DependencySQLRepository.Insert: refresh metadata: %w", err)
+			}
+			if err := issueops.BumpIssueRevisionInTx(ctx, r.runner, dep.IssueID, opts.UseWispsTable); err != nil {
+				return fmt.Errorf("db: DependencySQLRepository.Insert: bump source revision: %w", err)
+			}
+			var affectedIssues, affectedWisps []string
+			var affectedErr error
+			if opts.UseWispsTable {
+				affectedIssues, affectedWisps, affectedErr = issueops.AffectedByDepChangeForWispInTx(ctx, r.runner, dep.IssueID, dep.DependsOnID, dep.Type)
+			} else {
+				affectedIssues, affectedWisps, affectedErr = issueops.AffectedByDepChangeInTx(ctx, r.runner, dep.IssueID, dep.DependsOnID, dep.Type)
+			}
+			if affectedErr != nil {
+				return fmt.Errorf("db: DependencySQLRepository.Insert: affected set after metadata update: %w", affectedErr)
+			}
+			if _, err := issueops.RecomputeIsBlockedInTxWithResult(ctx, r.runner, affectedIssues, affectedWisps); err != nil {
+				return fmt.Errorf("db: DependencySQLRepository.Insert: recompute is_blocked after metadata update: %w", err)
 			}
 			// A same-type add refreshes edge metadata. It is an observable graph
 			// mutation, so emit the complete replacement edge for replay.
@@ -161,12 +189,14 @@ func (r *dependencySQLRepositoryImpl) Insert(ctx context.Context, dep *types.Dep
 		}
 		return fmt.Errorf("db: DependencySQLRepository.Insert: %w", err)
 	}
+	if err := issueops.BumpIssueRevisionInTx(ctx, r.runner, dep.IssueID, opts.UseWispsTable); err != nil {
+		return fmt.Errorf("db: DependencySQLRepository.Insert: bump source revision: %w", err)
+	}
 	if dep.Type == types.DepParentChild {
 		if err := issueops.TouchDependencyCoordinationTableInTx(ctx, r.runner, dep.DependsOnID, table); err != nil {
 			return fmt.Errorf("db: DependencySQLRepository.Insert: %w", err)
 		}
 	}
-
 	// Record the dependency_added event on the source's event table, matching the
 	// embedded/issueops AddDependencyInTx path so the bd CLI and library callers
 	// observe the same history from either write plumbing. Reached only on the
@@ -317,7 +347,7 @@ func (r *dependencySQLRepositoryImpl) markDirectBlockedSource(ctx context.Contex
 
 	//nolint:gosec // G201: sourceTable/targetTable are hardcoded constants
 	_, err := r.runner.ExecContext(ctx, fmt.Sprintf(`
-		UPDATE %s s SET s.is_blocked = 1, s.updated_at = s.updated_at
+		UPDATE %s s SET s.is_blocked = 1, s.row_lock = ?, s.updated_at = s.updated_at
 		WHERE s.id = ?
 		  AND s.is_blocked = 0
 		  AND s.status <> 'closed' AND s.status <> 'pinned'
@@ -326,13 +356,16 @@ func (r *dependencySQLRepositoryImpl) markDirectBlockedSource(ctx context.Contex
 		    WHERE t.id = ?
 		      AND t.status <> 'closed' AND t.status <> 'pinned'
 		  )
-	`, sourceTable, targetTable), source, target)
+	`, sourceTable, targetTable), issueops.FreshRowLock(), source, target)
 	return err
 }
 
 func (r *dependencySQLRepositoryImpl) Delete(ctx context.Context, issueID, dependsOnID, actor string, opts domain.DepInsertOpts) (domain.DepDeleteResult, error) {
 	if issueID == "" || dependsOnID == "" {
 		return domain.DepDeleteResult{}, errors.New("db: DependencySQLRepository.Delete: issueID and dependsOnID must not be empty")
+	}
+	if err := issueops.RefuseUnpermittedProtectedMutationInTx(ctx, r.runner, "dependency.remove", []string{issueID, dependsOnID}); err != nil {
+		return domain.DepDeleteResult{}, err
 	}
 	table := pickDepTable(opts.UseWispsTable)
 
@@ -355,6 +388,9 @@ func (r *dependencySQLRepositoryImpl) Delete(ctx context.Context, issueID, depen
 		issueID, dependsOnID,
 	); err != nil {
 		return domain.DepDeleteResult{}, fmt.Errorf("db: DependencySQLRepository.Delete: %s -> %s: %w", issueID, dependsOnID, err)
+	}
+	if err := issueops.BumpIssueRevisionInTx(ctx, r.runner, issueID, opts.UseWispsTable); err != nil {
+		return domain.DepDeleteResult{}, fmt.Errorf("db: DependencySQLRepository.Delete: bump source revision: %w", err)
 	}
 
 	// The type lookup above returned Found:false when no edge existed, so reaching
@@ -792,6 +828,11 @@ func (r *dependencySQLRepositoryImpl) DeleteAllForIDs(ctx context.Context, ids [
 		if err := issueops.RecordDependencyRemovalsForTableInTx(ctx, r.runner, table, batch, actor); err != nil {
 			return total, fmt.Errorf("db: DependencySQLRepository.DeleteAllForIDs journal removals from %s: %w", table, err)
 		}
+		if !opts.UseWispsTable {
+			if err := issueops.BumpDependencySourceRevisionsForIDsInTx(ctx, r.runner, batch); err != nil {
+				return total, fmt.Errorf("db: DependencySQLRepository.DeleteAllForIDs bump source revisions: %w", err)
+			}
+		}
 		//nolint:gosec // G201: table is one of two hardcoded constants; ? placeholders only.
 		res, err := r.runner.ExecContext(ctx,
 			fmt.Sprintf("DELETE FROM %s WHERE issue_id IN (%s) OR %s IN (%s)", table, ph, issueops.DepTargetExpr, ph),
@@ -998,6 +1039,17 @@ func (r *dependencySQLRepositoryImpl) GetDependencyRecordsForIssues(ctx context.
 	out, err := issueops.GetDependencyRecordsForIssuesInTx(ctx, r.runner, issueIDs)
 	if err != nil {
 		return nil, fmt.Errorf("db: DependencySQLRepository.GetDependencyRecordsForIssues: %w", err)
+	}
+	return out, nil
+}
+
+func (r *dependencySQLRepositoryImpl) GetDurableDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error) {
+	if len(issueIDs) == 0 {
+		return map[string][]*types.Dependency{}, nil
+	}
+	out, err := issueops.GetDependencyRecordsForIssuesFromTableInTx(ctx, r.runner, "dependencies", issueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("db: DependencySQLRepository.GetDurableDependencyRecordsForIssues: %w", err)
 	}
 	return out, nil
 }

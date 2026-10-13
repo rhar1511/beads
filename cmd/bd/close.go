@@ -42,6 +42,9 @@ the flags appear in the command line.`,
 	// PersistentPreRunE can open the store, migrate, or auto-import
 	// (bd-m00pb); see updateCmd for the full rationale.
 	Args: func(cmd *cobra.Command, args []string) error {
+		if err := validateRevisionArguments(cmd, args, 1); err != nil {
+			return err
+		}
 		if len(args) == 0 && !AllowLastTouchedFallback() {
 			return HandleErrorRespectJSON("no issue ID provided (the last-touched fallback only applies in interactive sessions; pass an explicit issue ID or set BD_LAST_TOUCHED_FALLBACK=1)")
 		}
@@ -59,7 +62,11 @@ the flags appear in the command line.`,
 			}
 		}()
 
+		expectedVersion := ifRevisionPrecondition(cmd)
 		if usesProxiedServer() {
+			if expectedVersion != nil {
+				return reportRevisionUnsupported("--if-revision is not supported against a proxied server")
+			}
 			return runCloseProxiedServer(cmd, rootCtx, args)
 		}
 
@@ -77,6 +84,9 @@ the flags appear in the command line.`,
 			return HandleErrorRespectJSON("%v", err)
 		}
 		args = updatedArgs
+		if expectedVersion != nil && len(args) != 1 {
+			return HandleErrorRespectJSON("--if-revision requires exactly one explicit issue ID")
+		}
 
 		if err := validateCloseReasons(reasons); err != nil {
 			return HandleErrorRespectJSON("%v", err)
@@ -139,8 +149,52 @@ the flags appear in the command line.`,
 		// there too (GH#962), so there is no read-then-write TOCTOU window
 		// between the check and the close.
 		plan := closeDirectPreflight(results, resolvedIDs, reasons, force)
-		outcomes, claimedNext := closeDirectRun(opsCtx, closeDirectBatches(plan.items), len(resolvedIDs),
-			session, force, postCloseStore, closeClaimNextRequest(claimNext, continueFlag))
+		var outcomes []*issueops.CloseOutcome
+		var claimedNext *types.IssueWithCounts
+		if expectedVersion == nil {
+			outcomes, claimedNext = closeDirectRun(opsCtx, closeDirectBatches(plan.items), len(resolvedIDs),
+				session, force, postCloseStore, closeClaimNextRequest(claimNext, continueFlag))
+		} else {
+			if plan.refusals[0] != "" {
+				return reportRevisionRefusal(fmt.Errorf("%s", plan.refusals[0]))
+			}
+			if err := revisionWriteReady(ctx, postCloseStore); err != nil {
+				return err
+			}
+			ops, err := writeOps(postCloseStore)
+			if err != nil {
+				return mapRevisionWriteError("closing "+resolvedIDs[0], err)
+			}
+			// A revision fences this named close, never a later workflow claim.
+			// Resolve the follow-up capability before any mutation. Unguarded
+			// close retains its atomic batch+claim path; the guarded primitive
+			// uses Lifecycle.Close and each follow-up's own transaction.
+			nextRequest := closeClaimNextRequest(claimNext, continueFlag)
+			var nextClaimer issueops.ReadyClaimer
+			if nextRequest != nil {
+				nextClaimer, err = postCloseStore.ReadyClaimer()
+				if err != nil {
+					return mapRevisionWriteError("preparing next claim", err)
+				}
+			}
+			closed, err := ops.Close(opsCtx, issueops.CloseRequest{
+				Actor: actor, IssueID: resolvedIDs[0], Reason: reasonForCloseIndex(reasons, 0),
+				Session: session, Force: force, ExpectedVersion: expectedVersion,
+			})
+			if err != nil {
+				return mapRevisionWriteError("closing "+resolvedIDs[0], err)
+			}
+			outcomes = []*issueops.CloseOutcome{{IssueID: resolvedIDs[0], Issue: closed.Issue, Changed: closed.Changed, OpenChildren: closed.OpenChildren}}
+			if nextClaimer != nil && closed.Changed {
+				next, err := nextClaimer.ClaimNext(opsCtx, issueops.ClaimNextRequest{Actor: actor, Filter: *nextRequest})
+				if err != nil {
+					// Close already succeeded: do not emit a did-not-mutate
+					// precondition/capability refusal for a later failure.
+					return HandleErrorRespectJSON("close succeeded; claiming next issue failed: %v", err)
+				}
+				claimedNext = next.Claimed
+			}
+		}
 
 		// Report and follow up on every argument, in the order it was typed.
 		closedIssues := []*types.Issue{}
@@ -481,6 +535,7 @@ func reportCloseFailures(failures []closeIDFailure, total int, claimedNextID str
 }
 
 func init() {
+	registerRevisionPrecondition(closeCmd)
 	registerCloseReasonFlag(closeCmd)
 	closeCmd.Flags().String("resolution", "", "Alias for --reason (Jira CLI convention)")
 	_ = closeCmd.Flags().MarkHidden("resolution") // Hidden alias for agent/CLI ergonomics

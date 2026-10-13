@@ -77,6 +77,12 @@ var ErrAssigneeMismatch = errors.New("assignee mismatch")
 // beside Releaser: both refusals answer "whose claim is this".
 var ErrNotOwner = errors.New("issue claimed by a different actor")
 
+// ErrProtectedRecord is returned when an operation touches an explicitly
+// classified record without a valid, transaction-scoped protected-mutation
+// permit. It is independent of actor strings, HTTP authentication, and row
+// version checks.
+var ErrProtectedRecord = errors.New("protected record mutation refused")
+
 // The namespace-neutral part of this vocabulary is declared by beadserrors and
 // re-exported here. These are ALIASES, so they are the same values: every
 // existing issueops.ErrX reference and every errors.Is site keeps matching the
@@ -170,6 +176,34 @@ func (e *AlreadyIdentifiedError) Unwrap() error { return ErrAlreadyIdentified }
 // concurrency failure. Callers errors.Is it to distinguish a lost-update
 // precondition from other errors.
 var ErrVersionMismatch = errors.New("version mismatch")
+
+// VersionMismatchError carries the tokens compared inside the mutation's
+// transaction. A caller can report the lost precondition without parsing prose
+// or performing a later read that might observe another writer's state.
+type VersionMismatchError struct {
+	IssueID         string
+	ExpectedVersion int64
+	CurrentVersion  int64
+}
+
+func (e *VersionMismatchError) Error() string {
+	return fmt.Sprintf("%v: expected %d, got %d", ErrVersionMismatch, e.ExpectedVersion, e.CurrentVersion)
+}
+
+// Unwrap preserves the existing errors.Is contract and human-readable message.
+func (e *VersionMismatchError) Unwrap() error { return ErrVersionMismatch }
+
+// ErrRevisionPatchPreconditionFailed is returned when the source revision is
+// current but one or more exact patch values no longer match the request.
+var ErrRevisionPatchPreconditionFailed = errors.New("revision patch precondition failed")
+
+// ErrTransitionReceiptConflict is returned when a receipt ID was already
+// committed for a different revision-transition request.
+var ErrTransitionReceiptConflict = errors.New("revision transition receipt conflict")
+
+// ErrBatchApplyReceiptConflict is returned when a durable batchApply receipt
+// ID is already bound to a different canonical request.
+var ErrBatchApplyReceiptConflict = errors.New("batch apply receipt conflict")
 
 // ErrStatusMismatch is returned by UpdateIssueChecked given an ExpectedStatus
 // that no longer matches the issue's current status. The caller's view of the

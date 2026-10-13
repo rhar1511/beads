@@ -2,12 +2,16 @@ package versioncontrolops
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/types"
 )
 
 // validTablePattern matches valid SQL table names (letters, digits, underscores).
@@ -163,7 +167,6 @@ func ResolveConflicts(ctx context.Context, db DBConn, table, strategy string) er
 	if err := validateTableName(table); err != nil {
 		return fmt.Errorf("invalid table name: %w", err)
 	}
-
 	var query string
 	switch strategy {
 	case "ours":
@@ -173,11 +176,172 @@ func ResolveConflicts(ctx context.Context, db DBConn, table, strategy string) er
 	default:
 		return fmt.Errorf("unknown conflict resolution strategy: %s", strategy)
 	}
+	var dependencyFence dependencyConflictFence
+	if table == "dependencies" {
+		var err error
+		dependencyFence, err = prepareDependencyConflictFence(ctx, db)
+		if err != nil {
+			return fmt.Errorf("prepare dependency conflict revision fence: %w", err)
+		}
+	}
 
 	if _, err := db.ExecContext(ctx, query); err != nil {
 		return fmt.Errorf("resolve conflicts: %w", err)
 	}
+	if table == "dependencies" {
+		if err := finishDependencyConflictFence(ctx, db, dependencyFence); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+type dependencyConflictEdge struct {
+	source string
+	target string
+	kind   types.DependencyType
+}
+
+type dependencyConflictFence struct {
+	sources []string
+	edges   []dependencyConflictEdge
+}
+
+// prepareDependencyConflictFence gathers both sides of every dependency
+// conflict before Dolt resolves them. A strategy may replace or remove any
+// edge, so each surviving permanent source gets a new revision and the
+// affected blocked-state closure is recomputed after resolution.
+func prepareDependencyConflictFence(ctx context.Context, db DBConn) (dependencyConflictFence, error) {
+	var fence dependencyConflictFence
+	rows, err := db.QueryContext(ctx, `
+		SELECT our_issue_id, their_issue_id,
+		       our_depends_on_issue_id, their_depends_on_issue_id,
+		       our_depends_on_wisp_id, their_depends_on_wisp_id,
+		       our_depends_on_external, their_depends_on_external,
+		       our_type, their_type
+		FROM dolt_conflicts_dependencies`)
+	if err != nil {
+		return fence, fmt.Errorf("query dependency conflict rows: %w", err)
+	}
+	var edges []dependencyConflictEdge
+	sourceSet := make(map[string]struct{})
+	for rows.Next() {
+		var sourceOurs, sourceTheirs sql.NullString
+		var issueOurs, issueTheirs sql.NullString
+		var wispOurs, wispTheirs sql.NullString
+		var externalOurs, externalTheirs sql.NullString
+		var typeOurs, typeTheirs sql.NullString
+		if err := rows.Scan(&sourceOurs, &sourceTheirs, &issueOurs, &issueTheirs,
+			&wispOurs, &wispTheirs, &externalOurs, &externalTheirs, &typeOurs, &typeTheirs); err != nil {
+			_ = rows.Close()
+			return fence, fmt.Errorf("scan dependency conflict row: %w", err)
+		}
+		for _, side := range []struct {
+			source   sql.NullString
+			issue    sql.NullString
+			wisp     sql.NullString
+			external sql.NullString
+			kind     sql.NullString
+		}{{sourceOurs, issueOurs, wispOurs, externalOurs, typeOurs}, {sourceTheirs, issueTheirs, wispTheirs, externalTheirs, typeTheirs}} {
+			if !side.source.Valid || side.source.String == "" {
+				continue
+			}
+			sourceSet[side.source.String] = struct{}{}
+			if !side.kind.Valid || side.kind.String == "" {
+				continue
+			}
+			target := ""
+			switch {
+			case side.issue.Valid:
+				target = side.issue.String
+			case side.wisp.Valid:
+				target = side.wisp.String
+			case side.external.Valid:
+				target = side.external.String
+			}
+			edges = append(edges, dependencyConflictEdge{
+				source: side.source.String,
+				target: target,
+				kind:   types.DependencyType(side.kind.String),
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fence, fmt.Errorf("iterate dependency conflict rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fence, fmt.Errorf("close dependency conflict rows: %w", err)
+	}
+
+	if len(sourceSet) == 0 {
+		return fence, nil
+	}
+	// Restrict fences to source rows that currently exist. A side can describe
+	// an edge whose source issue was deleted by another merge conflict.
+	sources := make([]string, 0, len(sourceSet))
+	for source := range sourceSet {
+		var exists int
+		err := db.QueryRowContext(ctx, "SELECT 1 FROM issues WHERE id = ?", source).Scan(&exists)
+		if err == nil {
+			sources = append(sources, source)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return fence, fmt.Errorf("check dependency conflict source %s: %w", source, err)
+		}
+	}
+	sort.Strings(sources)
+	fence.sources = sources
+	fence.edges = edges
+	return fence, nil
+}
+
+func finishDependencyConflictFence(ctx context.Context, db DBConn, fence dependencyConflictFence) error {
+	for _, source := range fence.sources {
+		if err := issueops.BumpIssueRevisionInTx(ctx, db, source, false); err != nil {
+			return fmt.Errorf("bump dependency conflict source %s: %w", source, err)
+		}
+	}
+	issueSet := make(map[string]struct{})
+	wispSet := make(map[string]struct{})
+	for _, edge := range fence.edges {
+		if edge.target == "" || !containsSorted(fence.sources, edge.source) {
+			continue
+		}
+		issues, wisps, err := issueops.AffectedByDepChangeInTx(ctx, db, edge.source, edge.target, edge.kind)
+		if err != nil {
+			return fmt.Errorf("find affected rows for dependency conflict %s -> %s: %w", edge.source, edge.target, err)
+		}
+		for _, id := range issues {
+			issueSet[id] = struct{}{}
+		}
+		for _, id := range wisps {
+			wispSet[id] = struct{}{}
+		}
+	}
+	recomputed, err := issueops.RecomputeIsBlockedInTxWithResult(ctx, db, sortedStringSet(issueSet), sortedStringSet(wispSet))
+	if err != nil {
+		return fmt.Errorf("recompute blocked state after dependency conflict resolution: %w", err)
+	}
+	if len(fence.sources) > 0 || recomputed.IssueRowsChanged {
+		if _, err := db.ExecContext(ctx, "CALL DOLT_ADD('issues')"); err != nil {
+			return fmt.Errorf("stage dependency source revisions after conflict resolution: %w", err)
+		}
+	}
+	return nil
+}
+
+func sortedStringSet(values map[string]struct{}) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func containsSorted(values []string, want string) bool {
+	i := sort.SearchStrings(values, want)
+	return i < len(values) && values[i] == want
 }
 
 func validateTableName(table string) error {

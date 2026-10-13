@@ -18,6 +18,13 @@ func MoveIssuePersistenceInTx(ctx context.Context, tx DBTX, current *types.Issue
 	if tx == nil || current == nil || current.ID == "" {
 		return PersistenceMoveResult{}, fmt.Errorf("move issue persistence: issue and transaction are required")
 	}
+	resourceIDs, err := DependencyEndpointsForIDsInTx(ctx, tx, []string{current.ID})
+	if err != nil {
+		return PersistenceMoveResult{}, fmt.Errorf("move issue persistence %s: resolve dependency endpoints: %w", current.ID, err)
+	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.persistence_move", resourceIDs); err != nil {
+		return PersistenceMoveResult{}, err
+	}
 	ephemeral, noHistory, storageClass, err := types.NormalizePersistenceMode(*current, mode)
 	if err != nil {
 		return PersistenceMoveResult{}, err

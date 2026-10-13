@@ -93,6 +93,18 @@ func TestAllMigrationsSQLRecordsContentHashes(t *testing.T) {
 			t.Errorf("version %d content_hash = %q, want %q (sha256 of %s)", mf.version, h, want, mf.name)
 		}
 	}
+
+	if tables := queryDoltCSV(t, dir, "SHOW TABLES LIKE 'issue_transition_receipts'"); len(tables) != 1 {
+		t.Fatalf("migration 0069 did not create issue_transition_receipts; rows=%v", tables)
+	}
+	downSQL, err := os.ReadFile("migrations/0069_create_issue_transition_receipts.down.sql")
+	if err != nil {
+		t.Fatalf("read migration 0069 down SQL: %v", err)
+	}
+	runDoltSQL(t, dir, string(downSQL))
+	if tables := queryDoltCSV(t, dir, "SHOW TABLES LIKE 'issue_transition_receipts'"); len(tables) != 0 {
+		t.Fatalf("migration 0069 down left issue_transition_receipts behind; rows=%v", tables)
+	}
 }
 
 // TestMigrationWorkNeededAddsContentHashColumnOnUpToDateDB is the regression for

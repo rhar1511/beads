@@ -32,6 +32,13 @@ and repeats the guarded wisp-column addition for release databases missing it.
 The embedded reconciliation regression covers both lineages and preserves wisp
 data; this reconciliation does not introduce a main-plane migration.
 
+The admission backend retains published main migration `0067` and ignored
+migration `0027` byte-for-byte. Its previously unpublished aggregate revision,
+transition receipt, protected mutation, and batch receipt migrations follow in
+main slots `0068`–`0073`; the clone-local aggregate revision backfill is ignored
+slot `0028`. Live cursor-66 stores must rehearse this combined upgrade and a
+backup restore before cutover. A binary rollback alone does not undo it.
+
 ## Measured Dolt behaviours
 
 These were measured against real Dolt (2.1.2 and 2.2.3) and confirmed against

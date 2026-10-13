@@ -33,6 +33,7 @@ var derivedReadinessEmitters = map[string]bool{
 	"recomputeIsBlockedAfterMergeScoped": true,
 	"recomputeIsBlockedForAll":           true,
 	"MarkIsBlockedInTx":                  true,
+	"MarkIsBlockedInTxWithResult":        true,
 	"recordBlockedJournalChanges":        true,
 }
 
@@ -158,19 +159,25 @@ var beadDMLExemptions = map[string]string{
 
 	// (3) constituent sub-helpers; the calling entry point journals the whole
 	// mutation once (a create/rename/promote/delete emits a single row).
-	"InsertIssueIntoTable":                   "raw issue insert; the calling create entry point journals the create",
-	"InsertIssueIfNew":                       "raw issue insert; the calling create entry point journals the create",
-	"InsertIssueStrictInTx":                  "raw issue insert; the calling create/persistence-move entry point journals it",
-	"InsertDerivedComment":                   "raw comment insert; the calling comment/create entry point journals it",
-	"PersistLabels":                          "constituent label write of a create; the create entry point journals it",
-	"PersistComments":                        "constituent comment write of a create; the create entry point journals it",
-	"UpdateWispIDInDependenciesInTx":         "rewrites dep rows during a rename; UpdateIssueIDInTx journals the rename",
-	"UpdateIssueIDInDependenciesInTx":        "rewrites dep rows during a rename; UpdateIssueIDInTx journals the rename",
-	"RetargetInboundDependenciesToWispInTx":  "rewrites dep rows during promote; PromoteFromEphemeralInTx journals it",
-	"RetargetInboundDependenciesToIssueInTx": "rewrites dep rows during promote; PromoteFromEphemeralInTx journals it",
-	"DeleteWispFromDependenciesInTx":         "cleans up dep rows during a delete that journals the delete",
-	"DeleteWispsFromDependenciesInTx":        "cleans up dep rows during a delete that journals the delete",
-	"DeleteWispAuxRowsInTx":                  "cleans up wisp label/event/comment/counter rows during a delete that journals the delete",
+	"InsertIssueIntoTable":                                  "raw issue insert; the calling create entry point journals the create",
+	"InsertIssueIfNew":                                      "raw issue insert; the calling create entry point journals the create",
+	"InsertIssueStrictInTx":                                 "raw issue insert; the calling create/persistence-move entry point journals it",
+	"InsertDerivedComment":                                  "raw comment insert; the calling comment/create entry point journals it",
+	"PersistLabels":                                         "constituent label write of a create; the create entry point journals it",
+	"PersistComments":                                       "constituent comment write of a create; the create entry point journals it",
+	"UpdateWispIDInDependenciesInTx":                        "rewrites dep rows during a rename; UpdateIssueIDInTx journals the rename",
+	"UpdateIssueIDInDependenciesInTx":                       "rewrites dep rows during a rename; UpdateIssueIDInTx journals the rename",
+	"RetargetInboundDependenciesToWispInTx":                 "rewrites dep rows during promote; PromoteFromEphemeralInTx journals it",
+	"RetargetInboundDependenciesToIssueInTx":                "rewrites dep rows during promote; PromoteFromEphemeralInTx journals it",
+	"DeleteWispFromDependenciesInTx":                        "cleans up dep rows during a delete that journals the delete",
+	"DeleteWispsFromDependenciesInTx":                       "cleans up dep rows during a delete that journals the delete",
+	"DeleteWispAuxiliaryRowsInTx":                           "constituent wisp cleanup; the calling delete entry point journals the delete",
+	"TouchRowVersionInTx":                                   "constituent aggregate-token write; the calling label/comment/dependency entry point journals the mutation",
+	"BumpIssueRevisionInTx":                                 "constituent aggregate-token invalidation; the calling graph or label mutation journals the resulting issue snapshot",
+	"BumpDependencySourceRevisionsForIDsInTx":               "constituent dependency-source invalidation; the calling graph mutation journals the affected sources",
+	"BumpDependencySourceRevisionsForTargetsInTx":           "constituent dependency-target invalidation; the calling rename, delete, or graph mutation journals the affected sources",
+	"BumpDependencySourceRevisionsForTargetsWithResultInTx": "result-bearing dependency-target invalidation helper; the calling mutation journals the affected sources",
+	"DeleteWispAuxRowsInTx":                                 "cleans up wisp label/event/comment/counter rows during a delete that journals the delete",
 
 	// (4) compaction maintenance — a lossy content rewrite outside the
 	// create/update/close/delete/dep/label op vocabulary. Carried from the

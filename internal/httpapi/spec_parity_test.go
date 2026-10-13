@@ -419,11 +419,12 @@ func TestSpecDefaultsMatchSharedConstants(t *testing.T) {
 }
 
 // capabilityToken matches one backticked capability token in the
-// `capabilities` description. The shape — a lowercase resource, a dot, a
-// lowerCamel verb — is what every token on this surface is, and it is narrow
-// enough that no other backticked word in that paragraph can be mistaken for
-// one.
-var capabilityToken = regexp.MustCompile("`([a-z]+\\.[a-zA-Z]+)`")
+// `capabilities` description. The shape — a lowercase resource followed by
+// one or more dotted lowerCamel segments — covers both the usual
+// `resource.verb` form and a subresource operation such as
+// `issues.transitionReceipt.get`. It remains narrow enough that no other
+// backticked word in that paragraph can be mistaken for one.
+var capabilityToken = regexp.MustCompile("`([a-z]+(?:\\.[a-zA-Z]+)+)`")
 
 // TestSpecCapabilityVocabularyMatchesTheRouteTable is the gate for the ONE
 // piece of per-operation plumbing that had no gate.
@@ -501,15 +502,12 @@ func TestSpecStatusCodesMatchHandlerTable(t *testing.T) {
 	doc := loadSpec(t)
 	ops := specOps(t, doc)
 
-	// There are no 501 stubs left. The check stays because it is the guard
-	// against one reappearing silently: 501 is not documented anywhere in this
-	// document and `not_implemented` is deliberately absent from the frozen
-	// vocabulary in problem.go, so a stub emits a status this test would
-	// otherwise forbid. The transitional exemption list that used to sit here
-	// was deleted with the last stub, which is what it was written to require.
+	// Every route has a handler. The transition operations may still return a
+	// documented 501 when startup readiness cannot prove the required schema;
+	// that runtime gate is separate from the route-table `implemented` flag.
 	for _, rt := range routeTable {
 		if !rt.implemented {
-			t.Errorf("%s is a 501 stub; v0 has no undocumented statuses left, so a new stub needs an exemption block here that says why", rt.op)
+			t.Errorf("%s has no implemented handler", rt.op)
 		}
 	}
 

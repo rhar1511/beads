@@ -42,10 +42,10 @@ func TestDeletePathReachesItsHandler(t *testing.T) {
 }
 
 // TestDeleteForwardsEveryDocumentedMember is the operation's central pin: each
-// of the body's five UNCONSTRAINED members reaches the role's request unchanged.
-// `expected_version` has cases of its own below rather than a column here,
-// because it constrains `ids` — a guard beside this case's two ids is refused
-// by design.
+// body member reaches the role's request, with `actor` normalized by its
+// documented rule and `protected_permit` preserved exactly. `expected_version`
+// has cases of its own below rather than a column here, because it constrains
+// `ids` — a guard beside this case's two ids is refused by design.
 //
 // It is asserted on the REQUEST the role received rather than on the response,
 // because a body carrying the right numbers says nothing about which beads went
@@ -60,7 +60,8 @@ func TestDeleteForwardsEveryDocumentedMember(t *testing.T) {
 		"actor": "  alice  ",
 		"cascade": true,
 		"force": true,
-		"dry_run": true
+		"dry_run": true,
+		"protected_permit": "opaque-delete-permit"
 	}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
@@ -74,13 +75,91 @@ func TestDeleteForwardsEveryDocumentedMember(t *testing.T) {
 		IDs: []string{"bd-1", "bd-2"},
 		// TRIMMED, by the same rule and the same function the claim's actor
 		// goes through: it reaches the same commit-message interpolation.
-		Actor:   "alice",
-		Cascade: true,
-		Force:   true,
-		DryRun:  true,
+		Actor:           "alice",
+		Cascade:         true,
+		Force:           true,
+		DryRun:          true,
+		ProtectedPermit: issueops.ProtectedMutationPermit("opaque-delete-permit"),
 	}
 	if !reflect.DeepEqual(reqs[0], want) {
 		t.Errorf("request = %+v, want %+v", reqs[0], want)
+	}
+}
+
+func TestDeleteRejectsMalformedProtectedPermitBeforeTheRole(t *testing.T) {
+	permitRequest := func(value string) string {
+		return `{"ids":["bd-1"],"protected_permit":` + value + `}`
+	}
+	invalidUTF8 := `{"ids":["bd-1"],"protected_permit":"bad` + string([]byte{0xff}) + `permit"}`
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "null", body: permitRequest(`null`)},
+		{name: "wrong type", body: permitRequest(`7`)},
+		{name: "empty", body: permitRequest(`""`)},
+		{name: "trimmed whitespace", body: permitRequest(`" permit"`)},
+		{name: "control character", body: permitRequest(`"permit\u0000suffix"`)},
+		{name: "C1 control character", body: permitRequest(`"permit\u0085suffix"`)},
+		{name: "line separator", body: permitRequest(`"permit\u2028suffix"`)},
+		{name: "paragraph separator", body: permitRequest(`"permit\u2029suffix"`)},
+		{name: "raw invalid UTF-8", body: invalidUTF8},
+		{name: "UTF-8 byte limit", body: permitRequest(`"` + strings.Repeat("é", maxProtectedMutationPermitBytes/2+1) + `"`)},
+		{name: "too long", body: permitRequest(`"` + strings.Repeat("p", maxProtectedMutationPermitBytes+1) + `"`)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			deleter := &roleDeleter{}
+			ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+
+			resp := ts.delete(t, test.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", resp.StatusCode, readAll(t, resp))
+			}
+			body := decodeBody(t, resp)
+			if body["code"] != string(CodeInvalidArgument) {
+				t.Errorf("code = %v, want %s", body["code"], CodeInvalidArgument)
+			}
+			if body["param"] != deletePermitMember {
+				t.Errorf("param = %v, want %q", body["param"], deletePermitMember)
+			}
+			if got := len(deleter.requests()); got != 0 {
+				t.Errorf("the role was called %d times for a malformed permit, want 0", got)
+			}
+		})
+	}
+}
+
+func TestDeleteProtectedRefusalDoesNotExposePermitOrClassDetails(t *testing.T) {
+	const (
+		permitSecret   = "opaque-delete-permit-secret"
+		verifierSecret = "private-verifier-diagnostic"
+		classSecret    = "internal-classification-secret"
+	)
+	wrapped := fmt.Errorf("permit %q verifier %q refused classification %q: %w",
+		permitSecret, verifierSecret, classSecret, issueops.ErrProtectedRecord)
+	deleter := &roleDeleter{err: wrapped}
+	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+
+	resp := ts.delete(t, `{"ids":["bd-protected"],"protected_permit":"`+permitSecret+`"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", resp.StatusCode, readAll(t, resp))
+	}
+	body := decodeBody(t, resp)
+	if body["code"] != string(CodeProtectedRecord) {
+		t.Errorf("code = %v, want %q", body["code"], CodeProtectedRecord)
+	}
+	if body["detail"] != staticDetail[CodeProtectedRecord] {
+		t.Errorf("detail = %v, want fixed detail %q", body["detail"], staticDetail[CodeProtectedRecord])
+	}
+	responseText := fmt.Sprint(body)
+	logText := ts.stderr.String()
+	for _, secret := range []string{permitSecret, verifierSecret, classSecret} {
+		if strings.Contains(responseText, secret) {
+			t.Errorf("response leaked protected detail %q: %s", secret, responseText)
+		}
+		if strings.Contains(logText, secret) {
+			t.Errorf("server log leaked protected detail %q: %s", secret, logText)
+		}
 	}
 }
 

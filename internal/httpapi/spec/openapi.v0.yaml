@@ -63,7 +63,7 @@ info:
       outside its own parameter table with `400` / `code: invalid_argument` /
       `reason: "unknown_parameter"` and `param` naming the offending key.
       Operations that declare no QUERY parameter at all reject every query key
-      the same way. Today that is twenty-five of the forty-one operations
+      the same way. Today that is twenty-seven of the forty-three operations
       here — `GET /healthz`, `GET /v0/beads/context`,
       `GET /v0/beads/dependencies/cycles`, `POST /v0/beads/issues`,
       `PATCH /v0/beads/issues/{id}`,
@@ -72,7 +72,10 @@ info:
       `POST /v0/beads/issues/{id}:release`,
       `POST /v0/beads/issues/{id}:close`,
       `POST /v0/beads/issues/{id}:reopen`,
-      `POST /v0/beads/issues/{id}:casMetadata`, `POST /v0/beads/issues:sweep`,
+      `POST /v0/beads/issues/{id}:casMetadata`,
+      `POST /v0/beads/issues/{id}:transitionMetadata`,
+      `GET /v0/beads/issue-transition-receipts/{receipt_id}`,
+      `POST /v0/beads/issues:sweep`,
       `POST /v0/beads/issues:delete`,
       `POST /v0/beads/issues:batchCreate`,
       `POST /v0/beads/issues:batchApply`,
@@ -2357,6 +2360,75 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issues/{id}/sourceSnapshot:
+    get:
+      operationId: getSourceSnapshot
+      summary: Read one durable issue and its complete outgoing edges atomically
+      description: >-
+        Returns the exact durable issue row, including its canonical signed
+        aggregate revision token, and every outgoing durable dependency row
+        from one database snapshot. The revision is the same `row_lock`
+        aggregate domain that revision-fenced metadata transitions compare.
+        This read does not resolve wisps or hydrate dependency targets.
+
+
+        `outgoing_dependencies` is always present. An empty array means the
+        read completed and found no outgoing edges; an absent or null list is
+        never a successful answer. Dependency-read failures fail the whole
+        request rather than returning a partial issue snapshot.
+
+
+        This operation always requires a configured bearer token and a
+        matching `Bd-Project-Id` header. It is advertised only when the Q43
+        revision readiness proof, source-snapshot role, authentication, and
+        project identity are all available.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+        - $ref: '#/components/parameters/ProjectID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The durable issue row and all outgoing durable edges from one snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceSnapshotResponse'
+        '400':
+          description: The project stamp is missing or does not match, or an unsupported query parameter was supplied.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No durable issue with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: The issue does not have a qualified durable aggregate revision.
+          x-bd-codes: [unsupported_resource]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '501':
+          description: Migration or role readiness for this route is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issues/{id}/related:
     get:
       operationId: listRelatedIssues
@@ -3331,6 +3403,328 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v0/beads/issues/{id}:transitionMetadata:
+    post:
+      operationId: transitionMetadata
+      summary: Apply a revision-fenced metadata transition with a durable receipt
+      description: >-
+        Changes one metadata marker only when both its current value and the
+        issue's exact signed 64-bit revision match. A marker miss is an ordinary
+        `200` with `applied: false` and `current`; a stale revision is
+        `409 precondition_failed`. Applied requests persist an immutable receipt
+        under `receipt_id`, so retry the exact same body after a lost response.
+        Reusing a receipt ID for a different request is a stable
+        `409 transition_receipt_conflict`.
+
+
+        A backend may refuse a mutation with `409 protected_record`. The code
+        and fixed detail do not disclose record classification or permit
+        details.
+
+
+        Revision values are canonical decimal strings over the full signed
+        64-bit range. Send the string returned by an earlier issue read or
+        transition response; JSON numbers are refused because common consumers
+        round values above 2^53.
+
+
+        `expected` and `value` each distinguish omission (the marker is absent)
+        from a present JSON `null`. The optional `payload` defaults to `{}` when
+        omitted and may carry any JSON value. A successful write returns its
+        exact immutable receipt; `replayed: true` means this receipt proves the
+        same request already committed.
+
+
+        This operation always requires a configured bearer token, even on a
+        loopback server, and requires a matching `Bd-Project-Id` header. If the
+        server cannot assert its own project ID, it refuses the request. Wisps
+        are valid issue resources but do not have durable receipts, so a wisp
+        target returns `409 unsupported_resource`.
+
+
+        The `issues.transitionMetadata` and `issues.transitionReceipt.get`
+        capabilities are advertised together only after migrations 0067/0068,
+        ignored migration 0027, the zero-token checks, the receipt table probe,
+        the revision-transition role, and both route handlers are ready.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionMetadataRequest'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The marker was applied, replayed, or did not match.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionMetadataResponse'
+        '400':
+          description: >-
+            Invalid request, including a malformed body, unknown field, invalid
+            receipt ID, invalid marker or payload JSON, a revision that is not
+            a canonical signed 64-bit decimal string, or a missing or mismatched
+            required `Bd-Project-Id` header.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No durable issue with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: >-
+            `precondition_failed` means `expected_version` was stale;
+            `transition_receipt_conflict` means this receipt ID is bound to a
+            different request; `protected_record` means the backend refused
+            the mutation without disclosing classification or permit details;
+            `unsupported_resource` means the target is a wisp. None of these
+            cases writes a transition.
+          x-bd-codes:
+            - precondition_failed
+            - transition_receipt_conflict
+            - protected_record
+            - unsupported_resource
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration or role readiness for this route is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v0/beads/issues/{id}:transitionPatch:
+    post:
+      operationId: transitionPatch
+      summary: Apply an atomic, receipt-chained issue patch
+      description: >-
+        Applies one exact compare-and-set patch to an issue. The request binds
+        the current signed revision to the `to_version` and digest of an
+        existing durable transition receipt, then checks every supplied
+        metadata, status, assignee, and label precondition in one transaction.
+        All requested fields, labels, the new backend-generated revision, and
+        the immutable receipt commit together. Any stale revision, failed field
+        precondition, or receipt-chain mismatch writes nothing.
+
+
+        Keep `receipt_id` stable across retries. After an unknown response,
+        read the exact patch receipt at
+        `/v0/beads/issue-transition-patch-receipts/{receipt_id}` before taking
+        another action. Reuse of an ID for a different canonical request is a
+        `409 transition_receipt_conflict`.
+
+
+        The `protected_permit` is an exact signed authorization for this
+        operation, issue, workspace, and canonical patch. HTTP bearer
+        authentication does not grant the mutation. Invalid or missing
+        authorization is refused without exposing permit details.
+
+
+        This route is unavailable unless migration 0072, the patch receipt
+        columns, protected-mutation schema and verifier, and the typed role are
+        all ready. It always requires a bearer token and matching
+        `Bd-Project-Id`.
+      parameters:
+        - $ref: '#/components/parameters/IssueID'
+        - $ref: '#/components/parameters/ProjectID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionPatchRequest'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The patch applied or an exact prior receipt was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionPatchResponse'
+        '400':
+          description: Invalid or incomplete request, unknown member, or missing or mismatched project stamp.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No durable issue with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: >-
+            `precondition_failed` means the revision or an expected field was
+            stale; `transition_receipt_conflict` means the ID or prior receipt
+            does not match this request; `protected_record` means the exact
+            signed permit was refused without disclosing its details;
+            `unsupported_resource` means the target is a wisp. Every refusal
+            leaves source fields and the receipt table unchanged.
+          x-bd-codes:
+            - precondition_failed
+            - transition_receipt_conflict
+            - protected_record
+            - unsupported_resource
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration, protected-authority, or role readiness is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v0/beads/issue-transition-patch-receipts/{receipt_id}:
+    get:
+      operationId: getTransitionPatchReceipt
+      summary: Read an immutable atomic patch receipt
+      description: >-
+        Reads one exact patch receipt. Use it after an unknown response to
+        prove whether that request committed and to obtain the backend-written
+        `to_version` and receipt body for the next chain link. A missing receipt
+        does not authorize a different operation; the original exact request
+        may be retried with the same ID.
+
+
+        Always requires bearer authentication and a matching `Bd-Project-Id`.
+        The capability is published only with the patch route after migration
+        0072 and protected-mutation readiness pass.
+      parameters:
+        - name: receipt_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 191
+        - $ref: '#/components/parameters/ProjectID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The immutable patch receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionPatchReceipt'
+        '400':
+          description: Invalid receipt ID, unknown query parameter, or missing or mismatched project stamp.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No patch receipt with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration, protected-authority, or role readiness is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v0/beads/issue-transition-receipts/{receipt_id}:
+    get:
+      operationId: getTransitionReceipt
+      summary: Read an immutable issue transition receipt
+      description: >-
+        Reads the durable receipt for one exact `receipt_id`. Use this after a
+        timeout or lost response to determine whether a transition committed;
+        a `404` means no receipt is currently visible under that ID. This route
+        always requires a configured bearer token and a matching
+        `Bd-Project-Id` header. The capability is advertised only with the
+        paired transition write route after migration and data readiness pass.
+      parameters:
+        - name: receipt_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 191
+        - $ref: '#/components/parameters/ProjectID'
+      security:
+        - bearerToken: []
+      responses:
+        '200':
+          description: The immutable transition receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransitionReceipt'
+        '400':
+          description: Invalid receipt ID, unknown query parameter, or missing or mismatched required project stamp.
+          x-bd-codes: [invalid_argument]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          description: No receipt with that exact ID exists.
+          x-bd-codes: [not_found]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '501':
+          description: Migration or role readiness for this route is absent.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
   /v0/beads/issues:sweep:
     post:
       operationId: sweepIssues
@@ -3539,6 +3933,8 @@ paths:
             Invalid request: an unparseable or oversized body, an unknown body
             member, an empty or over-long `ids`, a blank id, an `actor` that is
             empty after trimming or carries control characters, an
+            malformed `protected_permit` (which must be nonempty, trimmed
+            UTF-8 of at most 65536 bytes without control characters), an
             `expected_version` beside more than one distinct id — or a named
             bead with a dependent the request did not name and neither
             `cascade` nor `force` to say what to do about it, which the library
@@ -3573,7 +3969,13 @@ paths:
 
             It outranks the dependents refusal and is outranked by the `404`:
             see the operation description.
-          x-bd-codes: [precondition_failed]
+
+
+            `protected_record` is the backend refusing a mutation that touches
+            an explicitly protected record. Its `detail` is fixed as "this
+            mutation was refused" and carries no permit or classification
+            information.
+          x-bd-codes: [precondition_failed, protected_record]
           content:
             application/problem+json:
               schema:
@@ -3773,12 +4175,27 @@ paths:
 
 
         ONE HISTORY ENTRY IS RECORDED FOR THE WHOLE REQUEST, attributed to
-        `actor`, and none at all when nothing durable landed — a request made
-        entirely of ephemeral items writes only to unversioned tables.
+        `actor`. Without `receipt_id`, none is recorded when nothing durable
+        landed — a request made entirely of ephemeral items writes only to
+        unversioned tables. With `receipt_id`, the durable receipt itself is
+        versioned, even when every item is ephemeral or a semantic no-op.
         `provenance` labels that entry: it changes how the entry READS, never
         whether one is recorded, and an empty one composes a default naming how
         many items of each kind landed rather than every id, since an entry
         listing a hundred is the diff written twice.
+
+
+        Supplying `receipt_id` opts into an additional durable, versioned
+        receipt written atomically with the plan. That receipt is written even
+        when every item is an ephemeral no-op. It preserves the complete
+        original result, including the library's issue snapshots, and survives
+        later changes to those issues. Repeating the same ID and request returns
+        that result with `replayed: true`, without rerunning items or checking a
+        protected permit again. Reusing the ID for a different request returns
+        `409 batch_apply_receipt_conflict` and writes nothing. A failed plan
+        leaves no receipt. The 191-byte ID and canonical request digest bind
+        the receipt; the permit and receipt ID themselves are excluded from the
+        digest.
 
 
         EPHEMERALITY IS PER ITEM, exactly as it is for
@@ -3789,12 +4206,9 @@ paths:
         for.
 
 
-        IT IS NOT IDEMPOTENT AND CARRIES NO IDEMPOTENCY KEY. Replaying a request
-        applies it again — the creates mint new ids, the edges are idempotent,
-        the closes are no-ops. A caller that needs a replay record makes it an
-        ITEM of the batch, so the record lands or rolls back with the work it
-        describes; a key on the request would be a second, weaker mechanism for
-        the same thing.
+        Without `receipt_id`, replaying a request applies it again — creates
+        mint new IDs, edges are idempotent and closes may be no-ops. There is no
+        durable history for a receipt-less all-ephemeral or no-op batch.
 
 
         Hooks do not fire and the per-command auto-commit machinery does not
@@ -3814,7 +4228,9 @@ paths:
           description: >-
             Every item applied and the transaction committed. `items` carries
             one entry per requested item in request order, and `keys` maps every
-            key a create item named to the id it was bound to.
+            key a create item named to the id it was bound to. `replayed` is
+            true only when a durable receipt returned the immutable result of an
+            earlier successful request.
           content:
             application/json:
               schema:
@@ -3896,8 +4312,8 @@ paths:
         '409':
           description: >-
             The request is well-formed and the STATE refuses it, and NOTHING WAS
-            WRITTEN. Six codes, and every one of them is a statement a caller
-            could not have made without reading state it does not hold. Five
+            WRITTEN. Eight codes; each says why this well-formed plan could not
+            be applied as sent. Six
             paragraphs cover them: `dependency_cycle` and `dependency_exists`
             share one, because they are the graph's own pair.
 
@@ -3950,9 +4366,20 @@ paths:
             succeeded before the id was taken, so recovery is to look at the
             state (adopt the row, choose another id, or stop) rather than to fix
             a malformed request.
+
+
+            `protected_record` means a mutation involving a protected record
+            or a protected create was refused. Its detail is fixed and does not
+            disclose record classification or permit contents.
+
+
+            `batch_apply_receipt_conflict` means this `receipt_id` is already
+            bound to a different canonical request. The response carries no
+            stored result or request details.
           x-bd-codes:
             [already_claimed, already_exists, dependency_cycle,
-             dependency_exists, not_closable, precondition_failed]
+             dependency_exists, not_closable, precondition_failed,
+             protected_record, batch_apply_receipt_conflict]
           content:
             application/problem+json:
               schema:
@@ -3961,6 +4388,16 @@ paths:
           $ref: '#/components/responses/InternalError'
         '503':
           $ref: '#/components/responses/Unavailable'
+        '501':
+          description: >-
+            The request carries `receipt_id`, but startup could not prove that
+            migration 0071 and the durable receipt table are ready. The body is
+            not sent to the batch role and no database work is performed.
+          x-bd-codes: [not_implemented]
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   /v0/beads/issues:batchClose:
     post:
@@ -6116,14 +6553,27 @@ components:
       schema:
         type: string
 
+    ProjectID:
+      name: Bd-Project-Id
+      in: header
+      required: true
+      description: >-
+        Exact logical project ID the caller expects. These routes reject a
+        missing or mismatched stamp, and fail closed if the server cannot
+        assert its own project identity.
+      schema:
+        type: string
+        minLength: 1
+
   responses:
     Unauthenticated:
       description: >-
         The bearer credential was missing, malformed, or is not one this server
-        accepts. Emitted only by a server configured with a token file; one
-        without never emits it. `detail` is a fixed string, which is what
-        guarantees the presented credential is never echoed back to the client
-        or into any log between here and the caller.
+        accepts. Most routes emit this only when the server is configured with a
+        token file; revision-transition routes always require bearer
+        authentication. `detail` is a fixed string, which is what guarantees the
+        presented credential is never echoed back to the client or into any log
+        between here and the caller.
       x-bd-codes: [unauthenticated]
       headers:
         WWW-Authenticate:
@@ -6672,6 +7122,22 @@ components:
             `float` — rounds anything past 2^53 to a value NEAR the token that is not
             it, so a guard composed from it is refused against a row nothing else
             touched. A string round-trips exactly in every consumer.
+    SourceSnapshotResponse:
+      type: object
+      description: >-
+        The exact durable issue row and its complete outgoing durable dependency
+        list, observed in one database snapshot. The issue revision is the
+        canonical signed decimal string for the row_lock used by guarded
+        transitions. `outgoing_dependencies` is always present, including as
+        an empty array when the snapshot proves that no outgoing edge exists.
+      required: [issue, outgoing_dependencies]
+      properties:
+        issue:
+          $ref: '#/components/schemas/IssueDetails'
+        outgoing_dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dependency'
     IssueWithDependencyMetadata:
       type: object
       description: >-
@@ -7288,24 +7754,42 @@ components:
             `dependencies.add`, `dependencies.remove`,
             `memories.list`, `memories.get`, `memories.remember`,
             `memories.forget`, `events.list`, `events.watch`,
-            `issues.casMetadata`; the one behavior token is `project.enforce`,
+            `issues.casMetadata`, `issues.transitionMetadata`,
+            `issues.transitionReceipt.get`, `issues.transitionPatch`,
+            `issues.transitionPatchReceipt.get`, and `issues.sourceSnapshot`; behavior tokens include `issues.batchApplyReceipt`, `project.enforce`,
             which announces that a `Bd-Project-Id` stamp for the wrong workspace
-            is refused here rather than silently ignored. The list grows
+            is refused here rather than silently ignored, and `issues.protectedMutation`, which announces a startup-owned verifier and the durable permit-use table are ready. The list grows
             additively, and an operation never appears here unless it is fully
-            implemented. This is how a client checks for an operation or a
-            behavior — never the version string.
+            implemented. The two revision-transition capabilities are
+            advertised together only when the startup readiness probe verifies
+            migrations 0067 and 0068, ignored migration 0027, no remaining zero
+            aggregate revisions, the receipt table, and the role behind each
+            route. `issues.sourceSnapshot` is advertised only when the same
+            revision readiness proof and its atomic source-snapshot role are
+            available, and the server has authentication and a project ID.
+            `issues.protectedMutation` is advertised only when a startup-owned
+            verifier, migrations 0069 and 0070, both protected-mutation tables,
+            the revision-transition route, authentication, and a project
+            identity are ready.
+            `issues.batchApplyReceipt` is advertised only when migration 0071,
+            the durable result receipt table, and the batchApply role are ready.
+            The typed patch pair is advertised only after migration 0072, its
+            exact receipt columns, the patch role, and the protected-mutation
+            verifier are ready; both routes also require bearer authentication
+            and a project identity.
+            This is how a client checks for an operation or a behavior — never
+            the version string.
 
 
-            THIS LIST IS BUILD-LEVEL, NOT WORKSPACE-LEVEL. It says which
-            operations this binary serves, and for every entry but two that is
-            the whole answer. `events.list` and `events.watch` are the
-            exceptions: the durable events journal is a per-workspace setting
-            that is OFF by default, so a server that advertises them may still
-            refuse every request to both with 409 `events_journal_disabled` —
-            correctly, because the operations exist and the workspace has no
-            journal. A consumer of either MUST treat the capability as "this
-            server speaks it" and the 409 as "not on this workspace", and must
-            not read the capability as a promise that records will arrive.
+            THIS LIST IS MOSTLY BUILD-LEVEL. The revision-transition and
+            source-snapshot capabilities are also gated by the selected
+            database's migration and data readiness, so their absence means
+            this server instance cannot safely serve them yet. `events.list` and `events.watch` are
+            gated separately by a per-workspace setting that is OFF by default;
+            a server may advertise them and still refuse requests with 409
+            `events_journal_disabled`. Consumers MUST treat those tokens as
+            "this server speaks it" and that 409 as "not on this workspace",
+            not as a promise that journal records will arrive.
           items:
             type: string
 
@@ -7502,10 +7986,11 @@ components:
             pinned wants `dry_run` first.
 
 
-            IT GUARDS LIFECYCLE STATE, NOT THE GRAPH. The token is reminted by
-            status, assignee and started-at writes and deliberately not by
-            label, dependency or rename writes, so a match does not promise the
-            bead's edges are the ones you saw.
+            IT GUARDS THE NAMED AGGREGATE, NOT ITS TRANSITIVE CLOSURE. The token
+            is reminted by every supported user-authored mutation, including
+            outgoing dependency edits. Inbound edges belong to their source
+            aggregates and derived blocked-state recomputation is excluded, so
+            a match does not promise the cascade closure is unchanged.
 
 
             The token is the `revision` a lifecycle write answers with, and the
@@ -7519,6 +8004,21 @@ components:
             member. The token spans the FULL 64-bit range, so a number would be
             rounded past 2^53 by an IEEE-754-double parser and the guard would miss a
             row nothing else touched; a string round-trips exactly in every consumer.
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          x-max-utf8-bytes: 65536
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            A nonempty, trimmed UTF-8 opaque permit for deleting an explicitly
+            protected record. The server limits it to 65536 UTF-8 bytes;
+            `maxLength` counts Unicode characters, so the byte limit is
+            stricter for multibyte text. U+2028, U+2029, and Unicode control
+            characters are rejected. The storage role verifies the permit
+            against the exact deletion operation, resolved resources, and
+            request digest, then consumes replay in the delete transaction.
+            The permit does not classify a record.
     DeleteIssuesResult:
       type: object
       required: [dry_run, deleted, dependencies, labels, events, references_updated]
@@ -8632,6 +9132,40 @@ components:
 
             It is attributed to every item and to the ONE history entry the
             request records, because a batch is one act by one caller.
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          x-max-utf8-bytes: 65536
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            A nonempty, trimmed UTF-8 opaque permit authorizing explicitly
+            classified writes in this request. The server limits it to 65536
+            UTF-8 bytes; `maxLength` counts Unicode characters, so the byte
+            limit is stricter for multibyte text. U+2028, U+2029, and Unicode
+            control characters are rejected. The storage role verifies the
+            permit against the exact operation, resources, and request digest,
+            then consumes its replay identity in the same transaction as every
+            write. If a permit is supplied, every create item must carry an
+            explicit, trimmed `id`, including standalone creates whose key is
+            not referenced by another item. Generated IDs are refused so the
+            permit's exact resource set can name every created row before any
+            write begins. Permit-free batches keep generated-ID behavior. The
+            permit does not classify a record.
+        receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+          x-max-utf8-bytes: 191
+          description: >-
+            Optional caller-generated retry identity. Supplying it opts into a
+            durable versioned receipt that stores the complete original result
+            atomically with this request. An exact retry returns that original
+            result with `replayed: true`; a changed request using the same ID
+            returns `409 batch_apply_receipt_conflict`. Failed requests store no
+            receipt. The request digest excludes `receipt_id` and
+            `protected_permit`. IDs must be nonempty valid UTF-8 text of at most
+            191 bytes and may not contain NUL.
         items:
           type: array
           minItems: 1
@@ -8850,6 +9384,22 @@ components:
           minimum: 0
           maximum: 4
           description: 0 is P0/critical. Absent means the workspace default.
+        protection_class:
+          type: string
+          minLength: 1
+          maxLength: 64
+          x-max-utf8-bytes: 64
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            Nonempty, trimmed UTF-8 text that explicitly classifies this newly
+            created record as protected. The server limits it to 64 UTF-8
+            bytes; `maxLength` counts Unicode characters, so the byte limit is
+            stricter for multibyte text. U+2028, U+2029, and Unicode control
+            characters are rejected. Requires an explicit `id` and a valid
+            request-level `protected_permit`. Classification and all batch
+            writes are atomic. The server never infers classification from
+            issue content or metadata, and this member cannot classify an
+            existing record.
         assignee:
           type: string
           maxLength: 255
@@ -9316,7 +9866,7 @@ components:
 
     ApplyBatchResponse:
       type: object
-      required: [keys, items]
+      required: [keys, items, replayed]
       properties:
         keys:
           type: object
@@ -9330,6 +9880,13 @@ components:
             It carries only the keys the request NAMED: an unnamed create item
             is in `items` and not here. A request whose create items named
             nothing answers with an empty object, never `null`.
+        replayed:
+          type: boolean
+          description: >-
+            True when the server returned the immutable result stored by an
+            earlier successful request with the same `receipt_id` and request
+            digest. Always false for a newly applied request or when no receipt
+            ID was supplied.
         items:
           type: array
           description: >-
@@ -10228,6 +10785,283 @@ components:
         current:
           $ref: '#/components/schemas/MetadataValue'
 
+    TransitionMetadataRequest:
+      type: object
+      additionalProperties: false
+      required: [receipt_id, scope, kind, actor, expected_version, key]
+      properties:
+        receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+          description: >-
+            Caller-generated immutable receipt key. Keep it unchanged when
+            retrying the exact same request or recovering after a lost response.
+        scope:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+        actor:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: The caller asserted actor, trimmed and validated by the server.
+        expected_version:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^-?[1-9][0-9]*$'
+          description: >-
+            Canonical decimal spelling of a nonzero signed 64-bit integer. The
+            server rejects overflow and JSON numbers.
+        key:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: One metadata key, using the workspace metadata-key syntax.
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+        payload:
+          $ref: '#/components/schemas/MetadataValue'
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          x-max-utf8-bytes: 65536
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            A nonempty, trimmed UTF-8 opaque permit for a mutation of an
+            explicitly classified record. The server limits it to 65536 UTF-8
+            bytes; `maxLength` counts Unicode characters, so the byte limit is
+            stricter for multibyte text. U+2028, U+2029, and Unicode control
+            characters are rejected. The permit does not classify the record.
+            The storage role verifies the exact operation, resources, and
+            request digest, then consumes replay in the write transaction.
+            Generic receipts remain read evidence only.
+
+    TransitionMetadataResponse:
+      type: object
+      required: [applied, replayed]
+      properties:
+        applied:
+          type: boolean
+          description: True when the marker transition applied or replayed.
+        replayed:
+          type: boolean
+          description: True when the exact receipt already existed for this request.
+        current:
+          $ref: '#/components/schemas/MetadataValue'
+        receipt:
+          $ref: '#/components/schemas/TransitionReceipt'
+
+    TransitionReceipt:
+      type: object
+      required:
+        [receipt_id, issue_id, scope, kind, actor, expected_version, to_version, key, payload]
+      properties:
+        receipt_id:
+          type: string
+        issue_id:
+          type: string
+        scope:
+          type: string
+        kind:
+          type: string
+        actor:
+          type: string
+        expected_version:
+          type: string
+          description: Canonical decimal spelling of the signed 64-bit source revision.
+        to_version:
+          type: string
+          description: Canonical decimal spelling of the signed 64-bit revision written.
+        key:
+          type: string
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+        payload:
+          $ref: '#/components/schemas/MetadataValue'
+
+    TransitionPatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [receipt_id, scope, kind, actor, expected_version, prior_receipt_id, prior_receipt_digest, patch, protected_permit]
+      properties:
+        receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+          description: Keep this exact ID for retry and lost-response recovery.
+        scope:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          minLength: 1
+          maxLength: 64
+        actor:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Caller-asserted audit actor, limited to 255 Unicode characters by the patch planner.
+        expected_version:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^-?[1-9][0-9]*$'
+          description: Canonical nonzero signed 64-bit revision token.
+        prior_receipt_id:
+          type: string
+          minLength: 1
+          maxLength: 191
+        prior_receipt_digest:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 digest of the exact prior durable receipt.
+        patch:
+          $ref: '#/components/schemas/TransitionIssuePatch'
+        protected_permit:
+          type: string
+          minLength: 1
+          maxLength: 65536
+          x-max-utf8-bytes: 65536
+          pattern: '^[^\u0000-\u001F\u007F-\u009F\u2028\u2029]+$'
+          description: >-
+            Required exact signed authorization for this operation, issue,
+            workspace, and canonical patch. Bearer authentication alone does
+            not authorize the write. Storage verifies and consumes its replay
+            identity in the source-and-receipt transaction.
+
+    TransitionIssuePatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        metadata:
+          type: array
+          description: >-
+            Metadata compare-and-set entries. Keys are canonicalized in sorted
+            order and may appear once. Omitted `expected` means the key must be
+            absent; present JSON `null` is distinct. Omitted `value` deletes the
+            key; present JSON `null` stores null.
+          items:
+            $ref: '#/components/schemas/TransitionMetadataPatch'
+        status:
+          $ref: '#/components/schemas/TransitionStatusPatch'
+        assignee:
+          $ref: '#/components/schemas/TransitionStringPatch'
+        labels:
+          $ref: '#/components/schemas/TransitionLabelsPatch'
+
+    TransitionMetadataPatch:
+      type: object
+      additionalProperties: false
+      required: [key]
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 255
+        expected:
+          $ref: '#/components/schemas/MetadataValue'
+        value:
+          $ref: '#/components/schemas/MetadataValue'
+
+    TransitionStringPatch:
+      type: object
+      additionalProperties: false
+      required: [expected, value]
+      properties:
+        expected:
+          type: string
+          maxLength: 255
+        value:
+          type: string
+          maxLength: 255
+
+    TransitionStatusPatch:
+      type: object
+      additionalProperties: false
+      required: [expected, value]
+      properties:
+        expected:
+          type: string
+          maxLength: 32
+        value:
+          type: string
+          maxLength: 32
+
+    TransitionLabelsPatch:
+      type: object
+      additionalProperties: false
+      required: [expected, value]
+      properties:
+        expected:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 255
+        value:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 255
+
+    TransitionPatchResponse:
+      type: object
+      required: [applied, replayed]
+      properties:
+        applied:
+          type: boolean
+        replayed:
+          type: boolean
+        receipt:
+          $ref: '#/components/schemas/TransitionPatchReceipt'
+
+    TransitionPatchReceipt:
+      type: object
+      required:
+        [receipt_id, issue_id, scope, kind, actor, expected_version, to_version, prior_receipt_id, prior_receipt_digest, patch]
+      properties:
+        receipt_id:
+          type: string
+        issue_id:
+          type: string
+        scope:
+          type: string
+        kind:
+          type: string
+        actor:
+          type: string
+        expected_version:
+          type: string
+          description: Canonical signed 64-bit revision required by this patch.
+        to_version:
+          type: string
+          description: Exact backend-generated revision committed with this patch.
+        prior_receipt_id:
+          type: string
+        prior_receipt_digest:
+          type: string
+        patch:
+          $ref: '#/components/schemas/TransitionIssuePatch'
+
     UpdateIssueRequest:
       type: object
       additionalProperties: false
@@ -10858,12 +11692,17 @@ components:
             The stable machine-readable reason, and the ONLY member a client
             may dispatch on. v0's vocabulary: `invalid_argument` (400, also
             emitted by the Host-header middleware on any route),
-            `invalid_cursor` (400), `unauthenticated` (401, only on a server
-            configured with a token file), `not_found` (404),
+            `invalid_cursor` (400), `unauthenticated` (401, when a configured
+            token is refused or an authentication-required route has no
+            verifier), `not_found` (404),
             `already_claimed` (409), `not_claimable` (409),
             `not_closable` (409), `not_releasable` (409),
             `dependency_cycle` (409), `dependency_exists` (409),
             `already_exists` (409), `precondition_failed` (409),
+            `transition_receipt_conflict` (409),
+            `batch_apply_receipt_conflict` (409), `protected_record` (409),
+            `unsupported_resource` (409),
+            `not_implemented` (501),
             `events_journal_disabled` (409), `events_journal_truncated` (410),
             `busy` (503),
             `db_unavailable` (503), `events_watch_saturated` (503),
@@ -10879,11 +11718,10 @@ components:
             string per code and carries nothing about the underlying failure:
             driver and dial errors routinely embed the DSN, database user and
             host:port, and this API supports binding beyond loopback. It is
-            fixed for `unauthenticated` too, and for the mirror-image reason:
-            the caller's own input there is a credential, so echoing it would
-            write the token into every client log and proxy trace on the way
-            back. Other 4xx details reflect the caller's own input back and are
-            specific.
+            fixed for `unauthenticated` and `protected_record` too, because
+            those refusals must not reveal credentials, permits, or internal
+            record-class details. Other 4xx details reflect the caller's own
+            input back and are specific.
         param:
           type: string
           description: >-

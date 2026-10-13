@@ -7,6 +7,7 @@ import (
 
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/ui"
+	"github.com/steveyegge/beads/issueops"
 )
 
 var assignCmd = &cobra.Command{
@@ -25,7 +26,12 @@ Refuses to overwrite another actor's live in_progress claim without --force
 Examples:
   bd assign bd-123 alice
   bd assign bd-123 ""      # unassign`,
-	Args:          cobra.ExactArgs(2),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if err := validateRevisionArguments(cmd, args, 2); err != nil {
+			return err
+		}
+		return cobra.ExactArgs(2)(cmd, args)
+	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -39,8 +45,12 @@ Examples:
 		}()
 
 		force, _ := cmd.Flags().GetBool("force")
+		expectedVersion := ifRevisionPrecondition(cmd)
 
 		if usesProxiedServer() {
+			if expectedVersion != nil {
+				return reportRevisionUnsupported("--if-revision is not supported against a proxied server")
+			}
 			return runAssignProxiedServer(rootCtx, args, force)
 		}
 
@@ -67,21 +77,43 @@ Examples:
 		issueStore := result.Store
 
 		if err := validateIssueUpdatable(id, result.Issue); err != nil {
+			if expectedVersion != nil {
+				return reportRevisionRefusal(err)
+			}
 			return HandleErrorRespectJSON("%s", err)
 		}
 
 		// bd-98s5c: bd assign is shorthand for an unguarded assignee update —
 		// same live-claim fence as bd update -a.
-		if err := validateIssueReassignable(id, result.Issue, actor, assignee,
-			storeClaimPoolAliases(ctx, issueStore), force); err != nil {
-			return HandleErrorRespectJSON("%s", err)
-		}
-
-		updates := map[string]interface{}{
-			"assignee": assignee,
-		}
-		if err := issueStore.UpdateIssue(ctx, result.ResolvedID, updates, actor); err != nil {
-			return HandleErrorRespectJSON("updating %s: %v", id, err)
+		if expectedVersion != nil {
+			if err := revisionWriteReady(ctx, issueStore); err != nil {
+				return err
+			}
+			ops, err := writeOps(issueStore)
+			if err != nil {
+				return mapRevisionWriteError("assigning "+id, err)
+			}
+			opsCtx, err := issueOpsContext(ctx)
+			if err != nil {
+				return HandleErrorRespectJSON("%v", err)
+			}
+			_, err = runCommandUpdateMutation(opsCtx, ops, commandUpdateMutation{
+				actor: actor, issueID: result.ResolvedID, force: force,
+				patch:           issueops.IssuePatch{Assignee: setField(assignee)},
+				expectedVersion: expectedVersion,
+			})
+			if err != nil {
+				return mapRevisionWriteError("assigning "+id, err)
+			}
+		} else {
+			if err := validateIssueReassignable(id, result.Issue, actor, assignee,
+				storeClaimPoolAliases(ctx, issueStore), force); err != nil {
+				return HandleErrorRespectJSON("%s", err)
+			}
+			updates := map[string]interface{}{"assignee": assignee}
+			if err := issueStore.UpdateIssue(ctx, result.ResolvedID, updates, actor); err != nil {
+				return HandleErrorRespectJSON("updating %s: %v", id, err)
+			}
 		}
 
 		if err := commitPendingIfEmbedded(ctx, issueStore, actor, doltAutoCommitParams{
@@ -116,6 +148,7 @@ Examples:
 }
 
 func init() {
+	registerRevisionPrecondition(assignCmd)
 	assignCmd.Flags().Bool("force", false, "Allow overwriting another actor's live in_progress claim (use only for abandoned claims — crashed agent, expired lease; prefer bd reclaim)")
 	assignCmd.ValidArgsFunction = issueIDCompletion
 	rootCmd.AddCommand(assignCmd)

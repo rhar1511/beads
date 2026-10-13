@@ -48,9 +48,16 @@ func (m *metadataCAS) CompareAndSetKey(ctx context.Context, req issueops.Compare
 	if err != nil {
 		return issueops.CompareAndSetKeyResult{}, err
 	}
+	digest, err := issueops.ProtectedMutationDigest(req)
+	if err != nil {
+		return issueops.CompareAndSetKeyResult{}, err
+	}
 
 	var result issueops.CompareAndSetKeyResult
 	if err := m.store.runIssueOperationTxWithMessage(ctx, func(tx *sql.Tx) (storeops.ChangedTables, string, error) {
+		if err := storeops.RequireProtectedMutation(ctx, tx, req.ProtectedPermit, "metadata.compare_and_set", []string{plan.IssueID}, digest, ""); err != nil {
+			return nil, "", err
+		}
 		swap, write, err := storeops.CompareAndSetMetadataKeyInTx(ctx, tx, plan)
 		if err != nil {
 			return nil, "", err

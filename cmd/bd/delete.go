@@ -47,7 +47,12 @@ Cascade: Recursively delete all dependents
 
 Force: Delete and orphan dependents
   bd delete bd-1 --force`,
-	Args:          cobra.MinimumNArgs(0),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if err := validateRevisionArguments(cmd, args, 1); err != nil {
+			return err
+		}
+		return cobra.MinimumNArgs(0)(cmd, args)
+	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -60,7 +65,11 @@ Force: Delete and orphan dependents
 			}
 		}()
 
+		expectedVersion := ifRevisionPrecondition(cmd)
 		if usesProxiedServer() {
+			if expectedVersion != nil {
+				return reportRevisionUnsupported("--if-revision is not supported against a proxied server")
+			}
 			return runDeleteProxiedServer(cmd, rootCtx, args)
 		}
 
@@ -116,9 +125,17 @@ Force: Delete and orphan dependents
 		issue := routedResult.Issue
 		issueID = routedResult.ResolvedID
 		activeStore := routedResult.Store
+		if expectedVersion != nil {
+			if err := revisionWriteReady(ctx, activeStore); err != nil {
+				return err
+			}
+		}
 
 		deleter, err := activeStore.Deleter()
 		if err != nil {
+			if expectedVersion != nil {
+				return mapRevisionWriteError("deleting "+issueID, err)
+			}
 			return HandleError("%v", err)
 		}
 		// --force is this command's CONFIRMATION as well as its orphan mode, so an
@@ -126,10 +143,11 @@ Force: Delete and orphan dependents
 		// rewrite runs INSIDE the transaction that deletes, because it is the
 		// role's.
 		request := issueops.DeleteRequest{
-			Actor:  actor,
-			IDs:    []string{issueID},
-			Force:  force,
-			DryRun: dryRun || !force,
+			Actor:           actor,
+			IDs:             []string{issueID},
+			Force:           force,
+			DryRun:          dryRun || !force,
+			ExpectedVersion: expectedVersion,
 		}
 		opsCtx, err := issueOpsContext(ctx)
 		if err != nil {
@@ -152,6 +170,9 @@ Force: Delete and orphan dependents
 			return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, result)
 		}
 		if err != nil {
+			if expectedVersion != nil {
+				return mapRevisionWriteError("deleting "+issueID, err)
+			}
 			return HandleError("deleting issue: %v", err)
 		}
 
@@ -497,6 +518,7 @@ func uniqueStrings(slice []string) []string {
 }
 
 func init() {
+	registerRevisionPrecondition(deleteCmd)
 	deleteCmd.Flags().BoolP("force", "f", false, "Actually delete (without this flag, shows preview)")
 	deleteCmd.Flags().String("from-file", "", "Read issue IDs from file (one per line)")
 	deleteCmd.Flags().Bool("dry-run", false, "Preview what would be deleted without making changes")

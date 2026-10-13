@@ -82,6 +82,9 @@ func (s *DoltStore) runIssueOperationTxWithMessage(ctx context.Context, fn func(
 		// resolves the true outcome.
 		return err
 	}
+	if storageissueops.ProtectedMutationPermitUseWritten(ctx) {
+		tables.Add("protected_mutation_permit_uses")
+	}
 	staged := sortedDirtyTables(tables)
 	if len(staged) == 0 {
 		return nil

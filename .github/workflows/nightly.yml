@@ -77,19 +77,45 @@ jobs:
           # GitHub Actions (known issue, see scripts/repro-dolt-hang/).
           # Non-Docker integration tests still run via the installed dolt binary.
           BEADS_TEST_SKIP: dolt
-        run: go test -v -race -tags=integration,gms_pure_go -coverprofile=coverage.out -timeout=30m ./...
+          BEADS_TEST_BD_BINARY: ${{ github.workspace }}/bd
+          # Prevent detached Dolt metrics processes racing temporary-directory cleanup.
+          DOLT_DISABLE_EVENT_FLUSH: "1"
+        run: |
+          # The CLI conformance fixtures own native Dolt processes. Limit their
+          # opt-in to cmd/bd: other packages use Docker-backed shared servers.
+          package_list=$(go list -tags=integration,gms_pure_go ./...)
+          other_packages=()
+          while IFS= read -r package; do
+            if [[ "$package" != "github.com/steveyegge/beads/cmd/bd" ]]; then
+              other_packages+=("$package")
+            fi
+          done <<< "$package_list"
+          test "${#other_packages[@]}" -gt 0
+          BEADS_TEST_ENV_RUN_DOLT=1 go test -v -race -tags=integration,gms_pure_go -coverprofile=coverage-cli.out -timeout=30m ./cmd/bd
+          go test -v -race -tags=integration,gms_pure_go -coverprofile=coverage-packages.out -timeout=30m "${other_packages[@]}"
+          {
+            head -n 1 coverage-cli.out
+            tail -n +2 coverage-cli.out
+            tail -n +2 coverage-packages.out
+          } > coverage.out
 
       - name: Check coverage threshold
         run: |
-          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+          set -euo pipefail
+          COVERAGE=$(go tool cover -func=coverage.out | awk '$1 == "total:" {print $3}')
+          if ! [[ "$COVERAGE" =~ ^[0-9]+([.][0-9]+)?%$ ]]; then
+            echo "Invalid or ambiguous aggregate coverage: $COVERAGE" >&2
+            exit 1
+          fi
+          COVERAGE=${COVERAGE%\%}
           echo "Coverage: $COVERAGE%"
           # Threshold is lower (30%) because Docker-based Dolt integration
           # tests are skipped in CI (BEADS_TEST_SKIP=dolt). With Docker
           # tests included, coverage would be ~50%+.
-          if (( $(echo "$COVERAGE < 30" | bc -l) )); then
+          if awk -v coverage="$COVERAGE" 'BEGIN {exit !(coverage < 30)}'; then
             echo "❌ Coverage is below 30% threshold"
             exit 1
-          elif (( $(echo "$COVERAGE < 40" | bc -l) )); then
+          elif awk -v coverage="$COVERAGE" 'BEGIN {exit !(coverage < 40)}'; then
             echo "⚠️  Coverage is below 40% (warning threshold)"
           else
             echo "✅ Coverage meets threshold"

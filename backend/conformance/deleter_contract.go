@@ -1056,9 +1056,7 @@ func RunDeleterRefusesAStaleExpectedVersion(t *testing.T, ctx context.Context, f
 			ExpectedVersion: &stale,
 			DryRun:          dryRun,
 		})
-		if !errors.Is(err, publicops.ErrVersionMismatch) {
-			t.Fatalf("Delete(dryRun=%v) with a stale version error = %v, want ErrVersionMismatch", dryRun, err)
-		}
+		assertVersionMismatchTokens(t, err, target, stale, current)
 		if result.Deleted != 0 {
 			t.Errorf("refused delete reported Deleted = %d, want 0", result.Deleted)
 		}

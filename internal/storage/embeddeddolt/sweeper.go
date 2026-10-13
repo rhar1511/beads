@@ -95,5 +95,6 @@ func sweptTables() storeops.ChangedTables {
 	tables := storeops.ChangedTables{}
 	tables.Add(storeops.DeleteCascadeTables(false)...)
 	tables.Add(storeops.DeleteCascadeTables(true)...)
+	tables.Add("protected_issue_records", "protected_mutation_permit_uses")
 	return tables
 }

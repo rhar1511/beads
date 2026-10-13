@@ -40,6 +40,7 @@ type commandUpdateMutation struct {
 	force            bool
 	expectedAssignee *string
 	expectedStatus   *issueops.Status
+	expectedVersion  *int64
 	// provenance names the history entry the write records. Empty takes the
 	// backend's default, which is what the direct route wants; the proxied
 	// route spells the message it has always written.
@@ -60,6 +61,7 @@ func runCommandUpdateMutation(ctx context.Context, updater commandIssueUpdater, 
 		ForceClosePolicy:      mutation.force,
 		ExpectedAssignee:      mutation.expectedAssignee,
 		ExpectedStatus:        mutation.expectedStatus,
+		ExpectedVersion:       mutation.expectedVersion,
 		Provenance:            mutation.provenance,
 	})
 }
@@ -91,6 +93,9 @@ pointless).`,
 	// open the store, run a version-bump migration, or auto-import JSONL
 	// (bd-m00pb). The interactive fallback itself is resolved in RunE.
 	Args: func(cmd *cobra.Command, args []string) error {
+		if err := validateRevisionArguments(cmd, args, 1); err != nil {
+			return err
+		}
 		if len(args) == 0 && !AllowLastTouchedFallback() {
 			return HandleErrorRespectJSON("no issue ID provided (the last-touched fallback only applies in interactive sessions; pass an explicit issue ID or set BD_LAST_TOUCHED_FALLBACK=1)")
 		}
@@ -115,7 +120,11 @@ pointless).`,
 			return HandleErrorRespectJSON("%s", err)
 		}
 
+		expectedVersion := ifRevisionPrecondition(cmd)
 		if usesProxiedServer() {
+			if expectedVersion != nil {
+				return reportRevisionUnsupported("--if-revision is not supported against a proxied server")
+			}
 			return runUpdateProxiedServer(cmd, rootCtx, args)
 		}
 
@@ -393,7 +402,7 @@ pointless).`,
 		// exclusive with --if-assignee at the flag-group level.
 		forceFlag, _ := cmd.Flags().GetBool("force")
 
-		if len(updates) == 0 && !claimFlag {
+		if len(updates) == 0 && !claimFlag && expectedVersion == nil {
 			fmt.Println("No updates specified")
 			return nil
 		}
@@ -483,6 +492,10 @@ pointless).`,
 			issueStore := result.Store
 
 			if err := validateIssueUpdatable(id, issue); err != nil {
+				if expectedVersion != nil {
+					closeIfUnmutated(result)
+					return reportRevisionRefusal(err)
+				}
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				recordFailure(id, err.Error())
 				closeIfUnmutated(result)
@@ -499,7 +512,7 @@ pointless).`,
 			// and an assignee edit that rides a WON claim only ever touches
 			// the actor's own fresh claim. A policy refusal, so it exits 1,
 			// not 13.
-			if newAssignee, ok := updates["assignee"].(string); ok && ifAssignee == nil && !claimFlag {
+			if newAssignee, ok := updates["assignee"].(string); ok && ifAssignee == nil && !claimFlag && expectedVersion == nil {
 				if err := validateIssueReassignable(id, issue, actor, newAssignee,
 					storeClaimPoolAliases(ctx, issueStore), forceFlag); err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -525,8 +538,18 @@ pointless).`,
 			}
 			notesOverwritten := replacesExistingNotes(issue.Notes, updates)
 
+			if expectedVersion != nil {
+				if err := revisionWriteReady(ctx, issueStore); err != nil {
+					closeIfUnmutated(result)
+					return err
+				}
+			}
 			ops, err := writeOps(issueStore)
 			if err != nil {
+				if expectedVersion != nil {
+					closeIfUnmutated(result)
+					return mapRevisionWriteError("updating "+id, err)
+				}
 				fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, err)
 				recordFailure(id, fmt.Sprintf("updating issue: %v", err))
 				closeIfUnmutated(result)
@@ -548,8 +571,13 @@ pointless).`,
 				force:            forceFlag,
 				expectedAssignee: ifAssignee,
 				expectedStatus:   expectedStatus,
+				expectedVersion:  expectedVersion,
 			})
 			if updateErr != nil {
+				if expectedVersion != nil {
+					closeIfUnmutated(result)
+					return mapRevisionWriteError("updating "+id, updateErr)
+				}
 				fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, updateErr)
 				failures = append(failures, updateIDFailure{
 					ID:            id,
@@ -975,6 +1003,7 @@ func updateGuardsFromFlags(cmd *cobra.Command, claimFlag bool, updates map[strin
 }
 
 func init() {
+	registerRevisionPrecondition(updateCmd)
 	updateCmd.Flags().StringP("status", "s", "", "New status")
 	registerPriorityFlag(updateCmd, "")
 	updateCmd.Flags().String("title", "", "New title")

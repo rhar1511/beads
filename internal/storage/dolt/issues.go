@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
+	publicops "github.com/steveyegge/beads/issueops"
 )
 
 // CreateIssue creates a new issue.
@@ -669,7 +671,7 @@ func (s *DoltStore) deleteIssue(ctx context.Context, id string) error {
 
 		commitMsg := fmt.Sprintf("bd: delete %s", id)
 		return s.doltAddAndCommitInTx(ctx, tx,
-			[]string{"issues", "dependencies", "labels", "comments", "events", "provenance_events", "child_counters", "issue_snapshots", "compaction_snapshots"},
+			[]string{"issues", "dependencies", "labels", "comments", "events", "provenance_events", "child_counters", "issue_snapshots", "compaction_snapshots", "protected_issue_records"},
 			commitMsg)
 	}); err != nil {
 		return s.recordDoltPublicationFailure(ctx, err)
@@ -710,59 +712,33 @@ func (s *DoltStore) deleteIssues(ctx context.Context, ids []string, cascade bool
 	if len(ids) == 0 {
 		return &types.DeleteIssuesResult{}, nil
 	}
-
-	// Route wisp IDs to wisp deletion; process regular IDs in batch below.
-	// DoltStore uses its own batch wisp deletion (separate transactions per batch
-	// to avoid write timeout on large sets — see bd-2ehd, ff-tqm).
-	ephIDs, regularIDs := s.partitionByWispStatus(ctx, ids)
-	wispDeleteCount := 0
-	if len(ephIDs) > 0 {
-		var activeWispIDs []string
-		for _, eid := range ephIDs {
-			if s.isActiveWisp(ctx, eid) {
-				activeWispIDs = append(activeWispIDs, eid)
-			}
-		}
-		wispDeleteCount = len(activeWispIDs)
-		if !dryRun && len(activeWispIDs) > 0 {
-			deleted, err := s.deleteWispBatch(ctx, activeWispIDs)
-			if err != nil {
-				return nil, fmt.Errorf("failed to batch delete wisps: %w", err)
-			}
-			wispDeleteCount = deleted
-		}
+	deleter, err := s.Deleter()
+	if err != nil {
+		return nil, err
 	}
-	ids = regularIDs
-	if len(ids) == 0 {
-		return &types.DeleteIssuesResult{DeletedCount: wispDeleteCount}, nil
+	deleted, err := deleter.Delete(ctx, publicops.DeleteRequest{
+		IDs:     append([]string(nil), ids...),
+		Cascade: cascade,
+		Force:   force,
+		DryRun:  dryRun,
+	})
+	result := &types.DeleteIssuesResult{
+		DeletedCount:      deleted.Deleted,
+		DependenciesCount: deleted.Dependencies,
+		LabelsCount:       deleted.Labels,
+		EventsCount:       deleted.Events,
+		OrphanedIssues:    append([]string(nil), deleted.Orphaned...),
 	}
-
-	var result *types.DeleteIssuesResult
-	if err := s.withWriteTx(ctx, func(tx *sql.Tx) error {
-		// storage.DeleteIssues carries no actor, so the journal rows record none.
-		r, err := issueops.DeleteIssuesInTx(ctx, tx, ids, cascade, force, dryRun, "")
-		if err != nil {
-			result = r
-			return err
-		}
-		result = r
-		if dryRun {
-			return nil
-		}
-
-		commitMsg := fmt.Sprintf("bd: delete %d issue(s)", result.DeletedCount)
-		return s.doltAddAndCommitInTx(ctx, tx,
-			[]string{"issues", "dependencies", "labels", "comments", "events", "provenance_events", "child_counters", "issue_snapshots", "compaction_snapshots"},
-			commitMsg)
-	}); err != nil {
-		// Preserve partial result (e.g., OrphanedIssues) on error.
-		if result != nil {
-			result.DeletedCount += wispDeleteCount
+	if err != nil {
+		// Preserve the legacy refusal result while the Deleter keeps the whole
+		// mixed-plane attempt atomic. It previously returned external dependents
+		// alongside this specific refusal.
+		var blocked *publicops.DependentsOutsideRequestError
+		if errors.As(err, &blocked) {
+			result.OrphanedIssues = append([]string(nil), blocked.Dependents...)
 		}
 		return result, s.recordDoltPublicationFailure(ctx, err)
 	}
-	result.DeletedCount += wispDeleteCount
-
 	return result, nil
 }
 

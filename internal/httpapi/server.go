@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -27,6 +28,8 @@ import (
 	"github.com/steveyegge/beads/internal/httpapi/apigen"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/storage/uow"
 	"github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
@@ -265,6 +268,24 @@ type Config struct {
 	// every other role: a Config missing it would bind and nil-dereference on
 	// the first request that reached that handler.
 	MetadataCAS issueops.MetadataCAS
+	// RevisionTransition is the optional revision-fenced metadata transition
+	// role for a roles-backed server. It is used only with a positive
+	// TransitionReadiness proof; absence leaves both HTTP capabilities hidden.
+	RevisionTransition issueops.RevisionTransition
+	// SourceSnapshotReader is the optional atomic durable issue-plus-outgoing-
+	// edges read. It is published only when the same Q43 revision readiness
+	// proof, authentication, and project identity are present.
+	SourceSnapshotReader issueops.SourceSnapshotReader
+	// TransitionReadiness is a read-only schema/data probe result. Its zero
+	// value is unready, and only the schema probe can create a positive value.
+	TransitionReadiness schema.RevisionTransitionReadiness
+	// BatchApplyReceiptReadiness is the startup-owned proof for the optional
+	// durable receipt mode on issues:batchApply. Its zero value is unready.
+	BatchApplyReceiptReadiness schema.BatchApplyReceiptReadiness
+	// ProtectedMutationAuthority is immutable server-startup authority. Its zero
+	// value leaves protected writes fail-closed and the protected capability
+	// hidden. It is never populated from request data or role credentials.
+	ProtectedMutationAuthority ProtectedMutationAuthority
 	// BatchApplier is the ordered, heterogeneous plan behind
 	// POST /v0/beads/issues:batchApply. Required on the same terms as every
 	// other role: a Config missing it would bind and nil-dereference on the
@@ -345,32 +366,40 @@ type Server struct {
 	// reader(), claimer(), cycleDetector() and the rest of those accessors hand
 	// back on the store-shaped source; the field names differ from the method
 	// names because a struct cannot carry both.
-	issueReader       issueops.Reader
-	issueClaimer      issueops.Claimer
-	issueBatchCloser  issueops.BatchCloser
-	issueReadyClaimer issueops.ReadyClaimer
-	issueReleaser     issueops.Releaser
-	issueLifecycle    issueops.Lifecycle
-	settings          issueops.WorkspaceConfig
-	issueStats        issueops.StatsReporter
-	issueCycles       issueops.CycleDetector
-	issueEdges        issueops.EdgeReader
-	issueEdgeCounter  issueops.GraphCounter
-	issueRelations    issueops.Relations
-	issueCommenter    issueops.Commenter
-	issueBlocking     issueops.BlockingAnnotator
-	issueTree         issueops.TreeWalker
-	issueReadyCounter issueops.ReadyCounter
-	issueCounter      issueops.Counter
-	issueQuerier      issueops.Querier
-	issueSweeper      issueops.Sweeper
-	issueDeleter      issueops.Deleter
-	issueBatchCreator issueops.BatchCreator
-	issueDependencies issueops.DependencyEditor
-	issueMetadataCAS  issueops.MetadataCAS
-	issueBatchApplier issueops.BatchApplier
-	workspaceMemories memoryops.Memories
-	eventsJournal     storage.EventsJournalCursor
+	issueReader                issueops.Reader
+	issueClaimer               issueops.Claimer
+	issueBatchCloser           issueops.BatchCloser
+	issueReadyClaimer          issueops.ReadyClaimer
+	issueReleaser              issueops.Releaser
+	issueLifecycle             issueops.Lifecycle
+	settings                   issueops.WorkspaceConfig
+	issueStats                 issueops.StatsReporter
+	issueCycles                issueops.CycleDetector
+	issueEdges                 issueops.EdgeReader
+	issueEdgeCounter           issueops.GraphCounter
+	issueRelations             issueops.Relations
+	issueCommenter             issueops.Commenter
+	issueBlocking              issueops.BlockingAnnotator
+	issueTree                  issueops.TreeWalker
+	issueReadyCounter          issueops.ReadyCounter
+	issueCounter               issueops.Counter
+	issueQuerier               issueops.Querier
+	issueSweeper               issueops.Sweeper
+	issueDeleter               issueops.Deleter
+	issueBatchCreator          issueops.BatchCreator
+	issueDependencies          issueops.DependencyEditor
+	issueMetadataCAS           issueops.MetadataCAS
+	issueRevisionTransition    issueops.RevisionTransition
+	revisionTransitionReady    bool
+	revisionPatchReady         bool
+	protectedMutationAuthority ProtectedMutationAuthority
+	protectedMutationReady     bool
+	issueSourceSnapshot        issueops.SourceSnapshotReader
+	sourceSnapshotReady        bool
+	batchApplyReceiptReady     bool
+	issueBatchApplier          issueops.BatchApplier
+	workspaceMemories          memoryops.Memories
+	eventsJournal              storage.EventsJournalCursor
 
 	listener net.Listener
 	http     *http.Server
@@ -464,6 +493,9 @@ func ValidateBindAddr(addr string, allowNonLoopback bool) (net.IP, error) {
 // exist — N instances simply run on N ports — which is why fixed ports are the
 // deployment recommendation.)
 func Listen(cfg Config) (*Server, error) {
+	if cfg.ProtectedMutationAuthority.configured() && !cfg.ProtectedMutationAuthority.matchesWorkspace(cfg.Workspace.ProjectID, cfg.Workspace.Database) {
+		return nil, errors.New("httpapi: protected mutation authority does not match the selected project and database")
+	}
 	if err := checkDatabaseSource(cfg); err != nil {
 		return nil, err
 	}
@@ -487,6 +519,38 @@ func Listen(cfg Config) (*Server, error) {
 	}
 	if cfg.Stderr == nil {
 		cfg.Stderr = os.Stderr
+	}
+	transitionRole := cfg.RevisionTransition
+	sourceSnapshotRole := cfg.SourceSnapshotReader
+	if cfg.Provider != nil && cfg.TransitionReadiness.Ready() {
+		if source, ok := cfg.Provider.(uow.RevisionTransitionSource); ok {
+			transitionRole, err = source.RevisionTransition()
+			if err != nil {
+				transitionRole = nil
+			}
+		} else {
+			transitionRole = nil
+		}
+		if source, ok := cfg.Provider.(uow.SourceSnapshotReaderSource); ok {
+			sourceSnapshotRole, err = source.SourceSnapshotReader()
+			if err != nil {
+				sourceSnapshotRole = nil
+			}
+		} else {
+			sourceSnapshotRole = nil
+		}
+	}
+	transitionReady := revisionTransitionRoutesReady(cfg.TransitionReadiness, transitionRole, cfg.Auth, cfg.Workspace.ProjectID)
+	protectedMutationReady := transitionReady && cfg.ProtectedMutationAuthority.ready()
+	patchRole, _ := transitionRole.(issueops.RevisionTransitionPatcher)
+	transitionPatchReady := revisionTransitionPatchRoutesReady(cfg.TransitionReadiness, transitionRole, patchRole, cfg.Auth, cfg.Workspace.ProjectID, protectedMutationReady)
+	sourceSnapshotReady := sourceSnapshotRoutesReady(cfg.TransitionReadiness, sourceSnapshotRole, cfg.Auth, cfg.Workspace.ProjectID)
+	batchApplyReceiptReady := cfg.BatchApplyReceiptReadiness.Ready()
+	if cfg.Provider == nil {
+		batchApplyReceiptReady = batchApplyReceiptReady && !isNilBatchApplier(cfg.BatchApplier)
+	} else {
+		_, batchApplySourceReady := cfg.Provider.(uow.BatchApplierSource)
+		batchApplyReceiptReady = batchApplyReceiptReady && batchApplySourceReady
 	}
 
 	prefix, err := newIDPrefix()
@@ -531,13 +595,21 @@ func Listen(cfg Config) (*Server, error) {
 		closing:         make(chan struct{}),
 		maxWatchStreams: maxWatchStreams,
 
-		log:      log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
-		stdout:   cfg.Stdout,
-		ctxBody:  contextResponse(cfg.Workspace, cfg.SchemaVersion, Capabilities()),
-		hosts:    newHostPolicy(ip, cfg.AllowedHosts),
-		auth:     cfg.Auth,
-		idPrefix: prefix,
-		maxConns: maxConns,
+		log:                        log.New(cfg.Stderr, "bd serve: ", log.LstdFlags|log.LUTC),
+		stdout:                     cfg.Stdout,
+		ctxBody:                    contextResponse(cfg.Workspace, cfg.SchemaVersion, capabilitiesForWithGates(transitionReady, sourceSnapshotReady, protectedMutationReady, batchApplyReceiptReady, transitionPatchReady)),
+		hosts:                      newHostPolicy(ip, cfg.AllowedHosts),
+		auth:                       cfg.Auth,
+		idPrefix:                   prefix,
+		maxConns:                   maxConns,
+		issueRevisionTransition:    transitionRole,
+		revisionTransitionReady:    transitionReady,
+		revisionPatchReady:         transitionPatchReady,
+		protectedMutationAuthority: cfg.ProtectedMutationAuthority,
+		protectedMutationReady:     protectedMutationReady,
+		issueSourceSnapshot:        sourceSnapshotRole,
+		sourceSnapshotReady:        sourceSnapshotReady,
+		batchApplyReceiptReady:     batchApplyReceiptReady,
 	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
@@ -580,6 +652,74 @@ func Listen(cfg Config) (*Server, error) {
 	fmt.Fprintf(s.stdout, "bd serve: listening on http://%s\n", s.Addr())
 	s.logStartup()
 	return s, nil
+}
+
+// revisionTransitionRoutesReady is the complete startup gate for publishing or
+// serving either transition route. Readiness alone is insufficient: both
+// routes require a role, bearer authentication, and a known project identity.
+func revisionTransitionRoutesReady(readiness schema.RevisionTransitionReadiness, role issueops.RevisionTransition, auth *TokenFileAuth, projectID string) bool {
+	return readiness.Ready() && !isNilRevisionTransitionRole(role) && auth != nil && strings.TrimSpace(projectID) != ""
+}
+
+func revisionTransitionPatchRoutesReady(readiness schema.RevisionTransitionReadiness, transition issueops.RevisionTransition, patch issueops.RevisionTransitionPatcher, auth *TokenFileAuth, projectID string, protectedReady bool) bool {
+	return readiness.PatchReady() && !isNilRevisionTransitionRole(transition) && !isNilRevisionTransitionPatcher(patch) &&
+		auth != nil && strings.TrimSpace(projectID) != "" && protectedReady
+}
+
+func sourceSnapshotRoutesReady(readiness schema.RevisionTransitionReadiness, role issueops.SourceSnapshotReader, auth *TokenFileAuth, projectID string) bool {
+	return readiness.Ready() && !isNilSourceSnapshotReader(role) && auth != nil && strings.TrimSpace(projectID) != ""
+}
+
+func isNilRevisionTransitionRole(role issueops.RevisionTransition) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isNilRevisionTransitionPatcher(role issueops.RevisionTransitionPatcher) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isNilSourceSnapshotReader(role issueops.SourceSnapshotReader) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
+func isNilBatchApplier(role issueops.BatchApplier) bool {
+	if role == nil {
+		return true
+	}
+	value := reflect.ValueOf(role)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // checkDatabaseSource enforces exactly one complete database source.
@@ -635,7 +775,7 @@ func sourceRoles(cfg Config) []any {
 const roleSourceNames = "Reader, Claimer, ReadyClaimer, Releaser, Lifecycle, BatchCloser, Settings, Stats, CycleDetector, EdgeReader, GraphCounter, Relations, Commenter, BlockingAnnotator, TreeWalker, ReadyCounter, Counter, Querier, Sweeper, Deleter, BatchCreator, DependencyEditor, BatchApplier, Memories and MetadataCAS"
 
 func anyRoleSet(cfg Config) bool {
-	return slices.ContainsFunc(sourceRoles(cfg), func(r any) bool { return r != nil })
+	return cfg.SourceSnapshotReader != nil || slices.ContainsFunc(sourceRoles(cfg), func(r any) bool { return r != nil })
 }
 
 func everyRoleSet(cfg Config) bool {
@@ -643,7 +783,7 @@ func everyRoleSet(cfg Config) bool {
 }
 
 func anyRoleFiresHooks(cfg Config) bool {
-	return slices.ContainsFunc(sourceRoles(cfg), storage.RoleFiresHooks)
+	return storage.RoleFiresHooks(cfg.SourceSnapshotReader) || slices.ContainsFunc(sourceRoles(cfg), storage.RoleFiresHooks)
 }
 
 func checkDatabaseSource(cfg Config) error {
@@ -1145,6 +1285,31 @@ func (s *Server) metadataCAS(r *http.Request) (issueops.MetadataCAS, error) {
 	return src.MetadataCAS()
 }
 
+// revisionTransition returns the version-fenced metadata transition role for
+// one request. Provider-backed roles are built over timedProvider so their
+// unit-of-work acquisition remains visible in the request log.
+func (s *Server) revisionTransition(r *http.Request) (issueops.RevisionTransition, error) {
+	if s.provider == nil {
+		return s.issueRevisionTransition, nil
+	}
+	var src uow.RevisionTransitionSource = timedProvider{inner: s.provider, rec: requestInfo(r.Context())}
+	return src.RevisionTransition()
+}
+
+// sourceSnapshotReader returns the atomic durable source read role. Provider-
+// backed calls use timedProvider so the one unit of work appears in uow_ms.
+func (s *Server) sourceSnapshotReader(r *http.Request) (issueops.SourceSnapshotReader, error) {
+	if s.provider == nil {
+		return checkedSourceSnapshotReader{inner: s.issueSourceSnapshot}, nil
+	}
+	var src uow.SourceSnapshotReaderSource = timedProvider{inner: s.provider, rec: requestInfo(r.Context())}
+	reader, err := src.SourceSnapshotReader()
+	if err != nil {
+		return nil, err
+	}
+	return checkedSourceSnapshotReader{inner: reader}, nil
+}
+
 // batchApplier returns the ordered-plan write surface for one request, on the
 // same terms as every role above and held by INTERFACE so
 // uow.BatchApplierSource is load-bearing rather than decorative.
@@ -1563,8 +1728,14 @@ func (s *Server) route(rt route) http.Handler {
 			r = r.WithContext(ctx)
 		}
 
-		if !rt.authExempt && s.auth != nil && !s.authorize(w, r, rec) {
-			return
+		if !rt.authExempt && (rt.authRequired || s.auth != nil) {
+			if s.auth == nil {
+				s.fail(w, r, newResult(CodeUnauthenticated, ""))
+				return
+			}
+			if !s.authorize(w, r, rec) {
+				return
+			}
 		}
 
 		// Identity before resources: a stamp for the wrong workspace is turned
@@ -1574,7 +1745,13 @@ func (s *Server) route(rt route) http.Handler {
 		// the credential check so the server_project_id it discloses stays
 		// behind the authentication gate.
 		if !rt.projectExempt {
-			if res := s.checkProjectStamp(r); res != nil {
+			var res *Result
+			if rt.projectRequired {
+				res = s.checkRequiredProjectStamp(r)
+			} else {
+				res = s.checkProjectStamp(r)
+			}
+			if res != nil {
 				s.fail(w, r, *res)
 				return
 			}
@@ -1587,6 +1764,13 @@ func (s *Server) route(rt route) http.Handler {
 				return
 			}
 			defer release()
+		}
+
+		if s.protectedMutationReady {
+			r = r.WithContext(storageissueops.WithProtectedMutationVerifier(
+				r.Context(), s.protectedMutationAuthority.verifier, s.protectedMutationAuthority.audience,
+				s.protectedMutationAuthority.projectID, s.protectedMutationAuthority.database,
+			))
 		}
 
 		rt.handler(s, w, r)
@@ -1688,6 +1872,24 @@ func (s *Server) checkProjectStamp(r *http.Request) *Result {
 	requestInfo(r.Context()).refuse(stamp)
 	res := ProjectMismatch(stamp, s.ctxBody.ProjectId)
 	return &res
+}
+
+// checkRequiredProjectStamp is the stricter identity gate for transition
+// operations. These routes require a caller assertion and fail closed when
+// this server cannot assert its own project identity.
+func (s *Server) checkRequiredProjectStamp(r *http.Request) *Result {
+	stamp := r.Header.Get(ProjectIDHeader)
+	if stamp == "" {
+		res := InvalidArgument(ProjectIDHeader, ReasonInvalidValue,
+			"the "+ProjectIDHeader+" header is required for this operation")
+		return &res
+	}
+	if stamp != s.ctxBody.ProjectId || s.ctxBody.ProjectId == "" {
+		requestInfo(r.Context()).refuse(stamp)
+		res := ProjectMismatch(stamp, s.ctxBody.ProjectId)
+		return &res
+	}
+	return nil
 }
 
 // fail writes a problem response and records what it was for the log line.

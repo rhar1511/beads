@@ -96,6 +96,7 @@ func RunTxResultWithin[T any](ctx context.Context, p UnitOfWorkProvider, maxElap
 		}
 		defer closeAttempt(ctx, uw)
 
+		issueops.ResetProtectedMutationAttempt(ctx)
 		r, commitMsg, err := work(ctx, uw)
 		if err != nil {
 			if isSerializationError(err) {
@@ -187,5 +188,6 @@ func RunTxRead[T any](ctx context.Context, p UnitOfWorkProvider, work TxReadFunc
 	}
 	defer closeAttempt(ctx, uw)
 
+	issueops.ResetProtectedMutationAttempt(ctx)
 	return work(ctx, uw)
 }

@@ -177,6 +177,7 @@ type DependencySQLRepository interface {
 	CountEdges(ctx context.Context, req issueops.EdgeCountRequest) (issueops.EdgeCountResult, error)
 	CycleThroughEdges(ctx context.Context, edges [][2]string) (string, error)
 	GetDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
+	GetDurableDependencyRecordsForIssues(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
 	GetExternalBlockingDependencyRecords(ctx context.Context) (map[string][]*types.Dependency, error)
 	GetWispDependencyRecordsForIDs(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error)
 
@@ -240,9 +241,17 @@ type DependencyUseCase interface {
 	// closes, or "" when none does. Each pair is (source, target).
 	CycleThroughEdges(ctx context.Context, edges [][2]string) (string, error)
 	GetIssueDependencyRecords(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
+	// GetDurableIssueDependencyRecords reads only the durable dependency table.
+	// Callers use it after independently proving that every source is durable,
+	// so an ID collision with the wisp plane cannot redirect the read.
+	GetDurableIssueDependencyRecords(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error)
 	GetExternalBlockingDependencyRecords(ctx context.Context) (map[string][]*types.Dependency, error)
 
 	GetWispDependencyRecords(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error)
+	// WispSourceIDs classifies IDs by storage plane inside the current unit of
+	// work. Revision-fenced operations use it to refuse snapshots that depend
+	// on the ignored wisp plane.
+	WispSourceIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 
 	AddWispDependency(ctx context.Context, dep *types.Dependency, actor string) error
 	RemoveWispDependency(ctx context.Context, wispID, dependsOnID, actor string) error
@@ -817,6 +826,17 @@ func (u *dependencyUseCaseImpl) GetIssueDependencyRecords(ctx context.Context, i
 	return out, nil
 }
 
+func (u *dependencyUseCaseImpl) GetDurableIssueDependencyRecords(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error) {
+	if len(issueIDs) == 0 {
+		return map[string][]*types.Dependency{}, nil
+	}
+	out, err := u.depRepo.GetDurableDependencyRecordsForIssues(ctx, issueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("GetDurableIssueDependencyRecords: %w", err)
+	}
+	return out, nil
+}
+
 func (u *dependencyUseCaseImpl) GetExternalBlockingDependencyRecords(ctx context.Context) (map[string][]*types.Dependency, error) {
 	out, err := u.depRepo.GetExternalBlockingDependencyRecords(ctx)
 	if err != nil {
@@ -834,4 +854,8 @@ func (u *dependencyUseCaseImpl) GetWispDependencyRecords(ctx context.Context, wi
 		return nil, fmt.Errorf("GetWispDependencyRecords: %w", err)
 	}
 	return out, nil
+}
+
+func (u *dependencyUseCaseImpl) WispSourceIDs(ctx context.Context, ids []string) (map[string]struct{}, error) {
+	return u.depRepo.WispSourceIDs(ctx, ids)
 }

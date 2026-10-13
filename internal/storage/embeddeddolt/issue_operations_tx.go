@@ -25,12 +25,16 @@ func (s *EmbeddedDoltStore) runIssueOperationTx(ctx context.Context, commitMsg s
 func (s *EmbeddedDoltStore) runIssueOperationTxWithMessage(ctx context.Context, fn func(*sql.Tx) (storageissueops.ChangedTables, string, error)) error {
 	deferred := storageissueops.VersionCommitDeferred(ctx)
 	return s.runTransactionWithMessage(ctx, func(tx *embeddedTransaction) (string, error) {
+		storageissueops.ResetProtectedMutationAttempt(ctx)
 		tables, commitMsg, err := fn(tx.tx)
 		if err != nil {
 			return "", err
 		}
 		for table := range tables {
 			tx.dirty.MarkDirty(table)
+		}
+		if storageissueops.ProtectedMutationPermitUseWritten(ctx) {
+			tx.dirty.MarkDirty("protected_mutation_permit_uses")
 		}
 		if deferred {
 			return "", nil

@@ -33,11 +33,28 @@ const (
 // before, which is what keeps enforcement additive rather than a new precondition.
 const ProjectIDHeader = "Bd-Project-Id"
 
+// Patch-transition operations require both the Q43 receipt-chain schema and
+// the startup-owned protected-mutation verifier. They are separate from the
+// compatible one-key transition API and stay hidden when either proof is
+// absent.
+const (
+	CapTransitionPatch        = "issues.transitionPatch"
+	CapTransitionPatchReceipt = "issues.transitionPatchReceipt.get"
+)
+
 // CapProjectEnforce is the behavior capability that advertises this enforcement.
 // Unlike the per-operation tokens it names no route: it tells a client that a
 // stamped request WILL be checked here, so the client can rely on the refusal
 // instead of discovering an older server silently ignored its stamp.
 const CapProjectEnforce = "project.enforce"
+
+// CapProtectedMutation announces trusted permit verification and durable
+// replay protection for explicitly classified mutations.
+const CapProtectedMutation = "issues.protectedMutation"
+
+// CapBatchApplyReceipt announces that durable, caller-identified batchApply
+// receipts are ready on this server.
+const CapBatchApplyReceipt = "issues.batchApplyReceipt"
 
 // customMethodTarget splits the custom method off the segment the router
 // matched, and reports the row that claims it.
@@ -153,6 +170,15 @@ type route struct {
 	// reads that touch no workspace data are exempt and every other route —
 	// streaming or not — is enforced.
 	projectExempt bool
+	// authRequired makes the route require a configured bearer credential even
+	// on a loopback server whose other operations allow no-auth mode.
+	authRequired bool
+	// projectRequired makes Bd-Project-Id mandatory, and fails closed when the
+	// server has no project identity to compare it with.
+	projectRequired bool
+	// capabilityGate names an additional startup proof required before this
+	// route's capability is advertised.
+	capabilityGate string
 	// implemented gates the capability list, so a release between slices never
 	// advertises an operation that does not work. Every v0 operation is
 	// implemented as of the read-endpoints slice; the flag stays because the
@@ -280,6 +306,17 @@ var routeTable = []route{
 		capability:  "issues.get",
 		implemented: true,
 		handler:     (*Server).handleGetIssue,
+	},
+	{
+		op:              OpGetSourceSnapshot,
+		method:          http.MethodGet,
+		pattern:         "/v0/beads/issues/{id}/sourceSnapshot",
+		capability:      "issues.sourceSnapshot",
+		capabilityGate:  "source-snapshot",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleGetSourceSnapshot,
 	},
 	{
 		op:     OpUpdateIssue,
@@ -558,6 +595,54 @@ var routeTable = []route{
 		handler:      (*Server).handleCompareAndSetMetadata,
 	},
 	{
+		op:              OpTransitionMetadata,
+		method:          http.MethodPost,
+		pattern:         customMethodPattern,
+		specPath:        "/v0/beads/issues/{id}:transitionMetadata",
+		customMethod:    ":transitionMetadata",
+		capability:      "issues.transitionMetadata",
+		capabilityGate:  "revision-transition",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleTransitionMetadata,
+	},
+	{
+		op:              OpGetTransitionReceipt,
+		method:          http.MethodGet,
+		pattern:         "/v0/beads/issue-transition-receipts/{receipt_id}",
+		capability:      "issues.transitionReceipt.get",
+		capabilityGate:  "revision-transition",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleGetTransitionReceipt,
+	},
+	{
+		op:              OpTransitionPatch,
+		method:          http.MethodPost,
+		pattern:         customMethodPattern,
+		specPath:        "/v0/beads/issues/{id}:transitionPatch",
+		customMethod:    ":transitionPatch",
+		capability:      CapTransitionPatch,
+		capabilityGate:  "revision-patch",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleTransitionPatch,
+	},
+	{
+		op:              OpGetTransitionPatchReceipt,
+		method:          http.MethodGet,
+		pattern:         "/v0/beads/issue-transition-patch-receipts/{receipt_id}",
+		capability:      CapTransitionPatchReceipt,
+		capabilityGate:  "revision-patch",
+		authRequired:    true,
+		projectRequired: true,
+		implemented:     true,
+		handler:         (*Server).handleGetTransitionPatchReceipt,
+	},
+	{
 		op:     OpReopenIssue,
 		method: http.MethodPost,
 		// The close's mirror, on the dispatcher the close built. Nothing new is
@@ -750,20 +835,35 @@ func (r route) specPathOf() string {
 // rather than silently dropped by an older server.
 var behaviorCapabilities = []string{CapProjectEnforce}
 
-// Capabilities lists what this build advertises in ContextResponse.capabilities:
-// the operations it actually implements, gated on `implemented` so a stub can
-// never advertise itself, PLUS the behavior tokens for server-wide behaviors this
-// build enforces. A client that checks capabilities before calling gets a
-// truthful answer from every release, including one cut halfway through the
-// endpoint slices.
+// Capabilities returns this binary's static operation and behavior inventory.
+// It is useful for route/spec checks but is not a server-instance readiness
+// assertion: ContextResponse uses capability gates with startup readiness.
 func Capabilities() []string {
+	return capabilitiesForWithGates(true, true, true, true, true)
+}
+
+func capabilitiesFor(revisionTransitionReady bool) []string {
+	return capabilitiesForWithGates(revisionTransitionReady, revisionTransitionReady, false, false, false)
+}
+
+func capabilitiesForWithGates(revisionTransitionReady, sourceSnapshotReady, protectedMutationReady, batchReady, patchReady bool) []string {
 	var out []string
 	for _, rt := range routeTable {
-		if rt.implemented && rt.capability != "" {
+		gateReady := rt.capabilityGate == "" ||
+			(rt.capabilityGate == "revision-transition" && revisionTransitionReady) ||
+			(rt.capabilityGate == "source-snapshot" && sourceSnapshotReady) ||
+			(rt.capabilityGate == "revision-patch" && patchReady)
+		if rt.implemented && rt.capability != "" && gateReady {
 			out = append(out, rt.capability)
 		}
 	}
 	out = append(out, behaviorCapabilities...)
+	if protectedMutationReady {
+		out = append(out, CapProtectedMutation)
+	}
+	if batchReady {
+		out = append(out, CapBatchApplyReceipt)
+	}
 	slices.Sort(out)
 	return out
 }

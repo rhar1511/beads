@@ -51,6 +51,13 @@ type IssueSQLRepository interface {
 	// needs and the result does not carry — a swap can hold its precondition
 	// and write nothing (see issueops.MetadataCAS.CompareAndSetKey).
 	CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error)
+	// TransitionMetadata runs the SHARED revision-fenced transition body on this
+	// repository's transaction. The bool reports whether a durable issue and
+	// receipt write landed and therefore needs a version-control commit.
+	TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error)
+	GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error)
+	GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error)
+	StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error)
 	// ReleaseIssue runs the SHARED claim-release body on this repository's
 	// transaction, which is how the unit-of-work provider reaches the same
 	// function the two store backends wrap. It takes no table option: the body
@@ -114,6 +121,14 @@ type IssueSQLRepository interface {
 	WakeExpiredDefers(ctx context.Context) (issues, wisps int, err error)
 }
 
+// RevisionTransitionPatchRepository is the additive repository capability for
+// atomic source patches. It is separate from IssueSQLRepository to preserve
+// compatibility with existing repository implementations.
+type RevisionTransitionPatchRepository interface {
+	TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error)
+	GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error)
+}
+
 type CloseRowParams struct {
 	Reason  string
 	Session string
@@ -157,6 +172,18 @@ type DeleteIssuesParams struct {
 	EnforceCascadePolicy bool
 	Force                bool
 }
+
+// ResolvedDeletion describes the exact rows a delete resolved and the
+// surviving rows whose dependency state or rewritten text may change. The
+// optional hook is a transaction-local policy seam for storage adapters that
+// need to guard a deletion before the issue use case mutates anything.
+type ResolvedDeletion struct {
+	IDs         []string
+	AffectedIDs []string
+	DryRun      bool
+}
+
+type ResolvedDeletionHook func(context.Context, ResolvedDeletion) error
 
 type DeleteIssuesResult struct {
 	DeletedCount      int
@@ -343,6 +370,10 @@ type IssueUseCase interface {
 	// CompareAndSetMetadataKey is the shape issueops.MetadataCAS publishes; see
 	// IssueSQLRepository.CompareAndSetMetadataKey for what the bool carries.
 	CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error)
+	TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error)
+	GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error)
+	GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error)
+	StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error)
 	// ReleaseIssue is the shape issueops.Releaser publishes; see
 	// IssueSQLRepository.ReleaseIssue for what the bool carries.
 	ReleaseIssue(ctx context.Context, req publicops.ReleaseRequest) (publicops.ReleaseResult, bool, error)
@@ -380,6 +411,12 @@ type IssueUseCase interface {
 	PromoteWisp(ctx context.Context, id, actor string) error
 }
 
+// RevisionTransitionPatchUseCase is the additive UOW-facing patch capability.
+type RevisionTransitionPatchUseCase interface {
+	TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error)
+	GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error)
+}
+
 type CloseIssueParams struct {
 	Reason  string
 	Session string
@@ -410,30 +447,37 @@ func NewIssueUseCase(
 	eventsRepo EventsSQLRepository,
 	labelUC LabelUseCase,
 	depUC DependencyUseCase,
+	resolvedDeletionHooks ...ResolvedDeletionHook,
 ) IssueUseCase {
+	var resolvedDeletionHook ResolvedDeletionHook
+	if len(resolvedDeletionHooks) > 0 {
+		resolvedDeletionHook = resolvedDeletionHooks[0]
+	}
 	return &issueUseCaseImpl{
-		issueRepo:   issueRepo,
-		depRepo:     depRepo,
-		labelRepo:   labelRepo,
-		counterRepo: counterRepo,
-		commentRepo: commentRepo,
-		cfgRepo:     cfgRepo,
-		eventsRepo:  eventsRepo,
-		labelUC:     labelUC,
-		depUC:       depUC,
+		issueRepo:            issueRepo,
+		depRepo:              depRepo,
+		labelRepo:            labelRepo,
+		counterRepo:          counterRepo,
+		commentRepo:          commentRepo,
+		cfgRepo:              cfgRepo,
+		eventsRepo:           eventsRepo,
+		labelUC:              labelUC,
+		depUC:                depUC,
+		resolvedDeletionHook: resolvedDeletionHook,
 	}
 }
 
 type issueUseCaseImpl struct {
-	issueRepo   IssueSQLRepository
-	depRepo     DependencySQLRepository
-	labelRepo   LabelSQLRepository
-	counterRepo ChildCounterSQLRepository
-	commentRepo CommentSQLRepository
-	cfgRepo     ConfigSQLRepository
-	eventsRepo  EventsSQLRepository
-	labelUC     LabelUseCase
-	depUC       DependencyUseCase
+	issueRepo            IssueSQLRepository
+	depRepo              DependencySQLRepository
+	labelRepo            LabelSQLRepository
+	counterRepo          ChildCounterSQLRepository
+	commentRepo          CommentSQLRepository
+	cfgRepo              ConfigSQLRepository
+	eventsRepo           EventsSQLRepository
+	labelUC              LabelUseCase
+	depUC                DependencyUseCase
+	resolvedDeletionHook ResolvedDeletionHook
 }
 
 var _ IssueUseCase = (*issueUseCaseImpl)(nil)
@@ -507,6 +551,46 @@ func (u *issueUseCaseImpl) UpdateWisp(ctx context.Context, id string, updates ma
 // plane — are typed sentinels both front doors classify.
 func (u *issueUseCaseImpl) CompareAndSetMetadataKey(ctx context.Context, plan storage.CompareAndSetKeyPlan) (publicops.CompareAndSetKeyResult, bool, error) {
 	return u.issueRepo.CompareAndSetMetadataKey(ctx, plan)
+}
+
+// TransitionMetadata passes the validated plan to the shared transaction body
+// without changing its row-revision or receipt semantics.
+func (u *issueUseCaseImpl) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
+	return u.issueRepo.TransitionMetadata(ctx, plan)
+}
+
+func (u *issueUseCaseImpl) TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error) {
+	repository, ok := u.issueRepo.(RevisionTransitionPatchRepository)
+	if !ok {
+		return publicops.RevisionTransitionPatchResult{}, false, &storage.ErrUnsupported{Op: "RevisionTransitionPatch", Backend: "issue repository"}
+	}
+	return repository.TransitionPatch(ctx, plan)
+}
+
+func (u *issueUseCaseImpl) GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	repository, ok := u.issueRepo.(RevisionTransitionPatchRepository)
+	if !ok {
+		return nil, &storage.ErrUnsupported{Op: "RevisionTransitionPatchReceipt", Backend: "issue repository"}
+	}
+	return repository.GetRevisionTransitionPatchReceipt(ctx, receiptID)
+}
+
+// GetRevisionTransitionReceipt reads the durable receipt through this
+// unit-of-work's pinned issue repository.
+func (u *issueUseCaseImpl) GetRevisionTransitionReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionReceipt, error) {
+	return u.issueRepo.GetRevisionTransitionReceipt(ctx, receiptID)
+}
+
+// GetBatchApplyReceipt reads one immutable apply-batch result through the
+// pinned issue repository for this unit of work.
+func (u *issueUseCaseImpl) GetBatchApplyReceipt(ctx context.Context, receiptID string) (*publicops.BatchApplyReceipt, error) {
+	return u.issueRepo.GetBatchApplyReceipt(ctx, receiptID)
+}
+
+// StoreBatchApplyReceipt records the complete original result atomically with
+// the domain writes of a receipt-bearing apply batch.
+func (u *issueUseCaseImpl) StoreBatchApplyReceipt(ctx context.Context, plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult) (publicops.ApplyBatchResult, bool, error) {
+	return u.issueRepo.StoreBatchApplyReceipt(ctx, plan, result)
 }
 
 // ReleaseIssue passes the request straight through.
@@ -708,7 +792,7 @@ func (u *issueUseCaseImpl) ApplyUpdate(ctx context.Context, id string, spec Upda
 			return nil, fmt.Errorf("%w: issue %s", storage.ErrNotFound, id)
 		}
 		if spec.ExpectedVersion != nil && current.RowVersion != *spec.ExpectedVersion {
-			return nil, fmt.Errorf("%w: expected %d, got %d", storage.ErrVersionMismatch, *spec.ExpectedVersion, current.RowVersion)
+			return nil, &publicops.VersionMismatchError{IssueID: id, ExpectedVersion: *spec.ExpectedVersion, CurrentVersion: current.RowVersion}
 		}
 		if spec.ExpectedAssignee != nil && !validation.ActorMatches(current.Assignee, *spec.ExpectedAssignee) {
 			return nil, fmt.Errorf("%w: %s is held by %q, expected %q",

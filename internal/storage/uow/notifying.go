@@ -86,6 +86,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/domain"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
@@ -302,6 +303,32 @@ func (p *notifyingProvider) VersionReconciler() (publicops.VersionReconciler, er
 }
 
 func (p *notifyingProvider) MetadataCAS() (publicops.MetadataCAS, error) { return NewMetadataCAS(p) }
+
+func (p *notifyingProvider) RevisionTransition() (publicops.RevisionTransition, error) {
+	return NewRevisionTransition(p)
+}
+
+// SourceSnapshotReader builds on THIS provider so the atomic read stays inside
+// one notifying unit of work. The operation is read-only and emits no hook.
+func (p *notifyingProvider) SourceSnapshotReader() (publicops.SourceSnapshotReader, error) {
+	return NewSourceSnapshotReader(p)
+}
+
+func (p *notifyingProvider) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	source, ok := p.inner.(RevisionTransitionReadinessSource)
+	if !ok {
+		return schema.RevisionTransitionReadiness{}, &storage.ErrUnsupported{Op: "RevisionTransitionReadiness", Backend: "provider"}
+	}
+	return source.RevisionTransitionReadiness(ctx)
+}
+
+func (p *notifyingProvider) BatchApplyReceiptReadiness(ctx context.Context) (schema.BatchApplyReceiptReadiness, error) {
+	source, ok := p.inner.(BatchApplyReceiptReadinessSource)
+	if !ok {
+		return schema.BatchApplyReceiptReadiness{}, &storage.ErrUnsupported{Op: "BatchApplyReceiptReadiness", Backend: "provider"}
+	}
+	return source.BatchApplyReceiptReadiness(ctx)
+}
 
 func (p *notifyingProvider) Releaser() (publicops.Releaser, error) { return NewReleaser(p) }
 
@@ -967,6 +994,38 @@ func (u *recordingIssueUC) CompareAndSetMetadataKey(ctx context.Context, plan st
 	}
 	u.rec.record(opUpdate, u.snap.anyPlane(ctx, plan.IssueID))
 	return result, wrote, nil
+}
+
+func (u *recordingIssueUC) TransitionMetadata(ctx context.Context, plan storage.RevisionTransitionPlan) (publicops.RevisionTransitionResult, bool, error) {
+	result, wrote, err := u.IssueUseCase.TransitionMetadata(ctx, plan)
+	if err != nil || !wrote {
+		return result, wrote, err
+	}
+	u.rec.record(opUpdate, u.snap.issue(ctx, plan.IssueID))
+	return result, wrote, nil
+}
+
+// TransitionPatch preserves the optional atomic patch capability and records
+// the committed issue update with the same semantics as metadata transitions.
+func (u *recordingIssueUC) TransitionPatch(ctx context.Context, plan storage.RevisionTransitionPatchPlan) (publicops.RevisionTransitionPatchResult, bool, error) {
+	patcher, ok := u.IssueUseCase.(domain.RevisionTransitionPatchUseCase)
+	if !ok {
+		return publicops.RevisionTransitionPatchResult{}, false, &storage.ErrUnsupported{Op: "RevisionTransitionPatch", Backend: "notifying issue use case"}
+	}
+	result, wrote, err := patcher.TransitionPatch(ctx, plan)
+	if err != nil || !wrote {
+		return result, wrote, err
+	}
+	u.rec.record(opUpdate, u.snap.issue(ctx, plan.IssueID))
+	return result, wrote, nil
+}
+
+func (u *recordingIssueUC) GetRevisionTransitionPatchReceipt(ctx context.Context, receiptID string) (*publicops.RevisionTransitionPatchReceipt, error) {
+	patcher, ok := u.IssueUseCase.(domain.RevisionTransitionPatchUseCase)
+	if !ok {
+		return nil, &storage.ErrUnsupported{Op: "RevisionTransitionPatchReceipt", Backend: "notifying issue use case"}
+	}
+	return patcher.GetRevisionTransitionPatchReceipt(ctx, receiptID)
 }
 
 // ReleaseIssue records an update for a release that landed.

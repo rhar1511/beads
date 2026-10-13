@@ -77,6 +77,8 @@ type CreateItem struct {
 	// request creates on opposite planes is refused with everything else the
 	// request asked for.
 	Issue *Issue
+	// ProtectionClass explicitly classifies this newly created record.
+	ProtectionClass string
 	// MetadataRefs splices resolved ids into this issue's metadata: each entry
 	// writes the id its Ref resolves to as the WHOLE VALUE of one top-level
 	// metadata key.
@@ -250,7 +252,13 @@ type ApplyBatchRequest struct {
 	// Actor is the author of every item and must not be empty. It is
 	// attributed to the ONE history entry the request records, because a batch
 	// is one act by one caller.
-	Actor string
+	Actor           string
+	ProtectedPermit ProtectedMutationPermit
+	// ReceiptID opts into durable replay protection. When omitted, ApplyBatch
+	// keeps its ordinary non-idempotent behavior and does not write receipt
+	// history. When supplied, the ID is bound to this request's canonical
+	// digest and the immutable original result is returned on an exact replay.
+	ReceiptID string `json:"-"`
 	// Items are the items to apply, in the order they are to be applied. It
 	// must not be empty and must not exceed 100 entries.
 	//
@@ -329,6 +337,18 @@ type ApplyBatchResult struct {
 	// entry is ever missing for a successful call: a batch that could not apply
 	// every item applied none, so there is no index with nothing to put at it.
 	Items []ItemResult
+	// Replayed reports that this result came from an earlier durable receipt.
+	// It is false for a new application and true for an exact receipt replay.
+	Replayed bool
+}
+
+// BatchApplyReceipt is the immutable durable result recorded by a
+// receipt-bearing ApplyBatch request. The permit is intentionally absent: a
+// replay returns the result without re-validating or consuming authorization.
+type BatchApplyReceipt struct {
+	ReceiptID     string
+	RequestDigest string
+	Result        ApplyBatchResult
 }
 
 // ItemError names the item a batch refusal came from and wraps the refusal.
@@ -459,19 +479,20 @@ const MaxApplyBatchItems = 100
 //     type parent-child, so the ORDER of every edge in the request is total.
 //   - INLINE CREATE DEPENDENCIES, for the same reason.
 //
-// IT IS NOT IDEMPOTENT AND CARRIES NO IDEMPOTENCY KEY. Replaying a request
-// applies it again — the creates mint new ids, the edges are idempotent, the
-// closes are no-ops. That is deliberate: an idempotency RECORD is itself a
-// write, so a caller that needs one makes it an ITEM of the batch, and the
-// record then lands or rolls back with the work it describes. A key on the
-// request would be a second, weaker mechanism for the same thing.
+// WITHOUT ReceiptID, replaying a request applies it again — creates mint new
+// ids, edges are idempotent and closes are no-ops. Supplying ReceiptID opts
+// into durable replay protection: the ID binds to a canonical request digest,
+// the complete original result is stored with the work, and an exact retry
+// returns that result without running the operations again. A failed request
+// stores no receipt. An idempotency record can still be an ITEM of the batch
+// when the work itself should carry a domain-level record.
 //
 // EPHEMERALITY IS PER ITEM, exactly as it is for BatchCreator: one request may
 // create durable issues and wisps together, and an edge BETWEEN the two planes
 // whose ends this request creates cannot be written by it. HISTORY IS ONE ENTRY
-// FOR THE REQUEST, attributed to Actor, and none at all when nothing durable
-// landed — an all-wisp batch writes only to the dolt-ignored wisp tables, so an
-// entry naming one would be the sync artifact ignoring them exists to prevent.
+// FOR THE REQUEST, attributed to Actor. Without ReceiptID, there is no entry
+// when nothing durable landed. With ReceiptID, its durable receipt row commits
+// with the request, including when all items are wisps or semantic no-ops.
 //
 // THERE IS NO `bd` COMMAND BEHIND THIS ROLE, and that is a decision rather than
 // an unfinished half. A plan is composed by a program — the thing that knows

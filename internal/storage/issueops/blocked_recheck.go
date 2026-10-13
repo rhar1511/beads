@@ -170,6 +170,12 @@ const BlockedRecheckTimeout = 30 * time.Second
 // reports true inside it.
 func BlockedRecheckContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	detached := context.WithValue(context.WithoutCancel(ctx), blockedRecheckContextKey{}, struct{}{})
+	// This is a new transaction, not a continuation of the committed write.
+	// Preserve the store's authority binding without sharing its mutable
+	// authorization cache or erasing its pending permit-receipt publication.
+	if authority, _ := ctx.Value(protectedMutationConfigKey{}).(*protectedMutationConfig); authority != nil {
+		detached = WithProtectedMutationVerifier(detached, authority.verifier, authority.audience, authority.projectID, authority.database)
+	}
 	return context.WithTimeout(detached, BlockedRecheckTimeout)
 }
 

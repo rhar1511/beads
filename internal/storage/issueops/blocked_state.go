@@ -117,6 +117,9 @@ func RecomputeIsBlockedInTxWithResult(
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
 		return result, nil
 	}
+	if err := RefuseUnpermittedProtectedDerivedMutationInTx(ctx, tx, "issue.derived_recompute", append(append([]string(nil), issueIDs...), wispIDs...)); err != nil {
+		return result, err
+	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
 		return result, err
@@ -145,30 +148,44 @@ func RecomputeIsBlockedInTxWithResult(
 }
 
 func MarkIsBlockedInTx(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) error {
+	_, err := MarkIsBlockedInTxWithResult(ctx, tx, issueIDs, wispIDs)
+	return err
+}
+
+// MarkIsBlockedInTxWithResult is MarkIsBlockedInTx and reports which planes
+// had rows change. Every changed issue row receives a fresh row_lock so a
+// source revision also covers this derived work field.
+func MarkIsBlockedInTxWithResult(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) (RecomputeIsBlockedResult, error) {
+	var result RecomputeIsBlockedResult
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
-		return nil
+		return result, nil
+	}
+	if err := RefuseUnpermittedProtectedDerivedMutationInTx(ctx, tx, "issue.derived_recompute", append(append([]string(nil), issueIDs...), wispIDs...)); err != nil {
+		return result, err
 	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
-		return err
+		return result, err
 	}
 	for {
 		var changed int64
 
 		n, err := markIsBlockedPassForIssuesInTx(ctx, tx, issueIDs)
 		if err != nil {
-			return err
+			return result, err
 		}
 		changed += n
+		result.IssueRowsChanged = result.IssueRowsChanged || n > 0
 
 		n, err = markIsBlockedPassForWispsInTx(ctx, tx, wispIDs)
 		if err != nil {
-			return err
+			return result, err
 		}
 		changed += n
+		result.WispRowsChanged = result.WispRowsChanged || n > 0
 
 		if changed == 0 {
-			return recordBlockedJournalChanges(ctx, tx, before, issueIDs, wispIDs)
+			return result, recordBlockedJournalChanges(ctx, tx, before, issueIDs, wispIDs)
 		}
 	}
 }
@@ -247,7 +264,7 @@ func unmarkBlockedTemplateForWisps() string {
 //nolint:gosec // G201: table, alias, and depTable are constants from the four callers above.
 func markBlockedTemplate(table, alias, depTable string) string {
 	return fmt.Sprintf(`
-		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 1, %[2]s.updated_at = %[2]s.updated_at
+		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 1, %[2]s.row_lock = ?, %[2]s.updated_at = %[2]s.updated_at
 		WHERE %[2]s.id IN (%%s)
 		  AND %[2]s.is_blocked = 0
 		  AND %[2]s.status <> 'closed' AND %[2]s.status <> 'pinned'
@@ -262,7 +279,7 @@ func markBlockedTemplate(table, alias, depTable string) string {
 //nolint:gosec // G201: table, alias, and depTable are constants from the four callers above.
 func unmarkBlockedTemplate(table, alias, depTable string) string {
 	return fmt.Sprintf(`
-		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 0, %[2]s.updated_at = %[2]s.updated_at
+		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 0, %[2]s.row_lock = ?, %[2]s.updated_at = %[2]s.updated_at
 		WHERE %[2]s.id IN (%%s)
 		  AND %[2]s.is_blocked = 1
 		  AND ( %[2]s.status = 'closed' OR %[2]s.status = 'pinned'
@@ -319,6 +336,7 @@ func runMarkUnmarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl, unmarkTmpl
 		placeholders, args := buildSQLInClause(ids[start:end])
 
 		stmt, stmtArgs := expandBatchTemplate(markTmpl, placeholders, args)
+		stmtArgs = append([]interface{}{freshRowLock()}, stmtArgs...)
 		res, err := tx.ExecContext(ctx, stmt, stmtArgs...)
 		if err != nil {
 			return changed, fmt.Errorf("recompute is_blocked (mark): %w", err)
@@ -330,6 +348,7 @@ func runMarkUnmarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl, unmarkTmpl
 		changed += n
 
 		stmt, stmtArgs = expandBatchTemplate(unmarkTmpl, placeholders, args)
+		stmtArgs = append([]interface{}{freshRowLock()}, stmtArgs...)
 		res, err = tx.ExecContext(ctx, stmt, stmtArgs...)
 		if err != nil {
 			return changed, fmt.Errorf("recompute is_blocked (unmark): %w", err)
@@ -353,6 +372,7 @@ func runMarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl string, ids []str
 		placeholders, args := buildSQLInClause(ids[start:end])
 
 		stmt, stmtArgs := expandBatchTemplate(markTmpl, placeholders, args)
+		stmtArgs = append([]interface{}{freshRowLock()}, stmtArgs...)
 		res, err := tx.ExecContext(ctx, stmt, stmtArgs...)
 		if err != nil {
 			return changed, fmt.Errorf("mark is_blocked: %w", err)

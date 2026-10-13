@@ -161,14 +161,18 @@ func TestRecordingIssueUseCaseCoversItsSurface(t *testing.T) {
 			"SearchIssues":                 reads,
 			"SearchWispsPlane":             reads,
 			"SearchIssuesWithCounts":       reads,
-			"DeleteIssue":                  deletes,
-			"DeleteIssues":                 deletes,
-			"DeleteWisp":                   deletes,
-			"DeleteWisps":                  deletes,
-			"Unclaim":                      leases,
-			"UnclaimIfAssignee":            leases,
-			"Heartbeat":                    leases,
-			"ReclaimExpiredLeases":         leases,
+			"GetRevisionTransitionReceipt": reads,
+			"GetBatchApplyReceipt":         reads,
+			"StoreBatchApplyReceipt": "writes only the batch idempotency receipt; the batch's bead " +
+				"mutations already pass through the recording create, update, close and dependency methods",
+			"DeleteIssue":          deletes,
+			"DeleteIssues":         deletes,
+			"DeleteWisp":           deletes,
+			"DeleteWisps":          deletes,
+			"Unclaim":              leases,
+			"UnclaimIfAssignee":    leases,
+			"Heartbeat":            leases,
+			"ReclaimExpiredLeases": leases,
 			"WakeExpiredDefers": "the deferred-work sweep is a clock crossing rather than a user's " +
 				"mutation, and the DoltStorage plumbing fires nothing for it",
 			"PromoteWisp": "moves a row between planes without changing the bead; the DoltStorage " +
@@ -196,10 +200,11 @@ func TestRecordingDependencyUseCaseCoversItsSurface(t *testing.T) {
 			"DetectCycles":                         reads,
 			"GetBlockingInfo":                      reads,
 			"GetDependencyTree":                    reads,
-			"GetExternalBlockingDependencyRecords": reads,
 			"GetForIssueIDs":                       reads,
+			"GetDurableIssueDependencyRecords":     reads,
 			"GetIssueDependencyRecords":            reads,
 			"GetWispDependencyRecords":             reads,
+			"WispSourceIDs":                        reads,
 			"IsBlocked":                            reads,
 			"IsWispBlocked":                        reads,
 			"IterWispWithIssueMetadata":            reads,
@@ -209,6 +214,7 @@ func TestRecordingDependencyUseCaseCoversItsSurface(t *testing.T) {
 			"ListWispWithIssueMetadata":            reads,
 			"ListWithIssueMetadata":                reads,
 			"WalkDependencyTree":                   reads,
+			"GetExternalBlockingDependencyRecords": reads,
 		})
 }
 
@@ -300,6 +306,12 @@ func TestNotifyingProviderBuildsRolesOnItself(t *testing.T) {
 		// builds a role, so neither can build one "on itself".
 		"SetEventsJournalEnabled": true,
 		"RunEventsMaintenanceTx":  true,
+		// These readiness capabilities are startup-only schema probes. They
+		// construct no role and write no bead, so forwarding them to the selected
+		// inner provider is the intended behavior.
+		"RevisionTransitionReadiness": true,
+		"BatchApplyReceiptReadiness":  true,
+		"ProtectedMutationReadiness":  true,
 	}
 
 	var checked int
@@ -339,6 +351,18 @@ func TestUnitOfWorkBypassesAreAccountedFor(t *testing.T) {
 			"Import fires no hooks on the DoltStorage plumbing either — it runs the same engine " +
 			"there — so this is parity, not a gap. A hook per imported issue would be new " +
 			"behavior on both plumbings.",
+		"requireProtectedUOWMutation": "the protection guard reads classification and consumes a signed permit " +
+			"on the active transaction before a domain mutation. Those internal authority rows are not issue events.",
+		"requireAuthorizedUOWMutation": "the source-patch guard verifies and consumes the exact operation permit " +
+			"on the active transaction; its only direct write is internal permit-use evidence, not an issue event.",
+		"TransitionPatch": "patch preflight reads the exact source and parent receipt on the active transaction, " +
+			"while the mutation itself goes through the patch use case so the notifier sees the committed issue write.",
+		"classifyProtectedUOWRecord": "the protected classification is an internal authorization boundary written " +
+			"beside the issue create. It is deliberately absent from ordinary issue hook payloads.",
+		"protectedUOWRecords": "the deletion preflight reads internal classification state from the active transaction " +
+			"and performs no domain mutation or hook-worthy write.",
+		"applyBatchOldParentIDsInUOW": "the protected batch preflight reads current parent links from the active " +
+			"transaction before authorization and performs no domain mutation or hook-worthy write.",
 	}
 
 	found := map[string]bool{}

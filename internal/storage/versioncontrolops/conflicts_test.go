@@ -221,13 +221,13 @@ func TestResolveOneConflictRowZeroAffectedRows(t *testing.T) {
 		cols: []string{"base_id", "our_id", "their_id", "base_status", "our_status", "their_status"},
 		vals: []any{"bd-1", "bd-1", "bd-1", "open", "open", "closed"},
 	}
-	const updateSQL = "UPDATE `issues` SET `status` = ? WHERE `id` = ?"
+	const updateSQL = "UPDATE `issues` SET `status` = ?, `row_lock` = ? WHERE `id` = ?"
 	const existsSQL = "SELECT COUNT(*) FROM `issues` WHERE `id` = ?"
 	const deleteSQL = "DELETE FROM `dolt_conflicts_issues` WHERE `our_id` = ?"
 
 	t.Run("a live row resolves", func(t *testing.T) {
 		db, mock := newMockDB(t)
-		mock.ExpectExec(regexp.QuoteMeta(updateSQL)).WithArgs("closed", "bd-1").
+		mock.ExpectExec(regexp.QuoteMeta(updateSQL)).WithArgs("closed", sqlmock.AnyArg(), "bd-1").
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectQuery(regexp.QuoteMeta(existsSQL)).WithArgs("bd-1").
 			WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
@@ -244,7 +244,7 @@ func TestResolveOneConflictRowZeroAffectedRows(t *testing.T) {
 
 	t.Run("a vanished row is still refused", func(t *testing.T) {
 		db, mock := newMockDB(t)
-		mock.ExpectExec(regexp.QuoteMeta(updateSQL)).WithArgs("closed", "bd-1").
+		mock.ExpectExec(regexp.QuoteMeta(updateSQL)).WithArgs("closed", sqlmock.AnyArg(), "bd-1").
 			WillReturnResult(sqlmock.NewResult(0, 0))
 		mock.ExpectQuery(regexp.QuoteMeta(existsSQL)).WithArgs("bd-1").
 			WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(0))

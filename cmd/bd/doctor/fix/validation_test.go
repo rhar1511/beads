@@ -186,6 +186,10 @@ func TestChildParentDependencies_NoBadDeps(t *testing.T) {
 	if err := store.AddDependency(ctx, dep, "test"); err != nil {
 		t.Fatal(err)
 	}
+	var beforeRevision sql.NullInt64
+	if err := store.UnderlyingDB().QueryRow("SELECT row_lock FROM issues WHERE id = ?", dep.IssueID).Scan(&beforeRevision); err != nil {
+		t.Fatal(err)
+	}
 
 	// Run fix - should find no bad deps
 	err := ChildParentDependencies(dir, false)
@@ -201,6 +205,13 @@ func TestChildParentDependencies_NoBadDeps(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("Expected 1 dependency, got %d", count)
+	}
+	var afterRevision sql.NullInt64
+	if err := db.QueryRow("SELECT row_lock FROM issues WHERE id = ?", dep.IssueID).Scan(&afterRevision); err != nil {
+		t.Fatal(err)
+	}
+	if beforeRevision != afterRevision {
+		t.Errorf("no-op child-parent repair changed source row_lock: before=%v after=%v", beforeRevision, afterRevision)
 	}
 }
 
@@ -240,6 +251,14 @@ func TestChildParentDependencies_FixesBadDeps(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	beforeRevisions := make(map[string]sql.NullInt64)
+	for _, id := range []string{"bd-abc.1", "bd-abc.1.2"} {
+		var before sql.NullInt64
+		if err := store.UnderlyingDB().QueryRow("SELECT row_lock FROM issues WHERE id = ?", id).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		beforeRevisions[id] = before
+	}
 
 	// Run fix
 	err := ChildParentDependencies(dir, false)
@@ -255,6 +274,15 @@ func TestChildParentDependencies_FixesBadDeps(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("Expected 0 dependencies after fix, got %d", count)
+	}
+	for id, before := range beforeRevisions {
+		var after sql.NullInt64
+		if err := db.QueryRow("SELECT row_lock FROM issues WHERE id = ?", id).Scan(&after); err != nil {
+			t.Fatal(err)
+		}
+		if before == after {
+			t.Errorf("removing outgoing dependencies did not change source %s row_lock: %v", id, after)
+		}
 	}
 }
 

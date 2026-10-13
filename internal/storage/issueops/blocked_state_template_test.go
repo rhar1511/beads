@@ -64,8 +64,9 @@ func TestExpandBatchTemplateFillsEveryOccurrence(t *testing.T) {
 			if strings.ContainsAny(stmt, "%") {
 				t.Errorf("expanded statement still contains %%: %s", stmt)
 			}
-			if got := strings.Count(stmt, "?"); got != wantArgs {
-				t.Errorf("placeholder count = %d, want %d", got, wantArgs)
+			if got := strings.Count(stmt, "?"); got != wantArgs+1 {
+				// The executor binds one revision token before the repeated IDs.
+				t.Errorf("placeholder count = %d, want %d", got, wantArgs+1)
 			}
 			if got := len(stmtArgs); got != wantArgs {
 				t.Fatalf("arg count = %d, want %d — placeholders and args must stay in lockstep", got, wantArgs)

@@ -327,32 +327,34 @@ type timedProvider struct {
 // provider it holds for the role — the same two-step a CLI command performs on
 // a store — instead of reaching past it to a constructor.
 var (
-	_ uow.IssueReaderSource         = timedProvider{}
-	_ uow.IssueClaimerSource        = timedProvider{}
-	_ uow.BatchCloserSource         = timedProvider{}
-	_ uow.ReadyClaimerSource        = timedProvider{}
-	_ uow.ReleaserSource            = timedProvider{}
-	_ uow.IssueLifecycleSource      = timedProvider{}
-	_ uow.WorkspaceConfigSource     = timedProvider{}
-	_ uow.StatsReporterSource       = timedProvider{}
-	_ uow.CycleDetectorSource       = timedProvider{}
-	_ uow.EdgeReaderSource          = timedProvider{}
-	_ uow.GraphCounterSource        = timedProvider{}
-	_ uow.RelationsSource           = timedProvider{}
-	_ uow.CommenterSource           = timedProvider{}
-	_ uow.BlockingAnnotatorSource   = timedProvider{}
-	_ uow.TreeWalkerSource          = timedProvider{}
-	_ uow.ReadyCounterSource        = timedProvider{}
-	_ uow.CounterSource             = timedProvider{}
-	_ uow.QuerierSource             = timedProvider{}
-	_ uow.SweeperSource             = timedProvider{}
-	_ uow.DeleterSource             = timedProvider{}
-	_ uow.BatchCreatorSource        = timedProvider{}
-	_ uow.DependencyEditorSource    = timedProvider{}
-	_ uow.MetadataCASSource         = timedProvider{}
-	_ uow.BatchApplierSource        = timedProvider{}
-	_ uow.MemoriesSource            = timedProvider{}
-	_ uow.EventsJournalCursorSource = timedProvider{}
+	_ uow.IssueReaderSource          = timedProvider{}
+	_ uow.IssueClaimerSource         = timedProvider{}
+	_ uow.BatchCloserSource          = timedProvider{}
+	_ uow.ReadyClaimerSource         = timedProvider{}
+	_ uow.ReleaserSource             = timedProvider{}
+	_ uow.IssueLifecycleSource       = timedProvider{}
+	_ uow.WorkspaceConfigSource      = timedProvider{}
+	_ uow.StatsReporterSource        = timedProvider{}
+	_ uow.CycleDetectorSource        = timedProvider{}
+	_ uow.EdgeReaderSource           = timedProvider{}
+	_ uow.GraphCounterSource         = timedProvider{}
+	_ uow.RelationsSource            = timedProvider{}
+	_ uow.CommenterSource            = timedProvider{}
+	_ uow.BlockingAnnotatorSource    = timedProvider{}
+	_ uow.TreeWalkerSource           = timedProvider{}
+	_ uow.ReadyCounterSource         = timedProvider{}
+	_ uow.CounterSource              = timedProvider{}
+	_ uow.QuerierSource              = timedProvider{}
+	_ uow.SweeperSource              = timedProvider{}
+	_ uow.DeleterSource              = timedProvider{}
+	_ uow.BatchCreatorSource         = timedProvider{}
+	_ uow.DependencyEditorSource     = timedProvider{}
+	_ uow.MetadataCASSource          = timedProvider{}
+	_ uow.RevisionTransitionSource   = timedProvider{}
+	_ uow.SourceSnapshotReaderSource = timedProvider{}
+	_ uow.BatchApplierSource         = timedProvider{}
+	_ uow.MemoriesSource             = timedProvider{}
+	_ uow.EventsJournalCursorSource  = timedProvider{}
 )
 
 // IssueReader builds the reader OVER THIS WRAPPER rather than delegating to the
@@ -381,6 +383,12 @@ var (
 // provider ever appears, this is the line that has to grow a wrap.
 func (p timedProvider) IssueReader() (issueops.Reader, error) {
 	return uow.NewIssueReader(p)
+}
+
+// SourceSnapshotReader builds the atomic read role OVER THIS WRAPPER so its
+// single unit of work contributes to the request's uow_ms measurement.
+func (p timedProvider) SourceSnapshotReader() (issueops.SourceSnapshotReader, error) {
+	return uow.NewSourceSnapshotReader(p)
 }
 
 // IssueClaimer builds the claimer OVER THIS WRAPPER, for the same reason and
@@ -529,6 +537,10 @@ func (p timedProvider) DependencyEditor() (issueops.DependencyEditor, error) {
 // same reason and with the same hazard as IssueReader.
 func (p timedProvider) MetadataCAS() (issueops.MetadataCAS, error) {
 	return uow.NewMetadataCAS(p)
+}
+
+func (p timedProvider) RevisionTransition() (issueops.RevisionTransition, error) {
+	return uow.NewRevisionTransition(p)
 }
 
 // BatchApplier builds the ordered-plan write role OVER THIS WRAPPER, for the

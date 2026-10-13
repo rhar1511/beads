@@ -153,6 +153,23 @@ const (
 	// existing client dispatches on, while a 409 that turns out to be
 	// unreachable retires for free.
 	CodeAlreadyExists Code = "already_exists"
+	// CodeTransitionReceiptConflict means this receipt ID is already bound to a
+	// different request. It is stable across retries and never includes stored
+	// receipt contents in the response.
+	CodeTransitionReceiptConflict Code = "transition_receipt_conflict"
+	// CodeBatchApplyReceiptConflict means this batch receipt ID is already
+	// bound to a different canonical request.
+	CodeBatchApplyReceiptConflict Code = "batch_apply_receipt_conflict"
+	// CodeProtectedRecord reports a mutation refused by the backend's record
+	// protection checks. It deliberately carries no permit or classification
+	// details.
+	CodeProtectedRecord Code = "protected_record"
+	// CodeUnsupportedResource means the addressed resource plane cannot perform
+	// this operation (currently, a wisp cannot carry a durable revision receipt).
+	CodeUnsupportedResource Code = "unsupported_resource"
+	// CodeNotImplemented means this server lacks the startup prerequisites for
+	// the route. Such routes are omitted from capabilities until ready.
+	CodeNotImplemented Code = "not_implemented"
 	// CodePreconditionFailed is a compare-and-set guard that MISSED on an
 	// operation whose contract is that a miss refuses everything. The expected
 	// values travel in typed extension members; a batch operation adds the
@@ -242,17 +259,22 @@ const codeClientClosed Code = "client_closed"
 // codeStatus freezes one HTTP status per code. A code that could arrive with
 // two different statuses would defeat the point of dispatching on it.
 var codeStatus = map[Code]int{
-	CodeInvalidArgument:  http.StatusBadRequest,
-	CodeInvalidCursor:    http.StatusBadRequest,
-	CodeUnauthenticated:  http.StatusUnauthorized,
-	CodeNotFound:         http.StatusNotFound,
-	CodeAlreadyClaimed:   http.StatusConflict,
-	CodeNotClaimable:     http.StatusConflict,
-	CodeNotClosable:      http.StatusConflict,
-	CodeNotReleasable:    http.StatusConflict,
-	CodeDependencyCycle:  http.StatusConflict,
-	CodeDependencyExists: http.StatusConflict,
-	CodeAlreadyExists:    http.StatusConflict,
+	CodeInvalidArgument:           http.StatusBadRequest,
+	CodeInvalidCursor:             http.StatusBadRequest,
+	CodeUnauthenticated:           http.StatusUnauthorized,
+	CodeNotFound:                  http.StatusNotFound,
+	CodeAlreadyClaimed:            http.StatusConflict,
+	CodeNotClaimable:              http.StatusConflict,
+	CodeNotClosable:               http.StatusConflict,
+	CodeNotReleasable:             http.StatusConflict,
+	CodeDependencyCycle:           http.StatusConflict,
+	CodeDependencyExists:          http.StatusConflict,
+	CodeAlreadyExists:             http.StatusConflict,
+	CodeTransitionReceiptConflict: http.StatusConflict,
+	CodeBatchApplyReceiptConflict: http.StatusConflict,
+	CodeProtectedRecord:           http.StatusConflict,
+	CodeUnsupportedResource:       http.StatusConflict,
+	CodeNotImplemented:            http.StatusNotImplemented,
 
 	CodePreconditionFailed: http.StatusConflict,
 
@@ -313,10 +335,15 @@ const (
 // is exactly what must never happen to a presented token — it would land in
 // every client log and proxy trace between here and the caller.
 var staticDetail = map[Code]string{
-	CodeUnauthenticated: "missing or invalid bearer token",
-	CodeBusy:            "the server is busy; retry shortly",
-	CodeDBUnavailable:   "database temporarily unavailable; retry",
-	CodeInternal:        "internal server error",
+	CodeUnauthenticated:           "missing or invalid bearer token",
+	CodeBusy:                      "the server is busy; retry shortly",
+	CodeDBUnavailable:             "database temporarily unavailable; retry",
+	CodeInternal:                  "internal server error",
+	CodeTransitionReceiptConflict: "this receipt ID is already bound to a different request",
+	CodeBatchApplyReceiptConflict: "this receipt ID is already bound to a different request",
+	CodeProtectedRecord:           "this mutation was refused",
+	CodeUnsupportedResource:       "operation is not supported for this resource",
+	CodeNotImplemented:            "operation is not ready on this server",
 }
 
 // Retry-After values, in seconds.
@@ -344,13 +371,14 @@ var ErrBusy = errors.New("server busy")
 
 // Operation ids, matching the spec's operationId values exactly.
 const (
-	OpHealth        = "health"
-	OpGetContext    = "getContext"
-	OpListReadyWork = "listReadyWork"
-	OpGetStats      = "getStats"
-	OpListIssues    = "listIssues"
-	OpGetIssue      = "getIssue"
-	OpClaimIssue    = "claimIssue"
+	OpHealth            = "health"
+	OpGetContext        = "getContext"
+	OpListReadyWork     = "listReadyWork"
+	OpGetStats          = "getStats"
+	OpListIssues        = "listIssues"
+	OpGetIssue          = "getIssue"
+	OpGetSourceSnapshot = "getSourceSnapshot"
+	OpClaimIssue        = "claimIssue"
 	// OpBatchCloseIssues closes many issues as one transaction, behind
 	// issueops.BatchCloser. It is the surface's ONLY operation whose 200 body
 	// carries refusals: the role is deliberately not all-or-nothing, so an id
@@ -579,7 +607,11 @@ const (
 	// It is the only WRITE on this surface whose ordinary refusal is a 200: a
 	// lost race is the answer to the question the caller asked, and the value
 	// that refused the swap is what its retry needs next.
-	OpCompareAndSetMetadata = "compareAndSetMetadata"
+	OpCompareAndSetMetadata     = "compareAndSetMetadata"
+	OpTransitionMetadata        = "transitionMetadata"
+	OpGetTransitionReceipt      = "getTransitionReceipt"
+	OpTransitionPatch           = "transitionPatch"
+	OpGetTransitionPatchReceipt = "getTransitionPatchReceipt"
 )
 
 // specBearerScheme is the name of the document's securityScheme for the bearer
@@ -626,6 +658,10 @@ var operationCodes = map[string][]Code{
 	// this server knows, not the document-level unknown-key rule this table
 	// omits.
 	OpGetIssue: {CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeBusy, CodeDBUnavailable, CodeInternal},
+	OpGetSourceSnapshot: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodeUnsupportedResource,
+		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
 	// No 400 of its own: the operation takes no parameters, so the only
 	// invalid_argument it can raise is the document-level unknown-query-key
 	// rule this table deliberately omits.
@@ -745,11 +781,14 @@ var operationCodes = map[string][]Code{
 	// request that named no row has nothing to be stale about — and ABOVE the
 	// dependents refusal, which is the role's own order and is what makes the
 	// wire's answer the same one `bd delete` gives.
+	// protected_record is the backend's separate refusal for a mutation that
+	// touches an explicitly protected record; its fixed response never carries
+	// permit or classification details.
 	//
 	// The ARITY refusal is a 400 rather than a second conflict: a token beside
 	// two distinct ids is a malformed request, not a statement about state.
 	OpDeleteIssues: {
-		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodePreconditionFailed,
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound, CodePreconditionFailed, CodeProtectedRecord,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	OpClaimIssue: {
@@ -885,8 +924,8 @@ var operationCodes = map[string][]Code{
 	},
 	// The widest row here, and every code on it is inherited from an operation
 	// that already has it: this one performs the lifecycle's writes, the claim's
-	// assignee transfer and the graph's edge assertions inside one transaction,
-	// so it can earn any refusal any of them can.
+	// assignee transfer, the graph's edge assertions and the protected-record
+	// fence inside one transaction, so it can earn any refusal any of them can.
 	//
 	// THERE IS A CONFLICT CODE HERE, unlike the metadata compare-and-set, and
 	// that is the whole difference between the two contracts rather than a
@@ -906,7 +945,8 @@ var operationCodes = map[string][]Code{
 	OpApplyBatch: {
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodePreconditionFailed, CodeNotClosable, CodeAlreadyClaimed, CodeAlreadyExists,
-		CodeDependencyCycle, CodeDependencyExists,
+		CodeDependencyCycle, CodeDependencyExists, CodeProtectedRecord,
+		CodeBatchApplyReceiptConflict, CodeNotImplemented,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	// getDependencyTree's row, and it is the same shape for the same two
@@ -996,6 +1036,26 @@ var operationCodes = map[string][]Code{
 	OpCompareAndSetMetadata: {
 		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
 		CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpTransitionMetadata: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodePreconditionFailed, CodeTransitionReceiptConflict,
+		CodeProtectedRecord, CodeUnsupportedResource, CodeNotImplemented,
+		CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpGetTransitionReceipt: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpTransitionPatch: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodePreconditionFailed, CodeTransitionReceiptConflict,
+		CodeProtectedRecord, CodeUnsupportedResource, CodeNotImplemented,
+		CodeBusy, CodeDBUnavailable, CodeInternal,
+	},
+	OpGetTransitionPatchReceipt: {
+		CodeInvalidArgument, CodeUnauthenticated, CodeNotFound,
+		CodeNotImplemented, CodeBusy, CodeDBUnavailable, CodeInternal,
 	},
 	OpRemoveDependency: {CodeInvalidArgument, CodeUnauthenticated, CodeBusy, CodeDBUnavailable, CodeInternal},
 	// The two conflict codes are this operation's alone, and both say the same
@@ -1278,6 +1338,52 @@ func InvalidCursor() Result {
 // apart would be probing which ids are well-formed.
 func NotFound() Result {
 	return newResult(CodeNotFound, "no issue or wisp with that id")
+}
+
+// TransitionReceiptNotFound reports a missing immutable transition receipt.
+func TransitionReceiptNotFound() Result {
+	return newResult(CodeNotFound, "no transition receipt exists with that exact ID")
+}
+
+// TransitionReceiptConflict reports a stable receipt-ID binding conflict.
+func TransitionReceiptConflict() Result {
+	return newResult(CodeTransitionReceiptConflict, "")
+}
+
+// ProtectedRecordRefused reports a backend refusal without exposing permit or
+// classification details.
+func ProtectedRecordRefused() Result {
+	return newResult(CodeProtectedRecord, "")
+}
+
+// UnsupportedTransitionResource is the stable refusal for a resource plane
+// such as a wisp that cannot produce a durable revision receipt.
+func UnsupportedTransitionResource() Result {
+	return newResult(CodeUnsupportedResource, "")
+}
+
+// UnsupportedResource is the stable refusal for any operation whose addressed
+// resource plane cannot satisfy that operation's durable contract.
+func UnsupportedResource() Result {
+	return newResult(CodeUnsupportedResource, "")
+}
+
+// TransitionNotImplemented reports that the server did not prove the schema
+// and role prerequisites needed by the transition routes.
+func TransitionNotImplemented() Result {
+	return newResult(CodeNotImplemented, "")
+}
+
+// SourceSnapshotNotImplemented reports that the server did not prove the
+// schema and role prerequisites needed by the source-snapshot route.
+func SourceSnapshotNotImplemented() Result {
+	return newResult(CodeNotImplemented, "")
+}
+
+// BatchApplyReceiptNotImplemented reports that the server did not prove the
+// schema readiness required for durable batchApply receipts.
+func BatchApplyReceiptNotImplemented() Result {
+	return newResult(CodeNotImplemented, "")
 }
 
 // EventsJournalDisabled builds the 409 for a workspace whose journal is off.

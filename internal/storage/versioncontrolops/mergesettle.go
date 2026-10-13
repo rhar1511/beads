@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/storage/kvkeys"
+	"github.com/steveyegge/beads/internal/types"
 )
 
 // memoryConfigKeyPrefix is the config-table key prefix under which `bd remember`
@@ -75,6 +77,35 @@ func MergeAndSettleWithStrategy(ctx context.Context, db DBConn, ref, strategy st
 		mergeErr = nil
 	}
 	return SettleMerge(ctx, db, mergeErr, preMergeClean, strategy)
+}
+
+// orderMergeConflictsForRevisionFencing resolves issue-row choices before
+// dependency choices. A dependency strategy remints the affected source rows;
+// resolving an issue row afterward could otherwise overwrite that reminted
+// revision with its pre-merge row_lock.
+func orderMergeConflictsForRevisionFencing(conflicts []storage.Conflict) []storage.Conflict {
+	issues := make([]storage.Conflict, 0, 1)
+	other := make([]storage.Conflict, 0, len(conflicts))
+	dependencies := make([]storage.Conflict, 0, 1)
+	for _, conflict := range conflicts {
+		table := conflict.Field
+		if table == "" {
+			table = "issues"
+		}
+		switch table {
+		case "issues":
+			issues = append(issues, conflict)
+		case "dependencies":
+			dependencies = append(dependencies, conflict)
+		default:
+			other = append(other, conflict)
+		}
+	}
+	ordered := make([]storage.Conflict, 0, len(conflicts))
+	ordered = append(ordered, issues...)
+	ordered = append(ordered, other...)
+	ordered = append(ordered, dependencies...)
+	return ordered
 }
 
 // MergeConflictsError reports the conflicts a settle pass refused to
@@ -157,7 +188,7 @@ func SettleMerge(ctx context.Context, db DBConn, mergeErr error, preMergeClean b
 			// conflicted table (the resolver pre-screens ALL of them before
 			// resolving any, so `resolved == false` means none were touched)
 			// is resolved with the named strategy.
-			for _, c := range conflicts {
+			for _, c := range orderMergeConflictsForRevisionFencing(conflicts) {
 				table := c.Field
 				if table == "" {
 					table = "issues"
@@ -301,7 +332,7 @@ func MergeWithStrategy(ctx context.Context, db DBConn, ref, author, strategy str
 	}
 
 	dirtyTables := make(map[string]bool, len(conflicts))
-	for _, c := range conflicts {
+	for _, c := range orderMergeConflictsForRevisionFencing(conflicts) {
 		table := c.Field
 		if table == "" {
 			table = "issues"
@@ -865,6 +896,13 @@ func TryRepairFKCascadeViolations(ctx context.Context, db DBConn) (repaired, had
 	}
 
 	for _, t := range tables {
+		var dependencyEdges []dependencyCascadeRepairEdge
+		if t == "dependencies" {
+			dependencyEdges, err = bumpDependencySourcesBeforeCascadeRepair(ctx, db)
+			if err != nil {
+				return false, true, err
+			}
+		}
 		res, err := db.ExecContext(ctx, fkCascadeRepairDeletes[t])
 		if err != nil {
 			return false, true, fmt.Errorf("cascade-repair %s: %w", t, err)
@@ -878,6 +916,14 @@ func TryRepairFKCascadeViolations(ctx context.Context, db DBConn) (repaired, had
 		//nolint:gosec // G202: hardcoded table name.
 		if _, err := db.ExecContext(ctx, "CALL DOLT_ADD('"+t+"')"); err != nil {
 			return false, true, fmt.Errorf("stage repaired %s: %w", t, err)
+		}
+		if len(dependencyEdges) > 0 {
+			if _, err := recomputeAfterDependencyCascadeRepair(ctx, db, dependencyEdges); err != nil {
+				return false, true, err
+			}
+			if _, err := db.ExecContext(ctx, "CALL DOLT_ADD('issues')"); err != nil {
+				return false, true, fmt.Errorf("stage dependency source revisions after cascade repair: %w", err)
+			}
 		}
 		fmt.Fprintf(os.Stderr,
 			"Notice: pull merged %s row(s) referencing issue(s) deleted on another clone; applied the foreign key's cascade delete (%d row(s) removed)\n",
@@ -895,6 +941,76 @@ func TryRepairFKCascadeViolations(ctx context.Context, db DBConn) (repaired, had
 		return false, true, nil
 	}
 	return true, true, nil
+}
+
+type dependencyCascadeRepairEdge struct {
+	source string
+	target string
+	kind   string
+}
+
+// bumpDependencySourcesBeforeCascadeRepair records every surviving permanent
+// edge that will be removed because its target issue was deleted on the other
+// clone, then remints its source once. The FK repair below applies the delete
+// cascade manually, so it must preserve both the source revision and derived
+// blocked-state revisions.
+func bumpDependencySourcesBeforeCascadeRepair(ctx context.Context, db DBConn) ([]dependencyCascadeRepairEdge, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT d.issue_id, d.depends_on_issue_id, d.type
+		FROM dependencies d
+		JOIN issues source ON source.id = d.issue_id
+		WHERE d.depends_on_issue_id IS NOT NULL
+		  AND NOT EXISTS (SELECT 1 FROM issues target WHERE target.id = d.depends_on_issue_id)
+		ORDER BY d.issue_id, d.depends_on_issue_id, d.type`)
+	if err != nil {
+		return nil, fmt.Errorf("find dependency sources for cascade-repair fencing: %w", err)
+	}
+	var edges []dependencyCascadeRepairEdge
+	sources := make(map[string]struct{})
+	for rows.Next() {
+		var edge dependencyCascadeRepairEdge
+		if err := rows.Scan(&edge.source, &edge.target, &edge.kind); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan dependency source for cascade-repair fencing: %w", err)
+		}
+		edges = append(edges, edge)
+		sources[edge.source] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate dependency sources for cascade-repair fencing: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close dependency sources for cascade-repair fencing: %w", err)
+	}
+	for _, source := range sortedStringSet(sources) {
+		if err := issueops.BumpIssueRevisionInTx(ctx, db, source, false); err != nil {
+			return nil, fmt.Errorf("bump dependency source revision for cascade repair %s: %w", source, err)
+		}
+	}
+	return edges, nil
+}
+
+func recomputeAfterDependencyCascadeRepair(ctx context.Context, db DBConn, edges []dependencyCascadeRepairEdge) (bool, error) {
+	issueSet := make(map[string]struct{})
+	wispSet := make(map[string]struct{})
+	for _, edge := range edges {
+		issues, wisps, err := issueops.AffectedByDepChangeInTx(ctx, db, edge.source, edge.target, types.DependencyType(edge.kind))
+		if err != nil {
+			return false, fmt.Errorf("find affected rows for repaired dependency %s -> %s: %w", edge.source, edge.target, err)
+		}
+		for _, id := range issues {
+			issueSet[id] = struct{}{}
+		}
+		for _, id := range wisps {
+			wispSet[id] = struct{}{}
+		}
+	}
+	result, err := issueops.RecomputeIsBlockedInTxWithResult(ctx, db, sortedStringSet(issueSet), sortedStringSet(wispSet))
+	if err != nil {
+		return false, fmt.Errorf("recompute blocked state after dependency cascade repair: %w", err)
+	}
+	return result.IssueRowsChanged, nil
 }
 
 // constraintViolationTables lists the tables with outstanding constraint

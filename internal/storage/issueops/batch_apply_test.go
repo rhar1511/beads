@@ -1,12 +1,69 @@
 package issueops
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/steveyegge/beads/internal/storage"
 	publicops "github.com/steveyegge/beads/issueops"
 )
+
+func TestApplyBatchOldParentIDsCollectEveryParentAcrossPlanes(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	mock.ExpectQuery(`(?s)FROM dependencies.*WHERE issue_id = \?.*type = 'parent-child'`).
+		WithArgs("child").
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}).
+			AddRow("child", "old-parent-b").
+			AddRow("child", "old-parent-a"))
+	mock.ExpectQuery(`(?s)FROM wisp_dependencies.*WHERE issue_id = \?.*type = 'parent-child'`).
+		WithArgs("child").
+		WillReturnRows(sqlmock.NewRows([]string{"issue_id", "depends_on_id"}).
+			AddRow("child", "wisp-parent").
+			AddRow("child", "old-parent-a"))
+
+	plan := storage.ApplyBatchPlan{Items: []publicops.ApplyItem{{
+		Kind: publicops.ItemUpdate,
+		Update: &publicops.UpdateItem{
+			Target: publicops.Ref{ID: "child"},
+			Patch:  publicops.IssuePatch{ParentID: publicops.Field[string]{Set: true, Value: "new-parent"}},
+		},
+	}}}
+	got, err := ApplyBatchOldParentIDsInTx(context.Background(), tx, plan)
+	if err != nil {
+		t.Fatalf("applyBatchOldParentIDsInTx: %v", err)
+	}
+	want := []string{"old-parent-a", "old-parent-b", "wisp-parent"}
+	if !equalBatchParentIDs(got, want) {
+		t.Fatalf("old parents = %v, want %v", got, want)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func equalBatchParentIDs(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // applyBatchCommitResult builds a result from a (kind, changed) list, which is
 // all the message rule reads.

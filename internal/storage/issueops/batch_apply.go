@@ -58,6 +58,28 @@ import (
 // knows what to do with that; see BatchApplyWrite for why those are two facts
 // rather than one.
 func ApplyBatchInTx(ctx context.Context, tx *sql.Tx, plan storage.ApplyBatchPlan) (publicops.ApplyBatchResult, BatchApplyWrite, error) {
+	if plan.ReceiptID != "" {
+		result, found, err := PreflightBatchApplyReceiptInTx(ctx, tx, plan.ReceiptID, plan.RequestDigest)
+		if err != nil || found {
+			return result, BatchApplyWrite{}, err
+		}
+	}
+	protectedIDs := applyBatchResourceIDs(plan)
+	oldParents, err := ApplyBatchOldParentIDsInTx(ctx, tx, plan)
+	if err != nil {
+		return publicops.ApplyBatchResult{}, BatchApplyWrite{}, err
+	}
+	protectedIDs = append(protectedIDs, oldParents...)
+	explicitClass := ""
+	for _, item := range plan.Items {
+		if item.Create != nil && item.Create.ProtectionClass != "" {
+			explicitClass = "batch"
+			break
+		}
+	}
+	if err := RequireProtectedMutation(ctx, tx, plan.ProtectedPermit, "issue.batch_apply", protectedIDs, plan.ProtectedDigest, explicitClass); err != nil {
+		return publicops.ApplyBatchResult{}, BatchApplyWrite{}, err
+	}
 	run := &applyBatchRun{
 		plan:   plan,
 		keys:   make(map[string]string, len(plan.KeyIndex)),
@@ -71,7 +93,123 @@ func ApplyBatchInTx(ctx context.Context, tx *sql.Tx, plan storage.ApplyBatchPlan
 	if err := run.apply(ctx, tx); err != nil {
 		return publicops.ApplyBatchResult{}, BatchApplyWrite{}, err
 	}
+	if plan.ReceiptID != "" {
+		canonical, err := StoreBatchApplyReceiptInTx(ctx, tx, plan, run.result)
+		if err != nil {
+			return publicops.ApplyBatchResult{}, BatchApplyWrite{}, err
+		}
+		run.result = canonical
+		run.write.Tables.Add("issue_batch_apply_receipts")
+	}
+	run.write = run.write.WithProtectedMutationPermitUse(ctx)
 	return run.result, run.write, nil
+}
+
+// ApplyBatchOldParentIDsInTx returns the current parent endpoints for rows
+// whose parent link this batch replaces. Call it on the same transaction that
+// will apply the batch, before protected authorization, so permits cover every
+// endpoint whose edge may be removed.
+func ApplyBatchOldParentIDsInTx(ctx context.Context, tx DBTX, plan storage.ApplyBatchPlan) ([]string, error) {
+	var childIDs []string
+	for _, item := range plan.Items {
+		if item.Kind != publicops.ItemUpdate || item.Update == nil || !item.Update.Patch.ParentID.Set {
+			continue
+		}
+		if item.Update.Target.ID != "" {
+			childIDs = append(childIDs, item.Update.Target.ID)
+			continue
+		}
+		index, ok := plan.KeyIndex[item.Update.Target.Key]
+		if ok && index >= 0 && index < len(plan.Items) && plan.Items[index].Create != nil && plan.Items[index].Create.Issue != nil {
+			childIDs = append(childIDs, plan.Items[index].Create.Issue.ID)
+		}
+	}
+	parents, err := loadAllParentIDsForChildrenInTx(ctx, tx, []string{"dependencies", "wisp_dependencies"}, canonicalProtectedIDs(childIDs))
+	if err != nil {
+		return nil, fmt.Errorf("resolve existing parents for protected batch scope: %w", err)
+	}
+	return parents, nil
+}
+
+// loadAllParentIDsForChildrenInTx returns every existing parent endpoint for
+// the requested children. Unlike the blocked-state display helper, protected
+// authorization must cover every edge a parent replacement can remove.
+func loadAllParentIDsForChildrenInTx(ctx context.Context, tx DBTX, depTables []string, childIDs []string) ([]string, error) {
+	var parentIDs []string
+	for _, depTable := range depTables {
+		//nolint:gosec // G201: depTable is a hardcoded constant.
+		query := fmt.Sprintf(`
+			SELECT issue_id, %s AS depends_on_id FROM %s
+			WHERE issue_id = ?
+			  AND type = 'parent-child'
+		`, DepTargetExpr, depTable)
+		for _, id := range childIDs {
+			rows, err := tx.QueryContext(ctx, query, id)
+			if err != nil {
+				if optionalBlockedTable(depTable) && isTableNotExistError(err) {
+					break
+				}
+				return nil, fmt.Errorf("candidate parents from %s: %w", depTable, err)
+			}
+			for rows.Next() {
+				var childID, parentID string
+				if err := rows.Scan(&childID, &parentID); err != nil {
+					_ = rows.Close()
+					return nil, fmt.Errorf("scan candidate parent: %w", err)
+				}
+				parentIDs = append(parentIDs, parentID)
+			}
+			_ = rows.Close()
+			if err := rows.Err(); err != nil {
+				return nil, fmt.Errorf("candidate parent rows from %s: %w", depTable, err)
+			}
+		}
+	}
+	return canonicalProtectedIDs(parentIDs), nil
+}
+
+func applyBatchResourceIDs(plan storage.ApplyBatchPlan) []string {
+	ids := make([]string, 0, len(plan.Items)*2)
+	resolve := func(ref publicops.Ref) string {
+		if ref.ID != "" {
+			return ref.ID
+		}
+		index, ok := plan.KeyIndex[ref.Key]
+		if !ok || index < 0 || index >= len(plan.Items) || plan.Items[index].Create == nil || plan.Items[index].Create.Issue == nil {
+			return ""
+		}
+		return plan.Items[index].Create.Issue.ID
+	}
+	for _, item := range plan.Items {
+		switch item.Kind {
+		case publicops.ItemCreate:
+			if item.Create != nil && item.Create.Issue != nil && item.Create.Issue.ID != "" {
+				ids = append(ids, item.Create.Issue.ID)
+			}
+		case publicops.ItemUpdate:
+			if item.Update != nil {
+				ids = append(ids, resolve(item.Update.Target))
+				if item.Update.Patch.ParentID.Set {
+					ids = append(ids, item.Update.Patch.ParentID.Value)
+				}
+			}
+		case publicops.ItemClose:
+			if item.Close != nil {
+				ids = append(ids, resolve(item.Close.Target))
+			}
+		case publicops.ItemDepAdd:
+			if item.DepAdd != nil {
+				ids = append(ids, resolve(item.DepAdd.Source), resolve(item.DepAdd.Target))
+			}
+		}
+	}
+	return ids
+}
+
+// ApplyBatchResourceIDs returns the explicit issue IDs and resolved request
+// endpoints used by the batch authorization scope.
+func ApplyBatchResourceIDs(plan storage.ApplyBatchPlan) []string {
+	return applyBatchResourceIDs(plan)
 }
 
 // BatchApplyWrite reports what one apply-batch did.
@@ -84,7 +222,8 @@ func ApplyBatchInTx(ctx context.Context, tx *sql.Tx, plan storage.ApplyBatchPlan
 // when handed an empty commit message, since that message is what commits the
 // SQL transaction as well as what versions it.
 type BatchApplyWrite struct {
-	// Changed is true when this request WROTE something, on either plane.
+	// Changed is true when this request WROTE something, on either plane,
+	// including a protected-mutation replay-use row consumed by this request.
 	//
 	// IT IS NOT ItemResult.Changed SUMMED, and the difference is deliberate.
 	// ItemResult.Changed answers what a CALLER can observe — a new edge, a
@@ -98,6 +237,17 @@ type BatchApplyWrite struct {
 	// stages them. It is empty when nothing was written AND when everything
 	// written was ephemeral.
 	Tables ChangedTables
+}
+
+// WithProtectedMutationPermitUse accounts for the transactional replay-use
+// insert in the same write flag used by both store and unit-of-work batch
+// callers. Call only after the batch body succeeds; failed attempts roll back
+// both domain writes and permit consumption.
+func (write BatchApplyWrite) WithProtectedMutationPermitUse(ctx context.Context) BatchApplyWrite {
+	if ProtectedMutationPermitUseWritten(ctx) {
+		write.Changed = true
+	}
+	return write
 }
 
 // ApplyBatchCommitMessage is the history entry an apply-batch records: the
@@ -121,9 +271,11 @@ type BatchApplyWrite struct {
 // the same trap. The counts below are ItemResult.Changed, which is what a
 // caller can OBSERVE; a request can write a durable row without any item
 // reporting a landing — an idempotent same-type re-add rewrites the edge's
-// metadata, and a re-close can still settle blocked state. Composing "" for one
-// of those would hand the store legs a staged table with an empty Dolt commit
-// message, and hand the unit-of-work leg a rollback of a write it had made.
+// metadata, a re-close can still settle blocked state, and a protected request
+// consumes a replay-use row even when its domain items are semantic no-ops.
+// Composing "" for one of those would hand the store legs a staged table with
+// an empty Dolt commit message, and hand the unit-of-work leg a rollback of a
+// write it had made.
 func ApplyBatchCommitMessage(plan storage.ApplyBatchPlan, result publicops.ApplyBatchResult, write BatchApplyWrite) string {
 	counts := map[publicops.ItemKind]int{}
 	for _, item := range result.Items {
@@ -238,9 +390,11 @@ func (r *applyBatchRun) applyItem(ctx context.Context, tx *sql.Tx, index int) er
 // cap. Revisit it with a measurement, not with a copy of ExecuteCreateBatch.
 func (r *applyBatchRun) applyCreate(ctx context.Context, tx *sql.Tx, index int, item *publicops.CreateItem) error {
 	created, tables, err := ExecuteCreate(ctx, tx, publicops.CreateRequest{
-		Actor:         r.plan.Actor,
-		Issue:         item.Issue,
-		ForceIDPrefix: r.plan.ForceIDPrefix,
+		Actor:           r.plan.Actor,
+		ProtectedPermit: r.plan.ProtectedPermit,
+		ProtectionClass: item.ProtectionClass,
+		Issue:           item.Issue,
+		ForceIDPrefix:   r.plan.ForceIDPrefix,
 	})
 	if err != nil {
 		return &publicops.ItemError{Index: index, Kind: publicops.ItemCreate, Key: item.Key, Err: err}
@@ -272,6 +426,7 @@ func (r *applyBatchRun) applyUpdate(ctx context.Context, tx *sql.Tx, index int, 
 	}
 	updated, tables, err := ExecuteUpdate(ctx, tx, publicops.UpdateRequest{
 		Actor:                 r.plan.Actor,
+		ProtectedPermit:       r.plan.ProtectedPermit,
 		IssueID:               id,
 		Patch:                 item.Patch,
 		ExpectedVersion:       item.ExpectedVersion,
@@ -305,6 +460,7 @@ func (r *applyBatchRun) applyClose(ctx context.Context, tx *sql.Tx, index int, i
 	}
 	closed, tables, err := ExecuteClose(ctx, tx, publicops.CloseRequest{
 		Actor:           r.plan.Actor,
+		ProtectedPermit: r.plan.ProtectedPermit,
 		IssueID:         id,
 		Reason:          item.Reason,
 		Session:         item.Session,
@@ -375,7 +531,7 @@ func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx *sql.Tx, index int, 
 		Type:        item.Type,
 		Metadata:    item.Metadata,
 	}
-	eventWritten, err := AddDependencyInTx(ctx, tx, dep, r.plan.Actor, AddDependencyOpts{
+	eventWritten, issueRowsChanged, err := AddDependencyWithRevisionInTx(ctx, tx, dep, r.plan.Actor, AddDependencyOpts{
 		SourceTable:    sourceTable,
 		WriteTable:     depTable,
 		IsCrossPrefix:  types.ExtractPrefix(source) != types.ExtractPrefix(target),
@@ -390,6 +546,9 @@ func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx *sql.Tx, index int, 
 	// documents, so an idempotent re-add cannot sweep unrelated pending event
 	// rows into this commit (GH#2455).
 	r.write.Tables.Add(depTable)
+	if issueRowsChanged {
+		r.write.Tables.Add("issues")
+	}
 	// The edge row was written EITHER WAY: a new edge is an insert, and a
 	// same-type re-add rewrites that row's metadata. So the transaction has
 	// something to commit even when the caller sees no change.

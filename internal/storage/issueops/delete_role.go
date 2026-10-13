@@ -148,13 +148,23 @@ func DeleteInTx(ctx context.Context, tx *sql.Tx, req publicops.DeleteRequest) (p
 	if err != nil {
 		return publicops.DeleteResult{}, err
 	}
+	resourceIDs := make([]string, 0, len(neighbors))
+	for _, neighbor := range neighbors {
+		if neighbor != nil {
+			resourceIDs = append(resourceIDs, neighbor.ID)
+		}
+	}
 
 	// No guard argument to pass: this body has ALREADY answered the guard
 	// question above, and DeleteResolvedSetInTx deletes what it is handed.
 	// req.Actor goes with it: the journal rows for this delete — including the
 	// cascade's — name the identity that asked for it, the same identity the
 	// reference rewrite below is attributed to.
-	deleted, err := DeleteResolvedSetInTx(ctx, tx, set, req.DryRun, req.Actor)
+	deleted, err := DeleteResolvedSetInTx(ctx, tx, set, req.DryRun, req.Actor, ProtectedDeleteAuthorization{
+		Permit:      req.ProtectedPermit,
+		Digest:      protectedDeleteDigest(req),
+		ResourceIDs: resourceIDs,
+	})
 	if err != nil {
 		return publicops.DeleteResult{}, err
 	}
@@ -176,6 +186,12 @@ func DeleteInTx(ctx context.Context, tx *sql.Tx, req publicops.DeleteRequest) (p
 	}
 	result.ReferencesUpdated = rewritten
 	return result, nil
+}
+
+func protectedDeleteDigest(req publicops.DeleteRequest) string {
+	req.ProtectedPermit = ""
+	digest, _ := publicops.ProtectedMutationDigest(req)
+	return digest
 }
 
 // ExternalDependentsBySourceInTx reports, for each of ids, the DIRECT

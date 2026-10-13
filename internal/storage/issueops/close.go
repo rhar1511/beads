@@ -60,11 +60,13 @@ func CloseIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, reason,
 // so force bypasses the child and blocker policies, never the version check. Because
 // the read shares this transaction, a mismatch returns before any write and the
 // transaction rolls back with the issue unchanged (a true compare-and-swap).
-// row_lock only tracks lifecycle/ownership writes (status, assignee, started_at),
-// so this guards against a concurrent lifecycle change — not against concurrent
-// label, dependency, rename, or is_blocked writes that leave row_lock untouched
-// (see the freshRowLock invariant in lease.go).
+// row_lock tracks every supported aggregate mutation, including derived
+// is_blocked recomputation; exact no-ops remain stable (see the freshRowLock
+// invariant in lease.go).
 func CloseIssueCheckedInTx(ctx context.Context, tx DBTX, id, reason, actor, session string, force bool, expectedVersion *int64) (*CloseResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.close", []string{id}); err != nil {
+		return nil, err
+	}
 	if expectedVersion != nil {
 		if err := CheckVersionInTx(ctx, tx, id, *expectedVersion); err != nil {
 			return nil, err
@@ -316,6 +318,9 @@ func isClosedInTx(ctx context.Context, tx DBTX, id string) (closed bool, targetC
 
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func closeIssueInTx(ctx context.Context, tx DBTX, id string, reason, actor, session string, recordEvent bool) (*CloseResult, error) {
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.close", []string{id}); err != nil {
+		return nil, err
+	}
 	isWisp := IsActiveWispInTx(ctx, tx, id)
 	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
 

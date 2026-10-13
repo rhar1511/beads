@@ -10,6 +10,13 @@ import (
 
 //nolint:gosec // G201: table names are hardcoded constants
 func PromoteFromEphemeralInTx(ctx context.Context, tx DBTX, id string, actor string) error {
+	resourceIDs, err := DependencyEndpointsForIDsInTx(ctx, tx, []string{id})
+	if err != nil {
+		return fmt.Errorf("resolve promote endpoints for %s: %w", id, err)
+	}
+	if err := RefuseUnpermittedProtectedMutationInTx(ctx, tx, "issue.promote", resourceIDs); err != nil {
+		return err
+	}
 	if !IsActiveWispInTx(ctx, tx, id) {
 		return fmt.Errorf("wisp %s not found", id)
 	}
@@ -127,6 +134,12 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx DBTX, id string, actor str
 	}
 	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
 		return fmt.Errorf("recompute is_blocked after promote for %s: %w", id, err)
+	}
+	// Promotion moves outgoing edges into the durable dependency plane. Refresh
+	// the new issue row after that copy so its revision fences the newly visible
+	// aggregate dependency set.
+	if err := BumpIssueRevisionInTx(ctx, tx, id, false); err != nil {
+		return fmt.Errorf("bump promoted issue revision for %s: %w", id, err)
 	}
 
 	// The bead keeps its ID across promotion; only its plane changes. Journal

@@ -50,6 +50,12 @@ func (t *doltTransaction) txFor(table string) *sql.Tx {
 	return t.regularTx
 }
 
+func (t *doltTransaction) refuseProtectedMutation(ctx context.Context, operation string, ids []string) error {
+	// Classifications live in the regular transaction even when the mutation
+	// itself routes to the separately pinned ignored-table session.
+	return issueops.RefuseUnpermittedProtectedMutationInTx(ctx, t.regularTx, operation, ids)
+}
+
 // isActiveWisp checks if an ID exists in the wisps table within the transaction.
 // Unlike the store-level isActiveWisp, this queries within the transaction so it
 // sees uncommitted wisps. Handles both -wisp- pattern and explicit-ID ephemerals (GH#2053).
@@ -210,6 +216,7 @@ func (s *DoltStore) runDoltTransactionRecording(ctx context.Context, commitMsg s
 	if err != nil {
 		return issueops.BlockedRecheck{}, fmt.Errorf("failed to begin regular tx: %w", err)
 	}
+	issueops.ResetProtectedMutationAttempt(ctx)
 
 	// The journal counter and rows must commit in the SAME SQL transaction as
 	// every mutation they describe. bd_events_journal and bd_events_seq are
@@ -475,6 +482,9 @@ func (t *doltTransaction) CreateIssue(ctx context.Context, issue *types.Issue, a
 	if issue == nil {
 		return fmt.Errorf("issue must not be nil")
 	}
+	if err := t.refuseProtectedMutation(ctx, "issue.create", issueops.CreateMutationResourceIDs([]*types.Issue{issue})); err != nil {
+		return err
+	}
 
 	// Build the validation context on regularTx for both tiers: wisp rows
 	// live on the ignored session, but the validation context (config,
@@ -506,6 +516,9 @@ func (t *doltTransaction) CreateIssue(ctx context.Context, issue *types.Issue, a
 func (t *doltTransaction) CreateIssues(ctx context.Context, issues []*types.Issue, actor string) error {
 	if len(issues) == 0 {
 		return nil
+	}
+	if err := t.refuseProtectedMutation(ctx, "issue.create", issueops.CreateMutationResourceIDs(issues)); err != nil {
+		return err
 	}
 
 	// This must run before splitting regular issues from wisps: the shared
@@ -777,6 +790,9 @@ func (t *doltTransaction) hydrateSearchDependencies(ctx context.Context, depTabl
 // copies the historical event stream and appends one demotion event of its
 // own; a generic update is not that case.
 func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.update", []string{id}); err != nil {
+		return err
+	}
 	table := "issues"
 	if t.isActiveWisp(ctx, id) {
 		table = "wisps"
@@ -806,6 +822,9 @@ func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates ma
 }
 
 func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason string, actor string, session string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.close", []string{id}); err != nil {
+		return err
+	}
 	table := "issues"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, id) {
@@ -831,6 +850,9 @@ func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason stri
 // ReopenIssueWithResult reopens an issue within this transaction and reports
 // whether the lifecycle state changed.
 func (t *doltTransaction) ReopenIssueWithResult(ctx context.Context, id string, reason string, actor string) (bool, error) {
+	if err := t.refuseProtectedMutation(ctx, "issue.reopen", []string{id}); err != nil {
+		return false, err
+	}
 	table, eventTable := "issues", "events"
 	if t.isActiveWisp(ctx, id) {
 		table, eventTable = "wisps", "wisp_events"
@@ -857,7 +879,8 @@ func (t *doltTransaction) DeleteIssue(ctx context.Context, id string) error {
 	}
 	// storage.Tx.DeleteIssue carries no actor (it is the actorless system
 	// surface), so the journal rows record none — 0066's "system/unknown".
-	if err := issueops.DeleteIssueInTx(ctx, t.txFor(table), id, ""); err != nil {
+	issueRowsChanged, err := issueops.DeleteIssueInTxWithResult(ctx, t.txFor(table), id, "")
+	if err != nil {
 		return wrapExecError("delete issue in tx", err)
 	}
 	// Mark every table the ON DELETE CASCADE fans out to, not just the row's
@@ -865,6 +888,9 @@ func (t *doltTransaction) DeleteIssue(ctx context.Context, id string) error {
 	// staging only `issues` leaves them uncommitted in the working set.
 	for _, cascaded := range issueops.DeleteCascadeTables(isWisp) {
 		t.dirty.MarkDirty(cascaded)
+	}
+	if issueRowsChanged {
+		t.dirty.MarkDirty("issues")
 	}
 	return nil
 }
@@ -876,6 +902,12 @@ func (t *doltTransaction) AddDependency(ctx context.Context, dep *types.Dependen
 }
 
 func (t *doltTransaction) AddDependencyWithOptions(ctx context.Context, dep *types.Dependency, actor string, addOpts storage.DependencyAddOptions) error {
+	if dep == nil {
+		return fmt.Errorf("dependency must not be nil")
+	}
+	if err := t.refuseProtectedMutation(ctx, "dependency.add", []string{dep.IssueID, dep.DependsOnID}); err != nil {
+		return err
+	}
 	table := "dependencies"
 	sourceTable := "issues"
 	eventTable := "events"
@@ -939,22 +971,29 @@ func (t *doltTransaction) AddDependencyWithOptions(ctx context.Context, dep *typ
 	}
 
 	var addErr error
-	var eventWritten bool
+	var result issueops.DependencyWriteResult
 	if opts.PrecheckedTarget != nil && table == "wisp_dependencies" && kind == issueops.DepTargetIssue {
-		eventWritten, addErr = t.addWispDepSuspendingIssueTargetFK(ctx, dep, actor, opts)
+		result, addErr = t.addWispDepSuspendingIssueTargetFK(ctx, dep, actor, opts)
 	} else {
-		eventWritten, addErr = issueops.AddDependencyInTx(ctx, t.txFor(table), dep, actor, opts)
+		result, addErr = issueops.AddDependencyInTxWithResult(ctx, t.txFor(table), dep, actor, opts)
 	}
 	if addErr != nil {
 		return addErr
 	}
+	if !result.Changed {
+		return nil
+	}
 	t.dirty.MarkDirty(table)
+	t.dirty.MarkDirty(opts.SourceTable)
+	if result.IssueRowsChanged {
+		t.dirty.MarkDirty("issues")
+	}
 	// AddDependencyInTx records a dependency_added event on the source's event
 	// table only for a genuine emit (explicit verb + new edge); stage that table
 	// so StageAndCommit commits the event with the edge (a torn write otherwise
 	// leaves the event in the working set, dropped on reset). A structural or
 	// idempotent add writes no event, so leave eventTable unstaged.
-	if eventWritten {
+	if result.EventWritten {
 		t.dirty.MarkDirty(eventTable)
 	}
 	t.recordDepTierWrite(table)
@@ -993,15 +1032,15 @@ func (t *doltTransaction) recordDepTierWrite(writeTable string) {
 // target's existence was just validated on the regular tx. The regular tx
 // commits before the ignored tx, so the committed end-state always satisfies
 // the FK; suspend the session's FK checks around this one statement scope.
-func (t *doltTransaction) addWispDepSuspendingIssueTargetFK(ctx context.Context, dep *types.Dependency, actor string, opts issueops.AddDependencyOpts) (bool, error) {
+func (t *doltTransaction) addWispDepSuspendingIssueTargetFK(ctx context.Context, dep *types.Dependency, actor string, opts issueops.AddDependencyOpts) (issueops.DependencyWriteResult, error) {
 	if _, err := t.ignoredTx.ExecContext(ctx, "SET foreign_key_checks = 0"); err != nil {
-		return false, fmt.Errorf("suspend foreign key checks for cross-tier dependency: %w", err)
+		return issueops.DependencyWriteResult{}, fmt.Errorf("suspend foreign key checks for cross-tier dependency: %w", err)
 	}
-	eventWritten, addErr := issueops.AddDependencyInTx(ctx, t.ignoredTx, dep, actor, opts)
+	result, addErr := issueops.AddDependencyInTxWithResult(ctx, t.ignoredTx, dep, actor, opts)
 	if _, err := t.ignoredTx.ExecContext(ctx, "SET foreign_key_checks = 1"); err != nil && addErr == nil {
 		addErr = fmt.Errorf("restore foreign key checks after cross-tier dependency: %w", err)
 	}
-	return eventWritten, addErr
+	return result, addErr
 }
 
 // readDepTargetForPrecheck validates a dependency target on the transaction
@@ -1102,22 +1141,31 @@ func (t *doltTransaction) RemoveDependency(ctx context.Context, issueID, depends
 }
 
 func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issueID, dependsOnID string, actor string, rmOpts storage.DependencyRemoveOptions) error {
+	if err := t.refuseProtectedMutation(ctx, "dependency.remove", []string{issueID, dependsOnID}); err != nil {
+		return err
+	}
 	table := "dependencies"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, issueID) {
 		table = "wisp_dependencies"
 		eventTable = "wisp_events"
 	}
-	eventWritten, err := issueops.RemoveDependencyInTx(ctx, t.txFor(table), issueID, dependsOnID, actor, rmOpts.EmitEvent)
+	result, err := issueops.RemoveDependencyInTxWithResult(ctx, t.txFor(table), issueID, dependsOnID, actor, rmOpts.EmitEvent)
 	if err != nil {
 		return wrapExecError("remove dependency in tx", err)
 	}
+	if !result.Changed {
+		return nil
+	}
 	t.dirty.MarkDirty(table)
+	if result.IssueRowsChanged {
+		t.dirty.MarkDirty("issues")
+	}
 	// RemoveDependencyInTx records a dependency_removed event on the source's
 	// event table only for a genuine emit (explicit verb + edge removal); stage
 	// that table so it commits with the edge. A structural or missing-edge remove
 	// writes no event, so leave eventTable unstaged.
-	if eventWritten {
+	if result.EventWritten {
 		t.dirty.MarkDirty(eventTable)
 	}
 	return nil
@@ -1125,6 +1173,9 @@ func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issue
 
 // AddLabel adds a label within the transaction
 func (t *doltTransaction) AddLabel(ctx context.Context, issueID, label, actor string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.label_add", []string{issueID}); err != nil {
+		return err
+	}
 	table := "labels"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, issueID) {
@@ -1132,11 +1183,17 @@ func (t *doltTransaction) AddLabel(ctx context.Context, issueID, label, actor st
 		eventTable = "wisp_events"
 	}
 
-	if err := issueops.AddLabelInTx(ctx, t.txFor(table), table, eventTable, issueID, label, actor); err != nil {
+	changed, err := issueops.AddLabelInTx(ctx, t.txFor(table), table, eventTable, issueID, label, actor)
+	if err != nil {
 		return wrapExecError("add label in tx", err)
 	}
-	t.dirty.MarkDirty(table)
 	t.dirty.MarkDirty(eventTable)
+	if changed {
+		t.dirty.MarkDirty(table)
+		if table == "labels" {
+			t.dirty.MarkDirty("issues")
+		}
+	}
 	return nil
 }
 
@@ -1165,6 +1222,9 @@ func (t *doltTransaction) GetLabels(ctx context.Context, issueID string) ([]stri
 
 // RemoveLabel removes a label within the transaction
 func (t *doltTransaction) RemoveLabel(ctx context.Context, issueID, label, actor string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.label_remove", []string{issueID}); err != nil {
+		return err
+	}
 	table := "labels"
 	eventTable := "events"
 	if t.isActiveWisp(ctx, issueID) {
@@ -1172,11 +1232,17 @@ func (t *doltTransaction) RemoveLabel(ctx context.Context, issueID, label, actor
 		eventTable = "wisp_events"
 	}
 
-	if err := issueops.RemoveLabelInTx(ctx, t.txFor(table), table, eventTable, issueID, label, actor); err != nil {
+	changed, err := issueops.RemoveLabelInTx(ctx, t.txFor(table), table, eventTable, issueID, label, actor)
+	if err != nil {
 		return wrapExecError("remove label in tx", err)
 	}
-	t.dirty.MarkDirty(table)
 	t.dirty.MarkDirty(eventTable)
+	if changed {
+		t.dirty.MarkDirty(table)
+		if table == "labels" {
+			t.dirty.MarkDirty("issues")
+		}
+	}
 	return nil
 }
 
@@ -1259,6 +1325,9 @@ func (t *doltTransaction) GetLocalMetadata(ctx context.Context, key string) (str
 }
 
 func (t *doltTransaction) ImportIssueComment(ctx context.Context, issueID, author, text string, createdAt time.Time) (*types.Comment, error) {
+	if err := t.refuseProtectedMutation(ctx, "issue.comment", []string{issueID}); err != nil {
+		return nil, err
+	}
 	_, err := t.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, err
@@ -1270,11 +1339,25 @@ func (t *doltTransaction) ImportIssueComment(ctx context.Context, issueID, autho
 	}
 
 	createdAtText := issueops.FormatAuxTime(createdAt)
-	id, _, err := issueops.InsertDerivedComment(ctx, t.txFor(table), table, issueID, author, text, createdAtText)
+	id, existed, err := issueops.InsertDerivedComment(ctx, t.txFor(table), table, issueID, author, text, createdAtText)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add comment: %w", err)
 	}
-	t.dirty.MarkDirty(table)
+	if !existed {
+		t.dirty.MarkDirty(table)
+		issueTable := "issues"
+		if table == "wisp_comments" {
+			issueTable = "wisps"
+		}
+		if err := issueops.TouchRowVersionInTx(ctx, t.txFor(table), issueTable, issueID); err != nil {
+			return nil, fmt.Errorf("failed to add comment: %w", err)
+		}
+		if table == "wisp_comments" {
+			t.dirty.MarkDirty("wisps")
+		} else {
+			t.dirty.MarkDirty("issues")
+		}
+	}
 
 	stored, err := issueops.ParseAuxTime(createdAtText)
 	if err != nil {
@@ -1321,6 +1404,9 @@ func (t *doltTransaction) GetIssueComments(ctx context.Context, issueID string) 
 
 // AddComment adds a comment within the transaction
 func (t *doltTransaction) AddComment(ctx context.Context, issueID, actor, comment string) error {
+	if err := t.refuseProtectedMutation(ctx, "issue.comment", []string{issueID}); err != nil {
+		return err
+	}
 	table := "events"
 	if t.isActiveWisp(ctx, issueID) {
 		table = "wisp_events"
@@ -1337,7 +1423,19 @@ func (t *doltTransaction) AddComment(ctx context.Context, issueID, actor, commen
 	if err != nil {
 		return wrapExecError("add comment in tx", err)
 	}
+	issueTable := "issues"
+	if table == "wisp_events" {
+		issueTable = "wisps"
+	}
+	if err := issueops.TouchRowVersionInTx(ctx, t.txFor(table), issueTable, issueID); err != nil {
+		return wrapExecError("add comment in tx", err)
+	}
 	t.dirty.MarkDirty(table)
+	if table == "wisp_events" {
+		t.dirty.MarkDirty("wisps")
+	} else {
+		t.dirty.MarkDirty("issues")
+	}
 	stored, err := issueops.ParseAuxTime(createdAt)
 	if err != nil {
 		return wrapExecError("add comment in tx", err)

@@ -11,7 +11,9 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/issueops"
 )
 
 const storageScopeName = "github.com/steveyegge/beads/storage"
@@ -70,6 +72,55 @@ func WrapStorage(s storage.DoltStorage) storage.DoltStorage {
 // Unwrap satisfies storage.Unwrapper so storage.UnwrapStore can peel the
 // instrumentation layer for optional-interface type assertions.
 func (s *InstrumentedStorage) Unwrap() storage.DoltStorage { return s.inner }
+
+// RevisionTransition forwards the optional transition role without changing
+// its semantics. The role owns its own transaction and does not fire hooks.
+func (s *InstrumentedStorage) RevisionTransition() (issueops.RevisionTransition, error) {
+	source, ok := s.inner.(interface {
+		RevisionTransition() (issueops.RevisionTransition, error)
+	})
+	if !ok {
+		return nil, &storage.ErrUnsupported{Op: "RevisionTransition", Backend: "instrumented store"}
+	}
+	return source.RevisionTransition()
+}
+
+// RevisionTransitionReadiness forwards the read-only migration probe to the
+// wrapped store so telemetry decoration does not hide startup readiness.
+func (s *InstrumentedStorage) RevisionTransitionReadiness(ctx context.Context) (schema.RevisionTransitionReadiness, error) {
+	source, ok := s.inner.(interface {
+		RevisionTransitionReadiness(context.Context) (schema.RevisionTransitionReadiness, error)
+	})
+	if !ok {
+		return schema.RevisionTransitionReadiness{}, &storage.ErrUnsupported{Op: "RevisionTransitionReadiness", Backend: "instrumented store"}
+	}
+	return source.RevisionTransitionReadiness(ctx)
+}
+
+// BatchApplyReceiptReadiness forwards the read-only receipt migration probe to
+// the wrapped store so telemetry decoration preserves startup readiness.
+func (s *InstrumentedStorage) BatchApplyReceiptReadiness(ctx context.Context) (schema.BatchApplyReceiptReadiness, error) {
+	source, ok := s.inner.(interface {
+		BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+	})
+	if !ok {
+		return schema.BatchApplyReceiptReadiness{}, &storage.ErrUnsupported{Op: "BatchApplyReceiptReadiness", Backend: "instrumented store"}
+	}
+	return source.BatchApplyReceiptReadiness(ctx)
+}
+
+// ProtectedMutationReadiness forwards the protected-record and replay-use
+// schema probe so store-backed bd serve startup sees the selected database's
+// exact readiness through this decorator.
+func (s *InstrumentedStorage) ProtectedMutationReadiness(ctx context.Context) (schema.ProtectedMutationReadiness, error) {
+	source, ok := s.inner.(interface {
+		ProtectedMutationReadiness(context.Context) (schema.ProtectedMutationReadiness, error)
+	})
+	if !ok {
+		return schema.ProtectedMutationReadiness{}, &storage.ErrUnsupported{Op: "ProtectedMutationReadiness", Backend: "instrumented store"}
+	}
+	return source.ProtectedMutationReadiness(ctx)
+}
 
 // op starts a span and records a metric for the named storage operation.
 func (s *InstrumentedStorage) op(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span, time.Time) {

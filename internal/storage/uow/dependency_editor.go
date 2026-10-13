@@ -64,6 +64,17 @@ func (e *dependencyEditor) AddDependencies(ctx context.Context, request publicop
 	copy(added, request.Edges)
 
 	return RunTxResult(ctx, e.provider, func(ctx context.Context, uw UnitOfWork) (publicops.AddDependenciesResult, string, error) {
+		digest, err := publicops.ProtectedMutationDigest(request)
+		if err != nil {
+			return publicops.AddDependenciesResult{}, "", err
+		}
+		protectedIDs := make([]string, 0, len(request.Edges)*2)
+		for _, edge := range request.Edges {
+			protectedIDs = append(protectedIDs, edge.IssueID, edge.DependsOnID)
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, request.ProtectedPermit, "dependency.add", protectedIDs, digest, ""); err != nil {
+			return publicops.AddDependenciesResult{}, "", err
+		}
 		if _, err := uw.DependencyUseCase().AddDependencies(ctx, deps, request.Actor, domain.BulkAddDepsOpts{
 			SkipPerEdgeCycleCheck: request.SkipPerEdgeCycleCheck,
 		}); err != nil {
@@ -90,6 +101,13 @@ func (e *dependencyEditor) RemoveDependency(ctx context.Context, request publico
 		return publicops.RemoveDependencyResult{}, err
 	}
 	return RunTxResult(ctx, e.provider, func(ctx context.Context, uw UnitOfWork) (publicops.RemoveDependencyResult, string, error) {
+		digest, err := publicops.ProtectedMutationDigest(request)
+		if err != nil {
+			return publicops.RemoveDependencyResult{}, "", err
+		}
+		if err := requireProtectedUOWMutation(ctx, uw, request.ProtectedPermit, "dependency.remove", []string{request.IssueID, request.DependsOnID}, digest, ""); err != nil {
+			return publicops.RemoveDependencyResult{}, "", err
+		}
 		removed, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, request.IssueID, request.DependsOnID, request.Actor)
 		if err != nil {
 			return publicops.RemoveDependencyResult{}, "", err

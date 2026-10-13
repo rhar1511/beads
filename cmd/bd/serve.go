@@ -17,6 +17,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage/backends"
 	"github.com/steveyegge/beads/internal/storage/contextinfo"
 	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/storage/uow"
 	"github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
@@ -291,37 +292,51 @@ func runServe() error {
 		// fully drained, so no request can reach a closed store. runServe must
 		// not close it.
 		journalEnabled := eventsjournal.EnabledFor(info.BeadsDir)
-		roles, err := serveIssueRoles(store, journalEnabled)
+		roles, err := serveIssueRoles(rootCtx, store, journalEnabled)
 		if err != nil {
 			return HandleError("bd serve: %v", err)
 		}
+		protectedAuthority, closeProtectedAuthority, err := resolveServeProtectedMutationAuthority(rootCtx, info, roles.source)
+		if err != nil {
+			return HandleError("bd serve: %v", err)
+		}
+		defer func() {
+			if err := closeProtectedAuthority(); err != nil {
+				fmt.Fprintf(os.Stderr, "bd serve: closing protected mutation authority: %v\n", err)
+			}
+		}()
 		defer startServeEventsJournalMaintenance(info.BeadsDir, store)()
 		return serveListen(opts, httpapi.Config{
-			Reader:            roles.reader,
-			Claimer:           roles.claimer,
-			BatchCloser:       roles.batchCloser,
-			ReadyClaimer:      roles.readyClaimer,
-			Releaser:          roles.releaser,
-			Lifecycle:         roles.lifecycle,
-			Settings:          roles.settings,
-			Stats:             roles.stats,
-			CycleDetector:     roles.cycles,
-			EdgeReader:        roles.edges,
-			GraphCounter:      roles.edgeCounter,
-			Relations:         roles.relations,
-			Commenter:         roles.commenter,
-			BlockingAnnotator: roles.blocking,
-			TreeWalker:        roles.tree,
-			ReadyCounter:      roles.readyCounter,
-			Counter:           roles.counter,
-			Querier:           roles.querier,
-			Sweeper:           roles.sweeper,
-			Deleter:           roles.deleter,
-			BatchCreator:      roles.batchCreator,
-			DependencyEditor:  roles.dependencyEditor,
-			MetadataCAS:       roles.metadataCAS,
-			BatchApplier:      roles.batchApplier,
-			Memories:          roles.memories,
+			Reader:                     roles.reader,
+			Claimer:                    roles.claimer,
+			BatchCloser:                roles.batchCloser,
+			ReadyClaimer:               roles.readyClaimer,
+			Releaser:                   roles.releaser,
+			Lifecycle:                  roles.lifecycle,
+			Settings:                   roles.settings,
+			Stats:                      roles.stats,
+			CycleDetector:              roles.cycles,
+			EdgeReader:                 roles.edges,
+			GraphCounter:               roles.edgeCounter,
+			Relations:                  roles.relations,
+			Commenter:                  roles.commenter,
+			BlockingAnnotator:          roles.blocking,
+			TreeWalker:                 roles.tree,
+			ReadyCounter:               roles.readyCounter,
+			Counter:                    roles.counter,
+			Querier:                    roles.querier,
+			Sweeper:                    roles.sweeper,
+			Deleter:                    roles.deleter,
+			BatchCreator:               roles.batchCreator,
+			DependencyEditor:           roles.dependencyEditor,
+			MetadataCAS:                roles.metadataCAS,
+			RevisionTransition:         roles.revisionTransition,
+			SourceSnapshotReader:       roles.sourceSnapshotReader,
+			TransitionReadiness:        roles.transitionReadiness,
+			BatchApplyReceiptReadiness: roles.batchApplyReceiptReadiness,
+			ProtectedMutationAuthority: protectedAuthority,
+			BatchApplier:               roles.batchApplier,
+			Memories:                   roles.memories,
 			// Nil when this backend has no journal seam and the workspace never
 			// asked for one; Listen requires it exactly when the flag below is
 			// set, and serveIssueRoles has already refused the enabled case.
@@ -397,11 +412,23 @@ func runServe() error {
 		}()
 		provider = wireExternalDependencyUOWProvider(p)
 	}
+	protectedAuthority, closeProtectedAuthority, err := resolveServeProtectedMutationAuthority(rootCtx, info, provider)
+	if err != nil {
+		return HandleError("bd serve: %v", err)
+	}
+	defer func() {
+		if err := closeProtectedAuthority(); err != nil {
+			fmt.Fprintf(os.Stderr, "bd serve: closing protected mutation authority: %v\n", err)
+		}
+	}()
 
 	defer startServeEventsJournalMaintenance(info.BeadsDir, provider)()
 
 	return serveListen(opts, httpapi.Config{
-		Provider: provider,
+		Provider:                   provider,
+		TransitionReadiness:        probeRevisionTransitionReadiness(rootCtx, provider),
+		BatchApplyReceiptReadiness: probeBatchApplyReceiptReadiness(rootCtx, provider),
+		ProtectedMutationAuthority: protectedAuthority,
 		// No EventsJournal field on this arm: the provider carries the journal
 		// read as one of its own capability accessors, exactly as it carries
 		// every other role Listen would otherwise need spelled out. Activation
@@ -700,7 +727,7 @@ var _ serveRoleSource = storage.DoltStorage(nil)
 // It returns the WHOLE set httpapi.Config requires; Listen refuses a partial
 // set (see checkDatabaseSource), so a role missing here is a startup failure
 // rather than a nil dereference on the first request that reaches it.
-func serveIssueRoles(src serveRoleSource, journalEnabled bool) (serveRoles, error) {
+func serveIssueRoles(ctx context.Context, src serveRoleSource, journalEnabled bool) (serveRoles, error) {
 	var roles serveRoles
 	if src == nil {
 		// A set of nil roles would reach Listen as "no database source" —
@@ -710,6 +737,7 @@ func serveIssueRoles(src serveRoleSource, journalEnabled bool) (serveRoles, erro
 	if hooked, ok := src.(*storage.HookFiringStore); ok {
 		src = hooked.Unwrap()
 	}
+	roles.source = src
 
 	// Each entry binds one Config field to the accessor that fills it, and
 	// names itself in the failure.
@@ -782,7 +810,71 @@ func serveIssueRoles(src serveRoleSource, journalEnabled bool) (serveRoles, erro
 			return serveRoles{}, fmt.Errorf("%s: %w", b.name, err)
 		}
 	}
+	if roleSource, ok := src.(interface {
+		RevisionTransition() (issueops.RevisionTransition, error)
+	}); ok {
+		if role, err := roleSource.RevisionTransition(); err == nil {
+			roles.revisionTransition = role
+		}
+	}
+	if roleSource, ok := src.(interface {
+		SourceSnapshotReader() (issueops.SourceSnapshotReader, error)
+	}); ok {
+		if role, err := roleSource.SourceSnapshotReader(); err == nil {
+			roles.sourceSnapshotReader = role
+		}
+	}
+	if roles.revisionTransition != nil || roles.sourceSnapshotReader != nil {
+		if source, ok := src.(interface {
+			RevisionTransitionReadiness(context.Context) (schema.RevisionTransitionReadiness, error)
+		}); ok {
+			if readiness, err := source.RevisionTransitionReadiness(ctx); err == nil {
+				roles.transitionReadiness = readiness
+			}
+		}
+	}
+	if roles.batchApplier != nil {
+		if source, ok := src.(interface {
+			BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+		}); ok {
+			if readiness, err := source.BatchApplyReceiptReadiness(ctx); err == nil {
+				roles.batchApplyReceiptReadiness = readiness
+			}
+		}
+	}
 	return roles, nil
+}
+
+// probeRevisionTransitionReadiness is deliberately fail closed: a provider
+// without the optional read-only probe, or any probe error, yields the zero
+// (unready) proof. The API capability therefore follows the selected database
+// rather than a freely asserted startup flag.
+func probeRevisionTransitionReadiness(ctx context.Context, source any) schema.RevisionTransitionReadiness {
+	readinessSource, ok := source.(uow.RevisionTransitionReadinessSource)
+	if !ok {
+		return schema.RevisionTransitionReadiness{}
+	}
+	readiness, err := readinessSource.RevisionTransitionReadiness(ctx)
+	if err != nil {
+		return schema.RevisionTransitionReadiness{}
+	}
+	return readiness
+}
+
+// probeBatchApplyReceiptReadiness is fail closed: a source without the
+// optional read-only receipt probe, or any probe error, yields the zero proof.
+func probeBatchApplyReceiptReadiness(ctx context.Context, source any) schema.BatchApplyReceiptReadiness {
+	readinessSource, ok := source.(interface {
+		BatchApplyReceiptReadiness(context.Context) (schema.BatchApplyReceiptReadiness, error)
+	})
+	if !ok {
+		return schema.BatchApplyReceiptReadiness{}
+	}
+	readiness, err := readinessSource.BatchApplyReceiptReadiness(ctx)
+	if err != nil {
+		return schema.BatchApplyReceiptReadiness{}
+	}
+	return readiness
 }
 
 // serveJournalCursor is storage.UnwrapStore reached from serveRoleSource, which
@@ -812,6 +904,8 @@ func serveJournalCursor(src serveRoleSource) (storage.EventsJournalCursor, bool)
 // requires every httpapi.Config literal in this package to sit in a function
 // that consulted serveDatabaseSource.
 type serveRoles struct {
+	// source is the one-peel store value used for optional startup probes.
+	source  any
 	reader  issueops.Reader
 	claimer issueops.Claimer
 	// batchCloser closes many issues as one transaction, behind
@@ -854,7 +948,11 @@ type serveRoles struct {
 	// metadataCAS is the conditional single-key metadata write. Its accessor
 	// recurses through the hook decorator, so the ONE peel above is what keeps
 	// this server from running the workspace's on_update script per swap.
-	metadataCAS issueops.MetadataCAS
+	metadataCAS                issueops.MetadataCAS
+	revisionTransition         issueops.RevisionTransition
+	sourceSnapshotReader       issueops.SourceSnapshotReader
+	transitionReadiness        schema.RevisionTransitionReadiness
+	batchApplyReceiptReadiness schema.BatchApplyReceiptReadiness
 	// batchApplier is the role that makes the ONE peel above matter most, and
 	// the arithmetic is what makes it worth its own sentence. Its hook wrapper
 	// fires FOUR vocabularies from one call — on_create for every created item,

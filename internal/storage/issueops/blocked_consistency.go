@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+// randomRowLockSQL derives a nonzero signed 60-bit token from a fresh UUID.
+// The full-table repair must assign a distinct token per row in one SQL
+// statement; UUID() keeps the opaque row_lock behavior without a positive-counter
+// assumption or a shared constant token across concurrent repairs.
+const randomRowLockSQL = "CAST(CONV(SUBSTRING(REPLACE(UUID(), '-', ''), 2, 15), 16, 10) AS SIGNED)"
+
 // blockedRecomputeGraphTables are the version-controlled tables a full
 // is_blocked recompute reads and folds into its issues-only repair commit.
 //
@@ -277,6 +283,9 @@ func recomputeIsBlockedCounting(ctx context.Context, tx DBTX, issueIDs, wispIDs 
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
 		return 0, nil
 	}
+	if err := RefuseUnpermittedProtectedDerivedMutationInTx(ctx, tx, "issue.derived_recompute", append(append([]string(nil), issueIDs...), wispIDs...)); err != nil {
+		return 0, err
+	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
 		return 0, err
@@ -342,11 +351,11 @@ func recomputeAllIsBlockedPassInTx(ctx context.Context, tx DBTX, table, alias, d
 //nolint:gosec // G201: table, alias, and depTable are constants from the only two callers.
 func markAllBlockedSQL(table, alias, depTable string) string {
 	return fmt.Sprintf(`
-		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 1, %[2]s.updated_at = %[2]s.updated_at
+		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 1, %[2]s.row_lock = %[4]s, %[2]s.updated_at = %[2]s.updated_at
 		WHERE %[2]s.is_blocked = 0
 		  AND %[2]s.status <> 'closed' AND %[2]s.status <> 'pinned'
 		  AND %[2]s.id IN (%[3]s)
-	`, table, alias, shouldBeBlockedIDsUnionSQL(depTable))
+	`, table, alias, shouldBeBlockedIDsUnionSQL(depTable), randomRowLockSQL)
 }
 
 // unmarkAllBlockedSQL is the full-table analog of the batched unmark
@@ -358,11 +367,11 @@ func markAllBlockedSQL(table, alias, depTable string) string {
 //nolint:gosec // G201: table, alias, and depTable are constants from the only two callers.
 func unmarkAllBlockedSQL(table, alias, depTable string) string {
 	return fmt.Sprintf(`
-		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 0, %[2]s.updated_at = %[2]s.updated_at
+		UPDATE %[1]s %[2]s SET %[2]s.is_blocked = 0, %[2]s.row_lock = %[4]s, %[2]s.updated_at = %[2]s.updated_at
 		WHERE %[2]s.is_blocked = 1
 		  AND ( %[2]s.status = 'closed' OR %[2]s.status = 'pinned'
 		        OR %[2]s.id NOT IN (%[3]s) )
-	`, table, alias, shouldBeBlockedIDsUnionSQL(depTable))
+	`, table, alias, shouldBeBlockedIDsUnionSQL(depTable), randomRowLockSQL)
 }
 
 // shouldBeBlockedIDsUnionSQL selects, UNCORRELATED with any outer row, every

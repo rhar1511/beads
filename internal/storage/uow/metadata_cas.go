@@ -58,7 +58,14 @@ func (m *metadataCAS) CompareAndSetKey(ctx context.Context, req publicops.Compar
 	if err != nil {
 		return publicops.CompareAndSetKeyResult{}, err
 	}
+	digest, err := publicops.ProtectedMutationDigest(req)
+	if err != nil {
+		return publicops.CompareAndSetKeyResult{}, err
+	}
 	return RunTxResult(ctx, m.provider, func(ctx context.Context, uw UnitOfWork) (publicops.CompareAndSetKeyResult, string, error) {
+		if err := requireProtectedUOWMutation(ctx, uw, req.ProtectedPermit, "metadata.compare_and_set", []string{plan.IssueID}, digest, ""); err != nil {
+			return publicops.CompareAndSetKeyResult{}, "", err
+		}
 		result, wrote, err := uw.IssueUseCase().CompareAndSetMetadataKey(ctx, plan)
 		if err != nil || !wrote {
 			return result, "", err

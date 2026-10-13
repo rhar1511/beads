@@ -94,4 +94,5 @@ func (s *sweeper) Sweep(ctx context.Context, req issueops.SweepRequest) (issueop
 var sweptTables = []string{
 	"issues", "dependencies", "labels", "comments", "events", "provenance_events",
 	"child_counters", "issue_snapshots", "compaction_snapshots",
+	"protected_issue_records", "protected_mutation_permit_uses",
 }

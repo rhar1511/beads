@@ -50,6 +50,10 @@ func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequ
 	if err != nil {
 		return publicops.CreateResult{}, nil, err
 	}
+	digest, digestErr := publicops.ProtectedMutationDigest(attempt)
+	if digestErr != nil {
+		return publicops.CreateResult{}, nil, digestErr
+	}
 	issue := attempt.Issue
 	// Configured infra types live in the wisp tables, the same routing the
 	// stores' own CreateIssue applies (internal/storage/dolt/issues.go). Mark
@@ -65,6 +69,25 @@ func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequ
 	// this line). NoHistory keeps its own retention mode, same as above.
 	if !issue.Ephemeral && !issue.NoHistory && issue.WispType != "" {
 		issue.Ephemeral = true
+	}
+	if attempt.ProtectionClass != "" && (issue.ID == "" || strings.TrimSpace(issue.ID) != issue.ID) {
+		return publicops.CreateResult{}, nil, fmt.Errorf("%w: protected creation requires an explicit issue ID", storage.ErrValidation)
+	}
+	protectedIDs := []string{}
+	if issue.ID != "" {
+		protectedIDs = append(protectedIDs, issue.ID)
+	}
+	if attempt.ParentID != "" {
+		protectedIDs = append(protectedIDs, attempt.ParentID)
+	}
+	for _, dependency := range attempt.Dependencies {
+		protectedIDs = append(protectedIDs, dependency.TargetID)
+	}
+	if attempt.WaitsFor != nil {
+		protectedIDs = append(protectedIDs, attempt.WaitsFor.SpawnerID)
+	}
+	if err := RequireProtectedMutation(ctx, tx, attempt.ProtectedPermit, "issue.create", protectedIDs, digest, attempt.ProtectionClass); err != nil {
+		return publicops.CreateResult{}, nil, err
 	}
 	if attempt.InheritLabelsFromParent && attempt.ParentID != "" {
 		labels, err := GetLabelsInTx(ctx, tx, "", attempt.ParentID)
@@ -101,6 +124,12 @@ func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequ
 	}
 	tables := ChangedTables{}
 	tables.Merge(CreateIssuesDirtyTables(ctx, []*types.Issue{issue}, created))
+	if attempt.ProtectionClass != "" {
+		if err := SetProtectedRecordClassInTx(ctx, tx, issue.ID, attempt.ProtectionClass); err != nil {
+			return publicops.CreateResult{}, nil, err
+		}
+		tables.Add("protected_issue_records")
+	}
 	if childCounterChanged {
 		tables.Add("child_counters")
 	}
@@ -132,6 +161,10 @@ func skippedDependencyError(skipped []skippedDependency) error {
 // ExecuteUpdate applies a guarded update in tx and reports durable tables changed.
 func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequest) (publicops.UpdateResult, ChangedTables, error) {
 	attempt := CloneUpdateRequest(request)
+	digest, digestErr := publicops.ProtectedMutationDigest(attempt)
+	if digestErr != nil {
+		return publicops.UpdateResult{}, nil, digestErr
+	}
 	if attempt.Actor == "" || attempt.IssueID == "" {
 		return publicops.UpdateResult{}, nil, fmt.Errorf("%w: update requires actor and issue ID", storage.ErrValidation)
 	}
@@ -150,6 +183,29 @@ func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequ
 	tables := ChangedTables{}
 	before, err := GetIssueInTx(ctx, tx, attempt.IssueID)
 	if err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	protectedIDs := []string{attempt.IssueID}
+	if attempt.Patch.ParentID.Set {
+		parentEdges, err := GetDependencyRecordsForIssuesInTx(ctx, tx, []string{attempt.IssueID})
+		if err != nil {
+			return publicops.UpdateResult{}, nil, fmt.Errorf("read old parent endpoints: %w", err)
+		}
+		for _, edge := range parentEdges[attempt.IssueID] {
+			if edge != nil && edge.Type == types.DepParentChild {
+				protectedIDs = append(protectedIDs, edge.DependsOnID)
+			}
+		}
+		protectedIDs = append(protectedIDs, attempt.Patch.ParentID.Value)
+	}
+	if attempt.Patch.Persistence.Set {
+		endpoints, err := DependencyEndpointsForIDsInTx(ctx, tx, []string{attempt.IssueID})
+		if err != nil {
+			return publicops.UpdateResult{}, nil, fmt.Errorf("read persistence-move dependency endpoints: %w", err)
+		}
+		protectedIDs = append(protectedIDs, endpoints...)
+	}
+	if err := RequireProtectedMutation(ctx, tx, attempt.ProtectedPermit, "issue.update", protectedIDs, digest, ""); err != nil {
 		return publicops.UpdateResult{}, nil, err
 	}
 	if attempt.ExpectedVersion != nil {
@@ -228,8 +284,8 @@ func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequ
 	}
 	if labelsChanged {
 		changedAny = true
-		_, labelTable, eventTable, _ := WispTableRouting(IsActiveWispInTx(ctx, tx, attempt.IssueID))
-		tables.Add(labelTable, eventTable)
+		issueTable, labelTable, eventTable, _ := WispTableRouting(IsActiveWispInTx(ctx, tx, attempt.IssueID))
+		tables.Add(issueTable, labelTable, eventTable)
 	}
 	parentResult, err := ApplyParentPatch(ctx, tx, current, attempt.Patch.ParentID, attempt.Actor)
 	if err != nil {
@@ -237,8 +293,8 @@ func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequ
 	}
 	if parentResult.Changed {
 		changedAny = true
-		_, _, _, dependencyTable := WispTableRouting(IsActiveWispInTx(ctx, tx, attempt.IssueID))
-		tables.Add(dependencyTable)
+		issueTable, _, _, dependencyTable := WispTableRouting(IsActiveWispInTx(ctx, tx, attempt.IssueID))
+		tables.Add(issueTable, dependencyTable)
 		if parentResult.IssueRowsChanged {
 			tables.Add("issues")
 		}
@@ -283,6 +339,13 @@ func ExecuteClose(ctx context.Context, tx *sql.Tx, request publicops.CloseReques
 	if attempt.Actor == "" || attempt.IssueID == "" {
 		return publicops.CloseResult{}, nil, fmt.Errorf("%w: close requires actor and issue ID", storage.ErrValidation)
 	}
+	digest, err := publicops.ProtectedMutationDigest(attempt)
+	if err != nil {
+		return publicops.CloseResult{}, nil, err
+	}
+	if err := RequireProtectedMutation(ctx, tx, attempt.ProtectedPermit, "issue.close", []string{attempt.IssueID}, digest, ""); err != nil {
+		return publicops.CloseResult{}, nil, err
+	}
 	closed, err := CloseIssueCheckedInTx(ctx, tx, attempt.IssueID, attempt.Reason, attempt.Actor, attempt.Session, attempt.Force, attempt.ExpectedVersion)
 	if err != nil {
 		return publicops.CloseResult{}, nil, err
@@ -308,6 +371,13 @@ func ExecuteReopen(ctx context.Context, tx *sql.Tx, request publicops.ReopenRequ
 	attempt := CloneReopenRequest(request)
 	if attempt.Actor == "" || attempt.IssueID == "" {
 		return publicops.ReopenResult{}, nil, fmt.Errorf("%w: reopen requires actor and issue ID", storage.ErrValidation)
+	}
+	digest, err := publicops.ProtectedMutationDigest(attempt)
+	if err != nil {
+		return publicops.ReopenResult{}, nil, err
+	}
+	if err := RequireProtectedMutation(ctx, tx, attempt.ProtectedPermit, "issue.reopen", []string{attempt.IssueID}, digest, ""); err != nil {
+		return publicops.ReopenResult{}, nil, err
 	}
 	if attempt.ExpectedVersion != nil {
 		if err := CheckVersionInTx(ctx, tx, attempt.IssueID, *attempt.ExpectedVersion); err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/issueops"
 )
 
 // This file backs `bd conflicts` (federation ask #3): the issue-oriented view
@@ -389,9 +390,13 @@ func resolveOneConflictRow(ctx context.Context, db DBConn, table, keyCol, key, s
 		if len(names) == 0 {
 			return fmt.Errorf("conflict for %s %s carries no their_* data columns", table, key)
 		}
-		sets := make([]string, len(names))
+		sets := make([]string, 0, len(names)+1)
 		args := make([]any, 0, len(names)+1)
 		for i, n := range names {
+			if table == "issues" && n == "row_lock" {
+				// A conflict chooses issue data, not a reusable revision token.
+				continue
+			}
 			// Column names are interpolated (MySQL cannot bind an
 			// identifier) and come from the conflict table's own schema,
 			// which a peer's schema merge can extend — gate them exactly
@@ -399,8 +404,12 @@ func resolveOneConflictRow(ctx context.Context, db DBConn, table, keyCol, key, s
 			if err := ValidateConflictTable(n); err != nil {
 				return fmt.Errorf("refusing to write unexpected column %q of %s: %w", n, table, err)
 			}
-			sets[i] = fmt.Sprintf("`%s` = ?", n)
+			sets = append(sets, fmt.Sprintf("`%s` = ?", n))
 			args = append(args, vals[i])
+		}
+		if table == "issues" {
+			sets = append(sets, "`row_lock` = ?")
+			args = append(args, issueops.FreshRowLock())
 		}
 		args = append(args, ourKey)
 		stmt := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = ?", table, strings.Join(sets, ", "), keyCol) //nolint:gosec // identifiers validated above
