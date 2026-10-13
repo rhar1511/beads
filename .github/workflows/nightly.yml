@@ -77,11 +77,27 @@ jobs:
           # GitHub Actions (known issue, see scripts/repro-dolt-hang/).
           # Non-Docker integration tests still run via the installed dolt binary.
           BEADS_TEST_SKIP: dolt
-          BEADS_TEST_ENV_RUN_DOLT: "1"
           BEADS_TEST_BD_BINARY: ${{ github.workspace }}/bd
           # Prevent detached Dolt metrics processes racing temporary-directory cleanup.
           DOLT_DISABLE_EVENT_FLUSH: "1"
-        run: go test -v -race -tags=integration,gms_pure_go -coverprofile=coverage.out -timeout=30m ./...
+        run: |
+          # The CLI conformance fixtures own native Dolt processes. Limit their
+          # opt-in to cmd/bd: other packages use Docker-backed shared servers.
+          package_list=$(go list -tags=integration,gms_pure_go ./...)
+          other_packages=()
+          while IFS= read -r package; do
+            if [[ "$package" != "github.com/steveyegge/beads/cmd/bd" ]]; then
+              other_packages+=("$package")
+            fi
+          done <<< "$package_list"
+          test "${#other_packages[@]}" -gt 0
+          BEADS_TEST_ENV_RUN_DOLT=1 go test -v -race -tags=integration,gms_pure_go -coverprofile=coverage-cli.out -timeout=30m ./cmd/bd
+          go test -v -race -tags=integration,gms_pure_go -coverprofile=coverage-packages.out -timeout=30m "${other_packages[@]}"
+          {
+            head -n 1 coverage-cli.out
+            tail -n +2 coverage-cli.out
+            tail -n +2 coverage-packages.out
+          } > coverage.out
 
       - name: Check coverage threshold
         run: |
