@@ -42,11 +42,6 @@ func validateRevisionArguments(cmd *cobra.Command, args []string, argCount int) 
 		if claim {
 			return HandleErrorRespectJSON("--if-revision cannot be combined with --claim")
 		}
-		for _, name := range []string{"add-label", "remove-label", "set-labels", "parent"} {
-			if cmd.Flags().Changed(name) {
-				return HandleErrorRespectJSON("--if-revision cannot be combined with label or parent edits")
-			}
-		}
 	}
 	if cmd.Name() == "delete" {
 		force, _ := cmd.Flags().GetBool("force")
@@ -103,7 +98,7 @@ func mapRevisionWriteError(operation string, err error) error {
 	if errors.As(err, &unsupported) || errors.Is(err, errors.ErrUnsupported) {
 		return reportRevisionUnsupported(fmt.Sprintf("%s: %v", operation, err))
 	}
-	if errors.Is(err, issueops.ErrProtectedRecord) || errors.Is(err, issueops.ErrValidation) ||
+	if errors.Is(err, issueops.ErrActiveReferenceOwner) || errors.Is(err, issueops.ErrProtectedRecord) || errors.Is(err, issueops.ErrValidation) ||
 		errors.Is(err, issueops.ErrCloseBlocked) || errors.Is(err, issueops.ErrCloseOpenChildren) ||
 		errors.Is(err, issueops.ErrAlreadyClaimed) || errors.Is(err, issueops.ErrNotClaimable) ||
 		errors.Is(err, issueops.ErrNotOwner) ||

@@ -95,6 +95,47 @@ func TestRevisionCASCLIConformance(t *testing.T) {
 		f.unchanged(t, id, after)
 	})
 
+	t.Run("labels and parent edits share the revision fence", func(t *testing.T) {
+		id, parent := "rvcli-patch", "rvcli-parent"
+		f.create(t, id)
+		f.create(t, parent)
+		before := f.row(t, id)
+		f.ok(t, "update", id, "--if-revision", before.Revision, "--add-label", "guarded", "--parent", parent, "--title", "atomic patch", "--json")
+		after := f.row(t, id)
+		if after.Title != "atomic patch" || after.Revision == before.Revision {
+			t.Fatalf("matching aggregate patch did not persist/remint: %+v", after)
+		}
+		assertReferences := func(label, parentID string) {
+			t.Helper()
+			var labels, parents int
+			if err := f.db.QueryRow("SELECT COUNT(*) FROM labels WHERE issue_id=? AND label=?", id, label).Scan(&labels); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.db.QueryRow("SELECT COUNT(*) FROM dependencies WHERE issue_id=? AND depends_on_issue_id=? AND type='parent-child'", id, parentID).Scan(&parents); err != nil {
+				t.Fatal(err)
+			}
+			if labels != 1 || parents != 1 {
+				t.Fatalf("aggregate references: labels=%d parents=%d, want one each", labels, parents)
+			}
+		}
+		assertReferences("guarded", parent)
+		f.mismatch(t, id, before.Revision, after.Revision, "update", id, "--if-revision", before.Revision, "--remove-label", "guarded", "--parent", "", "--title", "lost", "--json")
+		f.unchanged(t, id, after)
+		assertReferences("guarded", parent)
+		for _, edit := range [][]string{
+			{"--set-labels", "replacement"},
+			{"--remove-label", "replacement"},
+			{"--parent", ""},
+		} {
+			current := f.row(t, id)
+			args := append([]string{"update", id, "--if-revision", current.Revision, "--json"}, edit...)
+			f.ok(t, args...)
+			if got := f.row(t, id); got.Revision == current.Revision {
+				t.Fatalf("aggregate edit %v did not remint", edit)
+			}
+		}
+	})
+
 	t.Run("assignment force never bypasses revision", func(t *testing.T) {
 		id := "rvcli-assign"
 		f.create(t, id)
@@ -146,6 +187,57 @@ func TestRevisionCASCLIConformance(t *testing.T) {
 		f.ok(t, "delete", id, "--if-revision", current.Revision, "--force", "--json")
 		if out, code := f.run(t, "show", id, "--json"); code == 0 {
 			t.Fatalf("matching delete left the row visible: %s", out)
+		}
+	})
+
+	t.Run("guarded terminal delete preserves active owner and fences cleanup", func(t *testing.T) {
+		target, owner := "rvcli-safe-target", "rvcli-safe-owner"
+		f.create(t, target)
+		f.create(t, owner)
+		f.ok(t, "close", target, "--json")
+		f.ok(t, "dep", "add", owner, target, "--type", "relates-to", "--json")
+		targetBefore, ownerBefore := f.row(t, target), f.row(t, owner)
+		edgeCount := func() int {
+			t.Helper()
+			// The private server has autocommit disabled. Give each observation
+			// its own transaction so an earlier read cannot retain a stale snapshot.
+			tx, err := f.db.BeginTx(t.Context(), &sql.TxOptions{ReadOnly: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+					t.Errorf("end reference observation: %v", err)
+				}
+			}()
+			var edges int
+			if err := tx.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM dependencies WHERE issue_id=? AND depends_on_issue_id=?", owner, target).Scan(&edges); err != nil {
+				t.Fatal(err)
+			}
+			return edges
+		}
+		if edges := edgeCount(); edges != 1 {
+			t.Fatalf("fixture did not establish active reference: count=%d", edges)
+		}
+		args := []string{"delete", target, "--force", "--protect-active-references", "--if-revision", targetBefore.Revision, "--json"}
+		f.problem(t, 13, "conditional_write_refused", args...)
+		f.unchanged(t, target, targetBefore)
+		f.unchanged(t, owner, ownerBefore)
+		if edges := edgeCount(); edges != 1 {
+			t.Fatalf("refusal lost active reference: count=%d", edges)
+		}
+		f.ok(t, "close", owner, "--json")
+		closedOwner := f.row(t, owner)
+		f.ok(t, args...)
+		after := f.row(t, owner)
+		if after.Revision == closedOwner.Revision {
+			t.Fatalf("cleanup reused surviving owner revision: %+v", after)
+		}
+		if edges := edgeCount(); edges != 0 {
+			t.Fatalf("cleanup retained reference: count=%d", edges)
+		}
+		if out, code := f.run(t, "show", target, "--json"); code == 0 {
+			t.Fatalf("guarded deletion retained target: %s", out)
 		}
 	})
 

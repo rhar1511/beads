@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/steveyegge/beads/internal/storage/domain"
+	storageops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
 )
@@ -121,5 +122,48 @@ func classUOWIssue(t *testing.T, ctx context.Context, provider UnitOfWorkProvide
 		return "classify protected issue", err
 	}); err != nil {
 		t.Fatalf("classify %s: %v", id, err)
+	}
+}
+
+func TestUOWDeletePermitBindsActiveReferenceConstraint(t *testing.T) {
+	ctx := context.Background()
+	provider := newUOWRoleFixtureProvider(t, ctx, "pdigest")
+	kit := newUOWRoleFixtureKit(provider, "pdigest")
+	id := "pdigest-target"
+	if err := kit.CreateIssue(ctx, &types.Issue{
+		ID: id, Title: "protected target", Status: types.StatusOpen,
+		Priority: 2, IssueType: types.TypeTask,
+	}, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	classUOWIssue(t, ctx, provider, id)
+	deleter, err := NewDeleter(provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := publicops.DeleteRequest{IDs: []string{id}, Force: true}
+	digest, err := publicops.ProtectedMutationDigest(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ProtectedPermit = "bound-delete"
+	verifier := protectedBatchVerifierFunc(func(_ context.Context, permit publicops.ProtectedMutationPermit, scope publicops.ProtectedMutationScope) (publicops.ProtectedMutationVerification, error) {
+		if permit != request.ProtectedPermit || scope.Operation != "issue.delete" || !equalProtectedBatchIDs(scope.ResourceIDs, []string{id}) || scope.Digest != digest {
+			return publicops.ProtectedMutationVerification{}, publicops.ErrProtectedRecord
+		}
+		return publicops.ProtectedMutationVerification{ReplayID: "bound-delete-once"}, nil
+	})
+	protectedCtx := storageops.WithProtectedMutationVerifier(ctx, verifier, "test-audience", "test-project", "test-database")
+	changed := request
+	changed.ProtectActiveReferences = true
+	if _, err := deleter.Delete(protectedCtx, changed); !errors.Is(err, publicops.ErrProtectedRecord) {
+		t.Fatalf("changed constraint reused original permit: %v", err)
+	}
+	var rows int
+	if err := kit.QueryScalar(ctx, "SELECT COUNT(*) FROM protected_issue_records WHERE issue_id=?", []any{id}, &rows); err != nil || rows != 1 {
+		t.Fatalf("rejected constraint removed classification: count=%d err=%v", rows, err)
+	}
+	if _, err := deleter.Delete(protectedCtx, request); err != nil {
+		t.Fatalf("rejected constraint consumed original permit: %v", err)
 	}
 }

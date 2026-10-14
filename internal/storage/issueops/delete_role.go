@@ -140,6 +140,14 @@ func DeleteInTx(ctx context.Context, tx *sql.Tx, req publicops.DeleteRequest) (p
 		return publicops.DeleteResult{}, fmt.Errorf("delete: %w", err)
 	}
 
+	var referenceOwners map[string]bool
+	if req.ProtectActiveReferences {
+		referenceOwners, err = CheckActiveDeleteReferencesInTx(ctx, tx, set.All)
+		if err != nil {
+			return publicops.DeleteResult{}, err
+		}
+	}
+
 	// The neighborhood is read BEFORE the deletion, because after it the
 	// edges that identify a neighbor are gone. It is read against the whole
 	// deletion set — the cascade closure, not just the named ids — so a row
@@ -175,6 +183,14 @@ func DeleteInTx(ctx context.Context, tx *sql.Tx, req publicops.DeleteRequest) (p
 
 	if req.DryRun {
 		return result, nil
+	}
+
+	// Reference removal mutates its source aggregate even without a prose
+	// rewrite. Fence wisp owners as well as durable owners in this transaction.
+	for _, id := range workapi.SortedDeleteIDs(referenceOwners) {
+		if err := BumpIssueRevisionInTx(ctx, tx, id, referenceOwners[id]); err != nil {
+			return publicops.DeleteResult{}, err
+		}
 	}
 
 	// set.All, not a set recomputed here: a `[deleted:<id>]` marker is a claim
