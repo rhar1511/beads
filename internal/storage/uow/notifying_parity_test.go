@@ -346,6 +346,9 @@ func TestNotifyingProviderBuildsRolesOnItself(t *testing.T) {
 // accident.
 func TestUnitOfWorkBypassesAreAccountedFor(t *testing.T) {
 	bypasses := map[string]string{
+		"deleteInUOW": "the opt-in active-reference guard only checks whether the underlying unit of work " +
+			"has transaction-local SQL capability; it reads no rows and performs no direct write. " +
+			"All deletion mutations still use the original unit of work's recorded IssueUseCase.",
 		"importStatementRunner": "the import role runs the shared batch-upsert engine on the " +
 			"transaction's statement runner (importer.go), so its writes never pass a use case. " +
 			"Import fires no hooks on the DoltStorage plumbing either — it runs the same engine " +

@@ -34,6 +34,15 @@ func TestDeleterContract(t *testing.T) {
 	t.Run("RefusesDependentsOutsideTheRequest", func(t *testing.T) {
 		conformance.RunDeleterRefusesDependentsOutsideTheRequest(t, ctx, fixture)
 	})
+	t.Run("ProtectsActiveReferences", func(t *testing.T) {
+		conformance.RunDeleterProtectsActiveReferences(t, ctx, fixture)
+	})
+	t.Run("ProtectsOnlySurvivingOwners", func(t *testing.T) {
+		conformance.RunDeleterProtectsOnlySurvivingOwners(t, ctx, fixture)
+	})
+	t.Run("FencesOpenTargetWispOwner", func(t *testing.T) {
+		conformance.RunDeleterFencesOpenTargetWispOwner(t, ctx, fixture)
+	})
 	t.Run("ForceOrphansDependents", func(t *testing.T) {
 		conformance.RunDeleterForceOrphansDependents(t, ctx, fixture)
 	})
