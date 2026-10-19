@@ -81,6 +81,11 @@ func (d *deleter) Delete(ctx context.Context, req publicops.DeleteRequest) (publ
 // issueops.Deleter promises that a dry run refuses exactly where the real run
 // refuses.
 func deleteInUOW(ctx context.Context, uw UnitOfWork, req publicops.DeleteRequest) (publicops.DeleteResult, error) {
+	if req.ProtectActiveReferences {
+		if _, ok := unwrapUOW(uw).(protectedMutationRunner); !ok {
+			return publicops.DeleteResult{}, &publicops.ErrUnsupported{Op: "Delete.ProtectActiveReferences", Backend: "unit of work without transaction-local reference checks"}
+		}
+	}
 	issueUC := uw.IssueUseCase()
 	result := publicops.DeleteResult{DryRun: req.DryRun}
 

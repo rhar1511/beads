@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
@@ -1409,5 +1410,173 @@ func deleterAssertWispEdgeRows(t *testing.T, ctx context.Context, fixture Delete
 	}
 	if got != want {
 		t.Errorf("wisp_dependencies rows %s -> %s = %d, want %d", dependent, blocker, got, want)
+	}
+}
+
+// RunDeleterProtectsActiveReferences pins the opt-in constraint across planes,
+// relation kinds, refusal previews, stale tokens, and closed-owner cleanup.
+func RunDeleterProtectsActiveReferences(t *testing.T, ctx context.Context, fixture DeleterFixture) {
+	t.Helper()
+	for _, targetWisp := range []bool{false, true} {
+		for _, ownerWisp := range []bool{false, true} {
+			for _, relation := range []types.DependencyType{types.DepRelatesTo, types.DepParentChild, types.DepBlocks} {
+				for _, closedOwner := range []bool{false, true} {
+					tag := fmt.Sprintf("safe-%t-%t-%s-%t", targetWisp, ownerWisp, relation, closedOwner)
+					t.Run(tag, func(t *testing.T) {
+						target := deleterIssue(fixture, tag, "target", targetWisp)
+						target.Status = types.StatusClosed
+						closedAt := time.Now().UTC()
+						target.ClosedAt = &closedAt
+						owner := deleterIssue(fixture, tag, "owner", ownerWisp)
+						if closedOwner {
+							owner.Status = types.StatusClosed
+							owner.ClosedAt = &closedAt
+						}
+						deleterSeed(t, ctx, fixture, target)
+						deleterSeed(t, ctx, fixture, owner)
+						if err := fixture.AddDependency(ctx, &types.Dependency{
+							IssueID: owner.ID, DependsOnID: target.ID, Type: relation,
+						}, "safe-delete-contract"); err != nil {
+							t.Fatal(err)
+						}
+						targetTable, ownerTable := "issues", "issues"
+						if targetWisp {
+							targetTable = "wisps"
+						}
+						if ownerWisp {
+							ownerTable = "wisps"
+						}
+						assertEdge := func(want int) {
+							t.Helper()
+							if ownerWisp {
+								deleterAssertWispEdgeRows(t, ctx, fixture, want, owner.ID, target.ID)
+							} else {
+								deleterAssertEdgeRows(t, ctx, fixture, want, owner.ID, target.ID)
+							}
+						}
+						assertEdge(1)
+						targetVersion := deleterRowVersion(t, ctx, fixture, targetTable, target.ID)
+						ownerVersion := deleterRowVersion(t, ctx, fixture, ownerTable, owner.ID)
+						request := publicops.DeleteRequest{
+							IDs: []string{target.ID}, Force: true,
+							ExpectedVersion: &targetVersion, ProtectActiveReferences: true,
+						}
+						stale := targetVersion + 1
+						staleRequest := request
+						staleRequest.ExpectedVersion = &stale
+						_, err := fixture.Deleter.Delete(ctx, staleRequest)
+						if !errors.Is(err, publicops.ErrVersionMismatch) {
+							t.Fatalf("stale token must outrank reference guard: %v", err)
+						}
+						assertEdge(1)
+						preview := request
+						preview.DryRun = true
+						_, previewErr := fixture.Deleter.Delete(ctx, preview)
+						if closedOwner && previewErr != nil {
+							t.Fatalf("closed-owner preview: %v", previewErr)
+						}
+						if !closedOwner && !errors.Is(previewErr, publicops.ErrActiveReferenceOwner) {
+							t.Fatalf("active-owner preview must refuse: %v", previewErr)
+						}
+						assertEdge(1)
+						if got := deleterRowVersion(t, ctx, fixture, ownerTable, owner.ID); got != ownerVersion {
+							t.Fatalf("preview changed owner revision: %d -> %d", ownerVersion, got)
+						}
+						_, err = fixture.Deleter.Delete(ctx, request)
+						if !closedOwner {
+							if !errors.Is(err, publicops.ErrActiveReferenceOwner) {
+								t.Fatalf("active-owner delete must refuse: %v", err)
+							}
+							if got := deleterRowVersion(t, ctx, fixture, targetTable, target.ID); got != targetVersion {
+								t.Fatalf("refusal changed target revision: %d -> %d", targetVersion, got)
+							}
+							if got := deleterRowVersion(t, ctx, fixture, ownerTable, owner.ID); got != ownerVersion {
+								t.Fatalf("refusal changed owner revision: %d -> %d", ownerVersion, got)
+							}
+							assertEdge(1)
+							// Ordinary Force remains the explicit orphaning operation.
+							request.ProtectActiveReferences = false
+							deleterDelete(t, ctx, fixture, request)
+						} else {
+							if err != nil {
+								t.Fatalf("closed-owner cleanup: %v", err)
+							}
+							if got := deleterRowVersion(t, ctx, fixture, ownerTable, owner.ID); got == 0 || got == ownerVersion {
+								t.Fatalf("cleanup reused owner revision: %d -> %d", ownerVersion, got)
+							}
+						}
+						assertEdge(0)
+						if got := deleterRowCount(t, ctx, fixture, targetTable, target.ID); got != 0 {
+							t.Fatalf("cleanup retained target: %d", got)
+						}
+						if got := deleterRowCount(t, ctx, fixture, ownerTable, owner.ID); got != 1 {
+							t.Fatalf("cleanup removed owner: %d", got)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+// RunDeleterProtectsOnlySurvivingOwners distinguishes named/cascade owners from
+// active reference owners that would remain after deletion.
+func RunDeleterProtectsOnlySurvivingOwners(t *testing.T, ctx context.Context, fixture DeleterFixture) {
+	t.Helper()
+	t.Run("batch keeps outside owner", func(t *testing.T) {
+		target := deleterIssue(fixture, "safe-batch", "target", false)
+		target.Status = types.StatusClosed
+		closedAt := time.Now().UTC()
+		target.ClosedAt = &closedAt
+		deleterSeed(t, ctx, fixture, target)
+		inside := deleterSeedIssue(t, ctx, fixture, "safe-batch", "inside")
+		outside := deleterSeedIssue(t, ctx, fixture, "safe-batch", "outside")
+		deleterAddEdge(t, ctx, fixture, inside, target.ID)
+		deleterAddEdge(t, ctx, fixture, outside, target.ID)
+		request := publicops.DeleteRequest{IDs: []string{target.ID, inside}, Force: true, ProtectActiveReferences: true}
+		if _, err := fixture.Deleter.Delete(ctx, request); !errors.Is(err, publicops.ErrActiveReferenceOwner) {
+			t.Fatalf("batch lost outside owner: %v", err)
+		}
+		deleterAssertEdgeRows(t, ctx, fixture, 1, outside, target.ID)
+		deleterAssertEdgeRows(t, ctx, fixture, 1, inside, target.ID)
+		deleterDelete(t, ctx, fixture, publicops.DeleteRequest{IDs: []string{outside}, Force: true})
+		deleterDelete(t, ctx, fixture, request)
+		deleterAssertIssueRows(t, ctx, fixture, 0, target.ID, inside)
+	})
+	t.Run("cascade includes active owner", func(t *testing.T) {
+		target := deleterIssue(fixture, "safe-cascade", "target", false)
+		target.Status = types.StatusClosed
+		closedAt := time.Now().UTC()
+		target.ClosedAt = &closedAt
+		deleterSeed(t, ctx, fixture, target)
+		inside := deleterSeedIssue(t, ctx, fixture, "safe-cascade", "inside")
+		survivor := deleterSeedIssue(t, ctx, fixture, "safe-cascade", "survivor")
+		deleterAddEdge(t, ctx, fixture, inside, target.ID)
+		deleterDelete(t, ctx, fixture, publicops.DeleteRequest{IDs: []string{target.ID}, Cascade: true, Force: true, ProtectActiveReferences: true})
+		deleterAssertIssueRows(t, ctx, fixture, 0, target.ID, inside)
+		deleterAssertIssueRows(t, ctx, fixture, 1, survivor)
+	})
+}
+
+// RunDeleterFencesOpenTargetWispOwner checks cleanup independently of the
+// terminal-owner refusal: an open target may be removed, but its wisp source
+// still changed even when there is no prose citation to rewrite.
+func RunDeleterFencesOpenTargetWispOwner(t *testing.T, ctx context.Context, fixture DeleterFixture) {
+	t.Helper()
+	for _, targetWisp := range []bool{false, true} {
+		tag := fmt.Sprintf("safe-open-%t", targetWisp)
+		target := deleterIssue(fixture, tag, "target", targetWisp)
+		deleterSeed(t, ctx, fixture, target)
+		owner := deleterSeedWisp(t, ctx, fixture, tag, "owner")
+		deleterAddEdge(t, ctx, fixture, owner, target.ID)
+		version := deleterRowVersion(t, ctx, fixture, "wisps", owner)
+		deleterDelete(t, ctx, fixture, publicops.DeleteRequest{
+			IDs: []string{target.ID}, Force: true, ProtectActiveReferences: true,
+		})
+		deleterAssertWispRows(t, ctx, fixture, 1, owner)
+		deleterAssertWispEdgeRows(t, ctx, fixture, 0, owner, target.ID)
+		if got := deleterRowVersion(t, ctx, fixture, "wisps", owner); got == 0 || got == version {
+			t.Fatalf("open-target cleanup reused surviving wisp revision: %d -> %d", version, got)
+		}
 	}
 }

@@ -141,6 +141,17 @@ type DeleteRequest struct {
 	// answers is the one about OTHER rows, and a caller saying "orphan them" has
 	// said nothing about whether the row it named is still the row it read.
 	Force bool
+
+	// ProtectActiveReferences refuses deletion of a closed row when an incoming
+	// dependency is owned by a surviving row that is not closed. Force does not
+	// bypass this opt-in constraint. Cascade checks the resolved deletion set,
+	// so owners included in that set do not survive and are not refused.
+	//
+	// The check shares the deletion transaction and follows ExpectedVersion.
+	// Every surviving owner whose reference is removed receives a fresh revision
+	// in that transaction, including active owners of open targets. False
+	// preserves ordinary Force semantics.
+	ProtectActiveReferences bool `json:",omitempty"`
 	// DryRun reports what the deletion WOULD do and changes nothing, including
 	// history.
 	//
@@ -370,3 +381,7 @@ type Deleter interface {
 	// until the next flush.
 	Delete(ctx context.Context, req DeleteRequest) (DeleteResult, error)
 }
+
+// ErrActiveReferenceOwner classifies an opt-in deletion refused because a
+// surviving active row owns an incoming reference to a closed target.
+var ErrActiveReferenceOwner = errors.New("active reference owner")

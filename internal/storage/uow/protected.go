@@ -9,14 +9,16 @@ import (
 	"github.com/steveyegge/beads/internal/storage/domain"
 	"github.com/steveyegge/beads/internal/storage/domain/db"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/workapi"
 	publicops "github.com/steveyegge/beads/issueops"
 )
 
 type resolvedDeleteAuthorizationKey struct{}
 
 type resolvedDeleteAuthorization struct {
-	permit publicops.ProtectedMutationPermit
-	digest string
+	permit                  publicops.ProtectedMutationPermit
+	digest                  string
+	protectActiveReferences bool
 }
 
 func withResolvedDeleteAuthorization(ctx context.Context, req publicops.DeleteRequest) context.Context {
@@ -24,8 +26,9 @@ func withResolvedDeleteAuthorization(ctx context.Context, req publicops.DeleteRe
 	unsigned.ProtectedPermit = ""
 	digest, _ := publicops.ProtectedMutationDigest(unsigned)
 	return context.WithValue(ctx, resolvedDeleteAuthorizationKey{}, resolvedDeleteAuthorization{
-		permit: req.ProtectedPermit,
-		digest: digest,
+		permit:                  req.ProtectedPermit,
+		digest:                  digest,
+		protectActiveReferences: req.ProtectActiveReferences,
 	})
 }
 
@@ -35,13 +38,28 @@ func protectedResolvedDeletionHook(runner db.Runner) domain.ResolvedDeletionHook
 		resourceIDs = append(resourceIDs, deletion.AffectedIDs...)
 		resourceIDs = canonicalResolvedDeleteIDs(resourceIDs)
 
+		authorization, _ := ctx.Value(resolvedDeleteAuthorizationKey{}).(resolvedDeleteAuthorization)
+		var referenceOwners map[string]bool
+		if authorization.protectActiveReferences {
+			var err error
+			referenceOwners, err = storageissueops.CheckActiveDeleteReferencesInTx(ctx, runner, deletion.IDs)
+			if err != nil {
+				return err
+			}
+		}
+
 		if deletion.DryRun {
 			return storageissueops.RefuseProtectedDeletionInTx(ctx, runner, resourceIDs)
 		}
-		authorization, _ := ctx.Value(resolvedDeleteAuthorizationKey{}).(resolvedDeleteAuthorization)
 		if err := storageissueops.RequireProtectedMutation(ctx, runner, authorization.permit,
 			"issue.delete", resourceIDs, authorization.digest, ""); err != nil {
 			return err
+		}
+
+		for _, id := range workapi.SortedDeleteIDs(referenceOwners) {
+			if err := storageissueops.BumpIssueRevisionInTx(ctx, runner, id, referenceOwners[id]); err != nil {
+				return err
+			}
 		}
 
 		// Classification belongs to the rows being deleted. Surviving protected

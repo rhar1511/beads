@@ -2,9 +2,11 @@ package uow
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/steveyegge/beads/backend/conformance"
+	publicops "github.com/steveyegge/beads/issueops"
 )
 
 // TestDeleterContract runs the Deleter contract against the unit-of-work
@@ -32,6 +34,15 @@ func TestDeleterContract(t *testing.T) {
 	})
 	t.Run("RefusesDependentsOutsideTheRequest", func(t *testing.T) {
 		conformance.RunDeleterRefusesDependentsOutsideTheRequest(t, ctx, fixture)
+	})
+	t.Run("ProtectsActiveReferences", func(t *testing.T) {
+		conformance.RunDeleterProtectsActiveReferences(t, ctx, fixture)
+	})
+	t.Run("ProtectsOnlySurvivingOwners", func(t *testing.T) {
+		conformance.RunDeleterProtectsOnlySurvivingOwners(t, ctx, fixture)
+	})
+	t.Run("FencesOpenTargetWispOwner", func(t *testing.T) {
+		conformance.RunDeleterFencesOpenTargetWispOwner(t, ctx, fixture)
 	})
 	t.Run("ForceOrphansDependents", func(t *testing.T) {
 		conformance.RunDeleterForceOrphansDependents(t, ctx, fixture)
@@ -132,5 +143,23 @@ func uowCommitPending(provider UnitOfWorkProvider) func(context.Context) error {
 		return RunTx(ctx, provider, func(context.Context, UnitOfWork) (string, error) {
 			return "conformance: settle seeds before a history delta", nil
 		})
+	}
+}
+
+func TestDeleterActiveReferenceCheckRequiresTransactionalRunner(t *testing.T) {
+	uw := &mockUnitOfWork{}
+	deleter, err := NewDeleter(&mockUnitOfWorkProvider{uows: []*mockUnitOfWork{uw}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = deleter.Delete(context.Background(), publicops.DeleteRequest{
+		IDs: []string{"target"}, Force: true, ProtectActiveReferences: true,
+	})
+	var unsupported *publicops.ErrUnsupported
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("missing transactional capability must refuse: %v", err)
+	}
+	if uw.commitCount != 0 || !uw.closed {
+		t.Fatalf("unsupported request committed or leaked unit of work: %+v", uw)
 	}
 }

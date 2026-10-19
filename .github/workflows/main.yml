@@ -677,6 +677,35 @@ jobs:
           sha256sum -c SHA256SUMS
           chmod +x bd-linux-gms-pure
 
+      # This server-backed contract is distinct from domain/UOW and must not
+      # be counted as validated when TestMain cannot start its Docker fixture.
+      - name: Test server-backed deletion contract (Docker SQL, no skips)
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="$(mktemp)"
+          trap 'rm -f -- "$report"' EXIT
+          go test -json -tags gms_pure_go -race -count=1 -timeout 15m -run '^TestDeleterContract$' ./internal/storage/dolt/ | tee "$report"
+          python3 - "$report" <<'PY_AUDIT'
+          import json
+          import sys
+          from pathlib import Path
+
+          events = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines()]
+          package = "github.com/steveyegge/beads/internal/storage/dolt"
+          terminal = {event.get("Test", ""): event["Action"] for event in events
+                      if event.get("Package") == package and event["Action"] in {"pass", "fail", "skip"}}
+          required = {"", "TestDeleterContract"} | {
+              "TestDeleterContract/" + case for case in
+              ("ProtectsActiveReferences", "ProtectsOnlySurvivingOwners", "FencesOpenTargetWispOwner")
+          }
+          if not all(terminal.get(test) == "pass" for test in required):
+              raise SystemExit("Docker SQL deletion contract did not actually pass all required roots")
+          if any(action in {"skip", "fail"} for action in terminal.values()):
+              raise SystemExit("Docker SQL deletion contract skipped or failed a selected case")
+          print(f"Verified Docker SQL deletion contract: {len(terminal) - 2} subtests passed, zero skips")
+          PY_AUDIT
+
       - name: Test domain + uow + tracker
         env:
           BEADS_TEST_BD_BINARY: ${{ github.workspace }}/ci-build-artifacts/bd-linux-gms-pure

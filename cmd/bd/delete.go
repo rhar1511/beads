@@ -46,7 +46,16 @@ Cascade: Recursively delete all dependents
   bd delete bd-1 --cascade --force
 
 Force: Delete and orphan dependents
-  bd delete bd-1 --force`,
+  bd delete bd-1 --force
+
+Protect active references: Refuse deleting a closed issue while any surviving
+issue that refers to it is not closed. This check also applies to --dry-run and
+cannot be overridden by --force. Owners included in a cascade are not survivors.
+On success, surviving reference owners receive fresh revisions.
+  bd delete bd-1 --force --protect-active-references
+
+Use --if-revision with the current issue revision to reject stale deletion.
+Guarded deletion is unavailable against a proxied server.`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if err := validateRevisionArguments(cmd, args, 1); err != nil {
 			return err
@@ -66,9 +75,10 @@ Force: Delete and orphan dependents
 		}()
 
 		expectedVersion := ifRevisionPrecondition(cmd)
+		protectActiveReferences, _ := cmd.Flags().GetBool("protect-active-references")
 		if usesProxiedServer() {
-			if expectedVersion != nil {
-				return reportRevisionUnsupported("--if-revision is not supported against a proxied server")
+			if expectedVersion != nil || protectActiveReferences {
+				return reportRevisionUnsupported("guarded deletion is not supported against a proxied server")
 			}
 			return runDeleteProxiedServer(cmd, rootCtx, args)
 		}
@@ -143,11 +153,12 @@ Force: Delete and orphan dependents
 		// rewrite runs INSIDE the transaction that deletes, because it is the
 		// role's.
 		request := issueops.DeleteRequest{
-			Actor:           actor,
-			IDs:             []string{issueID},
-			Force:           force,
-			DryRun:          dryRun || !force,
-			ExpectedVersion: expectedVersion,
+			Actor:                   actor,
+			IDs:                     []string{issueID},
+			Force:                   force,
+			DryRun:                  dryRun || !force,
+			ExpectedVersion:         expectedVersion,
+			ProtectActiveReferences: protectActiveReferences,
 		}
 		opsCtx, err := issueOpsContext(ctx)
 		if err != nil {
@@ -167,7 +178,7 @@ Force: Delete and orphan dependents
 			if jsonOutput || isQuiet() {
 				return outputDeletionPreview([]string{issueID}, map[string]*types.Issue{issueID: issue}, false, dryRun, &result, nil, jsonOutput)
 			}
-			return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, result)
+			return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, protectActiveReferences, result)
 		}
 		if err != nil {
 			if expectedVersion != nil {
@@ -214,7 +225,7 @@ Force: Delete and orphan dependents
 // with an effect rather than with rows.
 func renderSingleDeletePreview(
 	ctx context.Context, activeStore storage.DoltStorage,
-	issueID string, issue *types.Issue, dryRun bool, result issueops.DeleteResult,
+	issueID string, issue *types.Issue, dryRun, protectActiveReferences bool, result issueops.DeleteResult,
 ) error {
 	connectedIssues := make(map[string]*types.Issue)
 	deps, err := activeStore.GetDependencies(ctx, issueID)
@@ -278,7 +289,11 @@ func renderSingleDeletePreview(
 		fmt.Printf("\n(Dry-run mode - no changes made)\n")
 	} else {
 		fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
-		fmt.Printf("To proceed, run: %s\n\n", ui.RenderWarn("bd delete "+issueID+" --force"))
+		confirmationFlags := " --force"
+		if protectActiveReferences {
+			confirmationFlags += " --protect-active-references"
+		}
+		fmt.Printf("To proceed, run: %s\n\n", ui.RenderWarn("bd delete "+issueID+confirmationFlags))
 	}
 	return nil
 }
@@ -294,9 +309,7 @@ func deleteIssue(ctx context.Context, issueID string) error {
 // It resolves the ids the way this front door always has - prefix matching and
 // cross-repository routing, which issueops.DeleteRequest deliberately does not
 // do - and hands the RESOLVED ids to the role.
-//
-//nolint:unparam // cmd parameter required for potential future use
-func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, cascade bool, jsonOutput bool, _ bool, _ ...string) error {
+func deleteBatch(cmd *cobra.Command, issueIDs []string, force bool, dryRun bool, cascade bool, jsonOutput bool, _ bool, _ ...string) error {
 	if store == nil {
 		if err := ensureStoreActive(); err != nil {
 			return err
@@ -340,14 +353,19 @@ func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, c
 	if err != nil {
 		return err
 	}
+	protectActiveReferences := false
+	if cmd != nil {
+		protectActiveReferences, _ = cmd.Flags().GetBool("protect-active-references")
+	}
 	// --force is the confirmation as well as the orphan mode, so an unconfirmed
 	// run asks the role what it WOULD do; see the single-id path.
 	request := issueops.DeleteRequest{
-		Actor:   actor,
-		IDs:     resolvedIDs,
-		Cascade: cascade,
-		Force:   force,
-		DryRun:  dryRun || !force,
+		Actor:                   actor,
+		IDs:                     resolvedIDs,
+		ProtectActiveReferences: protectActiveReferences,
+		Cascade:                 cascade,
+		Force:                   force,
+		DryRun:                  dryRun || !force,
 	}
 	opsCtx, err := issueOpsContext(ctx)
 	if err != nil {
@@ -369,12 +387,16 @@ func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, c
 		}
 		if !dryRun && !jsonOutput && !isQuiet() {
 			fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
+			confirmationFlags := " --force"
+			if protectActiveReferences {
+				confirmationFlags += " --protect-active-references"
+			}
 			if cascade {
 				fmt.Printf("To proceed with cascade deletion, run: %s\n",
-					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --cascade --force"))
+					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --cascade"+confirmationFlags))
 			} else {
 				fmt.Printf("To proceed, run: %s\n",
-					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --force"))
+					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+confirmationFlags))
 			}
 		}
 		return nil
@@ -519,6 +541,7 @@ func uniqueStrings(slice []string) []string {
 
 func init() {
 	registerRevisionPrecondition(deleteCmd)
+	deleteCmd.Flags().Bool("protect-active-references", false, "Refuse deletion of closed issues referenced by surviving active issues, even with --force")
 	deleteCmd.Flags().BoolP("force", "f", false, "Actually delete (without this flag, shows preview)")
 	deleteCmd.Flags().String("from-file", "", "Read issue IDs from file (one per line)")
 	deleteCmd.Flags().Bool("dry-run", false, "Preview what would be deleted without making changes")
