@@ -178,7 +178,7 @@ Guarded deletion is unavailable against a proxied server.`,
 			if jsonOutput || isQuiet() {
 				return outputDeletionPreview([]string{issueID}, map[string]*types.Issue{issueID: issue}, false, dryRun, &result, nil, jsonOutput)
 			}
-			return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, result)
+			return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, protectActiveReferences, result)
 		}
 		if err != nil {
 			if expectedVersion != nil {
@@ -225,7 +225,7 @@ Guarded deletion is unavailable against a proxied server.`,
 // with an effect rather than with rows.
 func renderSingleDeletePreview(
 	ctx context.Context, activeStore storage.DoltStorage,
-	issueID string, issue *types.Issue, dryRun bool, result issueops.DeleteResult,
+	issueID string, issue *types.Issue, dryRun, protectActiveReferences bool, result issueops.DeleteResult,
 ) error {
 	connectedIssues := make(map[string]*types.Issue)
 	deps, err := activeStore.GetDependencies(ctx, issueID)
@@ -289,7 +289,11 @@ func renderSingleDeletePreview(
 		fmt.Printf("\n(Dry-run mode - no changes made)\n")
 	} else {
 		fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
-		fmt.Printf("To proceed, run: %s\n\n", ui.RenderWarn("bd delete "+issueID+" --force"))
+		confirmationFlags := " --force"
+		if protectActiveReferences {
+			confirmationFlags += " --protect-active-references"
+		}
+		fmt.Printf("To proceed, run: %s\n\n", ui.RenderWarn("bd delete "+issueID+confirmationFlags))
 	}
 	return nil
 }
@@ -383,12 +387,16 @@ func deleteBatch(cmd *cobra.Command, issueIDs []string, force bool, dryRun bool,
 		}
 		if !dryRun && !jsonOutput && !isQuiet() {
 			fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
+			confirmationFlags := " --force"
+			if protectActiveReferences {
+				confirmationFlags += " --protect-active-references"
+			}
 			if cascade {
 				fmt.Printf("To proceed with cascade deletion, run: %s\n",
-					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --cascade --force"))
+					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --cascade"+confirmationFlags))
 			} else {
 				fmt.Printf("To proceed, run: %s\n",
-					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --force"))
+					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+confirmationFlags))
 			}
 		}
 		return nil
