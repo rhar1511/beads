@@ -180,8 +180,18 @@ func TestImporterUOW(t *testing.T) {
 				CreatedAt: when, UpdatedAt: when,
 			}
 		}
+		// This provider uses CLIENT_FOUND_ROWS: an unchanged duplicate edge
+		// must not be mistaken for an insert and remint the source token.
+		before := countHistory(t)
+		versionBefore := queryString(t, "SELECT CAST(row_lock AS CHAR) FROM issues WHERE id = 'imp-two'")
+		sourceRow := &types.Issue{
+			ID: "imp-two", Title: "Imported two", Status: types.StatusOpen,
+			IssueType: types.TypeBug, Priority: 1,
+			Dependencies: []*types.Dependency{{IssueID: "imp-two", DependsOnID: "imp-one", Type: types.DepBlocks}},
+			CreatedAt:    when, UpdatedAt: when,
+		}
 		if _, err := imp.ImportBatch(ctx, publicops.ImportBatchRequest{
-			Actor: "importer-test", Issues: []*types.Issue{row()}, Source: "again.jsonl",
+			Actor: "importer-test", Issues: []*types.Issue{row(), sourceRow}, Source: "again.jsonl",
 		}); err != nil {
 			t.Fatalf("re-import: %v", err)
 		}
@@ -190,6 +200,15 @@ func TestImporterUOW(t *testing.T) {
 		}
 		if got := queryInt(t, "SELECT COUNT(*) FROM comments WHERE issue_id = 'imp-one'"); got != 1 {
 			t.Errorf("comments after re-import = %d, want 1 (idempotent merge)", got)
+		}
+		if got := queryInt(t, "SELECT COUNT(*) FROM dependencies WHERE issue_id = 'imp-two' AND depends_on_issue_id = 'imp-one'"); got != 1 {
+			t.Errorf("edges after re-import = %d, want 1", got)
+		}
+		if got := queryString(t, "SELECT CAST(row_lock AS CHAR) FROM issues WHERE id = 'imp-two'"); got != versionBefore {
+			t.Errorf("identical edge changed source version: got %s, want %s", got, versionBefore)
+		}
+		if after := countHistory(t); after != before {
+			t.Errorf("identical re-import history = %d, want unchanged %d", after, before)
 		}
 	})
 

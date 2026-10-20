@@ -140,7 +140,9 @@ func TestEmbeddedIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransa
 	skipUnlessEmbeddedDolt(t)
 	te := newTestEnv(t, "bscreate")
 	ctx := t.Context()
-	conformance.RunIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransaction(t, ctx, newEmbeddedIssueOperationsFixture(t, ctx, te, "bscreate"))
+	fixture := newEmbeddedIssueOperationsFixture(t, ctx, te, "bscreate")
+	fixture.Commit = te.store.Commit
+	conformance.RunIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransaction(t, ctx, fixture)
 }
 
 func TestEmbeddedIssueOperationsClaimLeavesBlockedStateAlone(t *testing.T) {

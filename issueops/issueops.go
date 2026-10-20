@@ -469,6 +469,14 @@ type Lifecycle interface {
 	// It is create-only across issues and wisps: an occupied ID returns
 	// ErrAlreadyExists and leaves persistent state unchanged. A refusal or
 	// validation error also leaves no partial persistent state.
+	// Create's immediate Dolt history path refuses preexisting dirty issue
+	// rows that this create must write (including reverse-edge sources), and
+	// preexisting staged work, rather than publishing those unknown changes.
+	// Establish their intended history baseline or explicitly defer version
+	// commits before composing writes. An ambiguous SQL/history outcome must
+	// not be blindly replayed. Server history failures after known SQL commit
+	// retain the existing logged/deferred-history disposition; nil alone is
+	// not proof that a new history entry was produced.
 	Create(context.Context, CreateRequest) (CreateResult, error)
 	// Update validates guards and commits the complete request as one atomic
 	// mutation. A Patch.Status that crosses from outside the configured done

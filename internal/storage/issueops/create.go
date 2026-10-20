@@ -247,6 +247,7 @@ func assignCreateIssueIDInTx(ctx context.Context, tx DBTX, bc *BatchContext, iss
 // CreateIssuesResult reports side effects that callers need for selective
 // Dolt staging after CreateIssuesInTxWithResult returns.
 type CreateIssuesResult struct {
+	changedIssueIDs           []string
 	ChangedTables             map[string]bool
 	ChangedChildCounterTables map[string]bool
 }
@@ -273,11 +274,15 @@ func CreateIssuesInTx(ctx context.Context, tx DBTX, issues []*types.Issue, actor
 // CreateIssuesInTxWithResult creates issues and reports tables whose writes are
 // only knowable after SQL reconciliation, such as child counter advances.
 func CreateIssuesInTxWithResult(ctx context.Context, tx DBTX, issues []*types.Issue, actor string, opts storage.BatchCreateOptions) (CreateIssuesResult, error) {
+	return createIssuesInTxWithRowScope(ctx, tx, issues, actor, opts, false)
+}
+
+func createIssuesInTxWithRowScope(ctx context.Context, tx DBTX, issues []*types.Issue, actor string, opts storage.BatchCreateOptions, captureRows bool) (CreateIssuesResult, error) {
 	bc, err := NewBatchContext(ctx, tx, opts)
 	if err != nil {
 		return CreateIssuesResult{}, err
 	}
-	return CreateIssuesInTxWithContext(ctx, tx, bc, issues, actor)
+	return createIssuesInTxWithContextAndRowScope(ctx, tx, bc, issues, actor, captureRows)
 }
 
 // CreateIssuesInTxWithContext is CreateIssuesInTxWithResult with a
@@ -286,6 +291,10 @@ func CreateIssuesInTxWithResult(ctx context.Context, tx DBTX, issues []*types.Is
 // on the session that sees in-transaction config writes and pass it here.
 // The caller's bc is not modified, so one context can serve several calls.
 func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext, issues []*types.Issue, actor string) (CreateIssuesResult, error) {
+	return createIssuesInTxWithContextAndRowScope(ctx, tx, bc, issues, actor, false)
+}
+
+func createIssuesInTxWithContextAndRowScope(ctx context.Context, tx DBTX, bc *BatchContext, issues []*types.Issue, actor string, captureRows bool) (CreateIssuesResult, error) {
 	opts := bc.Opts
 	// The plane rule is a REFUSAL, never a filter. A strict batch (BatchCreator's
 	// contract) is refused whole before any row is written. A tolerant batch
@@ -323,6 +332,9 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 			return CreateIssuesResult{}, err
 		}
 		result.merge(issueResult.ChangedTables)
+		if captureRows && issueResult.ChangedTables["issues"] {
+			result.changedIssueIDs = append(result.changedIssueIDs, issue.ID)
+		}
 		if issueResult.StaleRejected {
 			continue // stale snapshot: keep its deps out of the batch too
 		}
@@ -335,6 +347,13 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 		return CreateIssuesResult{}, err
 	}
 	result.merge(depResult.ChangedTables)
+	if captureRows {
+		for _, dependency := range depResult.persistedDependencies {
+			if !dependency.sourceWisp {
+				result.changedIssueIDs = append(result.changedIssueIDs, dependency.source)
+			}
+		}
+	}
 
 	changedCounters, err := ReconcileChildCounters(ctx, tx, issues)
 	if err != nil {
@@ -348,12 +367,30 @@ func CreateIssuesInTxWithContext(ctx context.Context, tx DBTX, bc *BatchContext,
 	if err != nil {
 		return CreateIssuesResult{}, err
 	}
+	var beforeVersions map[string]string
+	if captureRows {
+		beforeVersions, err = captureCreateIssueVersions(ctx, tx, issueIDs)
+		if err != nil {
+			return CreateIssuesResult{}, err
+		}
+	}
 	recomputed, err := RecomputeIsBlockedInTxWithResult(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
 		return CreateIssuesResult{}, err
 	}
 	if recomputed.IssueRowsChanged {
 		result.markChanged("issues")
+	}
+	if captureRows && recomputed.IssueRowsChanged {
+		afterVersions, err := captureCreateIssueVersions(ctx, tx, issueIDs)
+		if err != nil {
+			return CreateIssuesResult{}, err
+		}
+		for id, version := range afterVersions {
+			if beforeVersions[id] != version {
+				result.changedIssueIDs = append(result.changedIssueIDs, id)
+			}
+		}
 	}
 	if recomputed.WispRowsChanged {
 		result.markChanged("wisps")
@@ -886,8 +923,11 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			continue
 		}
 		for _, dep := range issue.Dependencies {
-			if dep.IssueID != "" && dep.IssueID != issue.ID {
-				return result, fmt.Errorf("%w: create dependency source %s must match created issue %s", storage.ErrValidation, dep.IssueID, issue.ID)
+			// Public create requests may attach a reverse edge owned by an
+			// existing issue. Each edge must still touch the created issue;
+			// unrelated foreign-source edges are refused before any SQL.
+			if dep.IssueID != "" && dep.IssueID != issue.ID && dep.DependsOnID != issue.ID {
+				return result, fmt.Errorf("%w: create dependency %s -> %s must reference created issue %s", storage.ErrValidation, dep.IssueID, dep.DependsOnID, issue.ID)
 			}
 			// Default IssueID to the owning issue when not pre-set (e.g.,
 			// markdown bulk create where the ID is auto-generated).
@@ -963,6 +1003,16 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			if metadata == "" {
 				metadata = "{}"
 			}
+			// CLIENT_FOUND_ROWS (the proxied UOW setting) reports one matched
+			// row for an unchanged ODKU. Read the logical identity in this same
+			// transaction so an already-visible edge never remints its owner.
+			// Still execute the original strict INSERT, including for duplicates:
+			// filtering its input would bypass invalid-value coercion errors.
+			var existingCount int
+			//nolint:gosec // G201: table and target column come from the same hardcoded routing as the INSERT below
+			if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE issue_id = ? AND %s = ?", item.depTable, kind.Column()), dep.IssueID, dep.DependsOnID).Scan(&existingCount); err != nil {
+				return result, fmt.Errorf("failed to check dependency identity %s -> %s: %w", dep.IssueID, dep.DependsOnID, err)
+			}
 			//nolint:gosec // G201: item.depTable is one of two hardcoded constants; target column from DepTargetKind.Column()
 			sqlResult, err := tx.ExecContext(ctx, fmt.Sprintf(`
 					INSERT INTO %s (id, issue_id, %s, type, created_by, created_at, metadata, thread_id)
@@ -976,17 +1026,15 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 			if err != nil {
 				return result, fmt.Errorf("failed to check dependency insert result for %s -> %s: %w", dep.IssueID, dep.DependsOnID, err)
 			}
-			if rowsAffected > 0 {
+			if existingCount == 0 && rowsAffected > 0 {
 				result.markChanged(item.depTable)
+				// A graph edit changes its source aggregate in either plane.
+				// Remint only after an inserted edge; an exact duplicate is a no-op.
+				// Only durable source rows belong in the Dolt table stage.
+				if err := BumpIssueRevisionInTx(ctx, tx, dep.IssueID, item.depTable == "wisp_dependencies"); err != nil {
+					return result, fmt.Errorf("bump dependency source revision for %s: %w", dep.IssueID, err)
+				}
 				if item.depTable == "dependencies" {
-					// A dependency is part of its permanent source's work snapshot.
-					// Import can merge aux data onto an existing row even when the
-					// incoming issue timestamp is tied or older, so remint the owner
-					// token only after a genuinely inserted edge. The enclosing create
-					// transaction also owns the issues table stage.
-					if err := BumpIssueRevisionInTx(ctx, tx, dep.IssueID, false); err != nil {
-						return result, fmt.Errorf("bump dependency source revision for %s: %w", dep.IssueID, err)
-					}
 					result.markChanged("issues")
 				}
 				result.persistedDependencies = append(result.persistedDependencies, persistedDependency{

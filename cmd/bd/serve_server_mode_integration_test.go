@@ -147,12 +147,9 @@ func TestServerModeServe(t *testing.T) {
 		if body["api_version"] != "v0" {
 			t.Errorf("api_version = %v, want v0", body["api_version"])
 		}
-		// Same build, same handlers: what a mode changes is where the data
-		// lives, never what the handshake advertises. This is LITERALLY the same
-		// assertion the proxied path makes — if the two ever have to be written
-		// differently, a mode has started changing the contract and that is the
-		// bug.
-		assertServedCapabilities(t, body)
+		// Like the proxied fixture, this default server has no authentication
+		// or host permit authority; storage mode cannot enable gated routes.
+		assertUnauthenticatedServedCapabilities(t, body)
 	})
 
 	t.Run("a read operation answers from the server-mode database", func(t *testing.T) {

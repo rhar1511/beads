@@ -127,37 +127,14 @@ func (sp *serveProcess) wait() error {
 
 func (sp *serveProcess) url(path string) string { return "http://" + sp.addr + path }
 
-// assertServedCapabilities checks a decoded context body against the capability
-// set this build's route table implies. Every topology asserts the same thing,
-// because a mode changes where the data lives and never what the handshake
-// advertises.
-//
-// THE EXPECTATION IS DERIVED, and it used to be a literal spelled out here for
-// a reason that did not survive contact with the third operation to be added.
-// That reason was: "comparing the server against its own derivation would pass
-// for any surface at all, and the point of this list is that adding an
-// operation costs a line here."
-//
-// The first half is true and is answered elsewhere. The capability CONTENT is
-// pinned by TestSpecCapabilityVocabularyMatchesTheRouteTable, which compares
-// the derived set against the `capabilities` prose in openapi.v0.yaml in both
-// directions — a paragraph a human writes for the operation being added, which
-// is an independent source in a way a second test literal never was.
-//
-// The second half is the part that inverted. The line this list cost was paid
-// in the WRONG package: an operation is added in internal/httpapi, its own
-// gates go green, and the copy that fails is out here in a proxied shard the
-// author's pre-merge checks do not run. That is precisely what happened to the
-// slice that added `issues.count` — this file went red on a list nothing about
-// counting had changed. And the failure mode the old comment itself describes,
-// a copy silently stuck at four entries while the surface grew, is not a bug
-// derivation makes harder to catch: it is a bug derivation makes impossible to
-// write.
-//
-// What the assertion still buys, and what no in-package test can see: each
-// TOPOLOGY's subprocess really binds, really answers /v0/beads/context, and
-// really publishes the whole set rather than a truncated one.
-func assertServedCapabilities(t *testing.T, body map[string]any) {
+// assertUnauthenticatedServedCapabilities checks the exact inventory exposed
+// by these default lifecycle fixtures: their child environments strip BEADS_*
+// authority inputs and their start commands pass no authentication flag.
+// The binary's static route inventory includes readiness-gated operations;
+// those must remain absent here even when their storage implementation exists.
+// Derive the ordinary inventory from the route table, then remove the explicit
+// gated vocabulary rather than learning an expected subset from the response.
+func assertUnauthenticatedServedCapabilities(t *testing.T, body map[string]any) {
 	t.Helper()
 	caps, ok := body["capabilities"].([]any)
 	if !ok {
@@ -175,16 +152,16 @@ func assertServedCapabilities(t *testing.T, body map[string]any) {
 	if len(want) == 0 {
 		t.Fatal("this build derives no capabilities; the assertion below would pass against a server that advertises nothing")
 	}
-	transitionWrite := slices.Contains(got, "issues.transitionMetadata")
-	transitionReceipt := slices.Contains(got, "issues.transitionReceipt.get")
-	if transitionWrite != transitionReceipt {
-		t.Errorf("transition capabilities must be advertised together, got write=%v receipt=%v", transitionWrite, transitionReceipt)
-	}
-	if !transitionWrite {
-		want = slices.DeleteFunc(want, func(capability string) bool {
-			return capability == "issues.transitionMetadata" || capability == "issues.transitionReceipt.get"
-		})
-	}
+	want = slices.DeleteFunc(want, func(capability string) bool {
+		switch capability {
+		case "issues.transitionMetadata", "issues.transitionReceipt.get",
+			"issues.sourceSnapshot", "issues.protectedMutation",
+			"issues.transitionPatch", "issues.transitionPatchReceipt.get":
+			return true
+		default:
+			return false
+		}
+	})
 	if !slices.Equal(got, want) {
 		t.Errorf("capabilities = %v, want %v", got, want)
 	}
@@ -284,7 +261,7 @@ func TestProxiedServerServeLifecycle(t *testing.T) {
 		if body["bd_version"] == "" || body["bd_version"] == nil {
 			t.Error("bd_version is empty")
 		}
-		assertServedCapabilities(t, body)
+		assertUnauthenticatedServedCapabilities(t, body)
 		// The allowlist is enforced in internal/httpapi; this is the end-to-end
 		// half — a real workspace's real config, over a real socket.
 		for _, forbidden := range []string{"sync_remote", "server_host", "server_port", "data_dir", "proxied_dir", "role"} {
