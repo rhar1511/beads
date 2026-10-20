@@ -107,27 +107,26 @@ func TestSchemaInitReplaysMigration0067WhenBookkeepingRowMissing(t *testing.T) {
 	assertSchemaVersionAtLeast(ctx, t, db, latest)
 }
 
-// TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness is the
-// raw-SQL half of the same guarantee, and the half no Go-side guard can
-// provide.
-//
-// pr4107_corruption_test.go's runMigrationSQLFilesFrom re-executes the frozen
-// .up.sql bytes from 0046 onward straight through the driver, against a store
-// setupTestStore has already migrated to latest. Nothing in
-// internal/storage/schema is in that path — not execMigrationBody, not any
-// filename-keyed override — so every migration >= 0046 has to be idempotent
-// as raw SQL on its own. 0067's two ADD COLUMNs are guarded on
-// INFORMATION_SCHEMA for exactly this, and this test is the proof, run
-// through that harness rather than a hand-written double-apply: the same call
-// TestPR4107IssueIsBlockedMigrationMatchesRuntimeMixedGraphSemantics makes,
-// made twice.
-//
-// It also pins that the guard NO-OPS rather than re-applies: a column whose
-// replay silently dropped and re-added it would pass a mere "the column
-// exists" check while resetting every row to the DEFAULT. Phase 1 writes no
-// revisions, so the seeded value below is the only way to see that
-// difference from here.
+// TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness keeps
+// migration0067's own frozen bytes as the raw oracle, including seeded values
+// that a drop/re-add would erase. A later frozen migration may require a runtime
+// adapter (0073 does); that does not turn its raw SQL into an idempotent file.
+// The separate chain test below preserves the original all-file/data assertions
+// with the production executor at that explicit compatibility boundary.
 func TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness(t *testing.T) {
+	testMigration0067ReplayRetainsVersions(t, func(t *testing.T, ctx context.Context, store *DoltStore) {
+		runMigrationSQL(t, ctx, store, "../schema/migrations/0067_add_versioned_beads_schema.up.sql")
+	})
+}
+
+func TestMigrationExecutionChainPreservesVersionedBeads(t *testing.T) {
+	testMigration0067ReplayRetainsVersions(t, func(t *testing.T, ctx context.Context, store *DoltStore) {
+		runMigrationExecutionFilesFrom(t, ctx, store, "../schema/migrations", 46)
+	})
+}
+
+func testMigration0067ReplayRetainsVersions(t *testing.T, replay func(*testing.T, context.Context, *DoltStore)) {
+	t.Helper()
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 
@@ -146,7 +145,7 @@ func TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness(t *testing
 	}
 
 	for pass := 1; pass <= 2; pass++ {
-		runMigrationSQLFilesFrom(t, ctx, store, "../schema/migrations", 46)
+		replay(t, ctx, store)
 
 		for _, table := range []string{"issues", "wisps"} {
 			if got := countColumn(t, ctx, store, table, "current_revision"); got != 1 {

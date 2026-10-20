@@ -392,5 +392,11 @@ func execMigration(ctx context.Context, db DBConn, src migrationSource, mf migra
 		}
 		return execMigration0059(ctx, db)
 	}
+	if src.cursorTable == mainSource.cursorTable && src.dir == mainSource.dir && mf.version == 73 {
+		if err := validateMigration0073Execution(src, mf, original); err != nil {
+			return fmt.Errorf("validate migration 0073 execution: %w", err)
+		}
+		return execMigration0073(ctx, db)
+	}
 	return execMigrationBody(ctx, db, string(original))
 }
