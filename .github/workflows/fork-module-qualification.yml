@@ -184,7 +184,7 @@ jobs:
 
   normal-baseline:
     if: github.repository == 'rhar1511/beads'
-    name: Normal Go baseline with real Dolt fixtures
+    name: Normal Go baseline + required real-Dolt contention
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -204,9 +204,8 @@ jobs:
         run: ./scripts/ci/install-dolt.sh
       - name: Pull pinned SQL fixture image
         run: ./scripts/ci/pull-dolt-image.sh
-      - name: Run normal baseline with actual fixtures
+      - name: Run unchanged normal baseline
         env:
-          BEADS_TEST_ENV_RUN_DOLT: '1'
           TEST_VERBOSE: '1'
         shell: bash
         run: |
@@ -215,18 +214,52 @@ jobs:
           mkdir -p "$output"
           make test 2>&1 | tee "$output/baseline.log"
           python3 - "$output" <<'PY_AUDIT'
-          import json, pathlib, re, sys
+          import hashlib, json, pathlib, re, sys
           output = pathlib.Path(sys.argv[1])
-          text = (output / 'baseline.log').read_text()
-          root = 'TestDoltAutocommitRollbackContentionConverges'
-          assert re.search(r'^=== RUN   ' + root + r'$', text, re.M)
-          assert re.search(r'^--- PASS: ' + root + r' \([^\n]+\)$', text, re.M)
-          assert re.search(r'^ok\s+github\.com/rhar1511/beads/internal/storage/dolt\s', text, re.M)
+          raw = (output / 'baseline.log').read_bytes()
+          text = raw.decode()
+          assert re.search(r'^ok\s+github\.com/rhar1511/beads/cmd/bd\s', text, re.M)
           assert not re.search(r'^--- FAIL:|^FAIL(?:\s|$)', text, re.M)
+          (output / 'normal-baseline-proof.json').write_text(json.dumps(dict(
+              normal_make_test_exit=0, baseline_log_sha256=hashlib.sha256(raw).hexdigest(),
+              per_package_timeout='normal unchanged 25m',
+              skip_policy='unchanged repository test.sh defaults',
+              all_leaf_skips_enumerated=False), indent=2) + '\n')
+          PY_AUDIT
+      - name: Require isolated real-Dolt contention execution
+        env:
+          BEADS_TEST_ENV_RUN_DOLT: '1'
+          BEADS_TEST_SKIP: ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./.buildflags
+          output="$RUNNER_TEMP/fork-module-baseline"
+          go test -json -count=1 -timeout 25m \
+            -run '^TestDoltAutocommitRollbackContentionConverges$' \
+            ./internal/storage/dolt 2>&1 | tee "$output/real-dolt-contention.jsonl"
+          python3 - "$output" <<'PY_AUDIT'
+          import hashlib, json, pathlib, sys
+          output = pathlib.Path(sys.argv[1])
+          root = 'TestDoltAutocommitRollbackContentionConverges'
+          package = 'github.com/rhar1511/beads/internal/storage/dolt'
+          raw = (output / 'real-dolt-contention.jsonl').read_bytes()
+          events = [json.loads(line) for line in raw.decode().splitlines()]
+          selected = [event for event in events if event.get('Package') == package]
+          assert any(event.get('Action') == 'run' and event.get('Test') == root for event in selected)
+          terminal = {event.get('Test', ''): event['Action'] for event in selected
+                      if event.get('Action') in {'pass', 'fail', 'skip'}}
+          assert terminal.get(root) == 'pass' and terminal.get('') == 'pass'
+          assert not any(event.get('Action') in {'fail', 'skip'} for event in events)
+          normal = json.loads((output / 'normal-baseline-proof.json').read_text())
+          assert normal['normal_make_test_exit'] == 0
+          assert normal['baseline_log_sha256'] == hashlib.sha256((output / 'baseline.log').read_bytes()).hexdigest()
           (output / 'baseline-proof.json').write_text(json.dumps(dict(
               required_real_dolt_root=root, root_passed=True, normal_make_test_exit=0,
-              per_package_timeout='normal unchanged 25m',
-              all_leaf_skips_enumerated=False), indent=2) + '\n')
+              baseline_log_sha256=normal['baseline_log_sha256'],
+              real_dolt_log_sha256=hashlib.sha256(raw).hexdigest(),
+              real_dolt_selected_skips=0, per_package_timeout='normal unchanged 25m',
+              normal_skip_policy=normal['skip_policy'], all_leaf_skips_enumerated=False), indent=2) + '\n')
           PY_AUDIT
       - name: Retain exact baseline evidence
         if: always()
