@@ -84,6 +84,12 @@ func TestEmbeddedIssueOperationsCreateAggregatesRelations(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// This case tests relation hydration; same-row dirty-source refusal has
+	// its own test. Legacy embedded seed writes do not create history.
+	if err := te.store.Commit(ctx, "seed create relation aggregate"); err != nil {
+		t.Fatal(err)
+	}
+
 	result, err := operations.Create(ctx, publicops.CreateRequest{
 		Actor:                   "writer",
 		ForceIDPrefix:           true,

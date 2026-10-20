@@ -64,6 +64,11 @@ func RunIssueOperationsCreateReverseNonBlockingStagesConcreteTables(t *testing.T
 	assertIssueOperationsScalar(t, ctx, fixture, "committed dirty title before create", "committed title",
 		"SELECT title FROM issues AS OF 'HEAD' WHERE id = ?", []any{dirty.ID})
 
+	var sourceVersionBefore string
+	if err := fixture.QueryScalar(ctx, "SELECT row_lock FROM issues WHERE id = ?", []any{source.ID}, &sourceVersionBefore); err != nil {
+		t.Fatal(err)
+	}
+
 	created, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
@@ -86,6 +91,15 @@ func RunIssueOperationsCreateReverseNonBlockingStagesConcreteTables(t *testing.T
 	if created.Issue == nil || created.Issue.ID == "" {
 		t.Fatalf("created issue = %#v, want generated wisp ID", created.Issue)
 	}
+
+	var sourceVersionAfter string
+	if err := fixture.QueryScalar(ctx, "SELECT row_lock FROM issues WHERE id = ?", []any{source.ID}, &sourceVersionAfter); err != nil {
+		t.Fatal(err)
+	}
+	if sourceVersionAfter == sourceVersionBefore {
+		t.Fatal("reverse dependency did not remint durable source revision")
+	}
+	assertIssueOperationsScalar(t, ctx, fixture, "committed reverse source revision", sourceVersionAfter, "SELECT row_lock FROM issues AS OF 'HEAD' WHERE id = ?", []any{source.ID})
 
 	assertIssueOperationsScalar(t, ctx, fixture, "committed reverse dependency", 1,
 		"SELECT COUNT(*) FROM dependencies AS OF 'HEAD' WHERE issue_id = ? AND depends_on_wisp_id = ? AND type = ?",

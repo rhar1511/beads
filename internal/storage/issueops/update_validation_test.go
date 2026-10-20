@@ -48,3 +48,29 @@ func TestApplyMetadataPatchRejectsUnsafeKeysAndNullMerge(t *testing.T) {
 		})
 	}
 }
+
+func TestExecuteUpdateClassifiesInvalidJSONBeforeDatabaseAccess(t *testing.T) {
+	invalid := json.RawMessage(`{"broken":`)
+	for name, patch := range map[string]publicops.MetadataPatch{
+		"replace": {Replace: publicops.Field[json.RawMessage]{Set: true, Value: invalid}},
+		"merge":   {Merge: publicops.Field[json.RawMessage]{Set: true, Value: invalid}},
+		"set":     {Set: map[string]json.RawMessage{"key": invalid}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// A nil transaction makes any attempted database access a test failure.
+			_, tables, err := ExecuteUpdate(t.Context(), nil, publicops.UpdateRequest{
+				Actor: "writer", IssueID: "test-invalid-json", Patch: publicops.IssuePatch{Metadata: patch},
+			})
+			if !errors.Is(err, storage.ErrValidation) {
+				t.Fatalf("invalid JSON error = %v, want ErrValidation", err)
+			}
+			var encodingError *json.MarshalerError
+			if !errors.As(err, &encodingError) {
+				t.Fatalf("invalid JSON error lost its encoding cause: %v", err)
+			}
+			if len(tables) != 0 {
+				t.Fatalf("refused invalid JSON reports changed tables: %#v", tables)
+			}
+		})
+	}
+}

@@ -76,6 +76,12 @@ func TestEmbeddedIssueOperationsCreateEmptyIDPreservesParentAndReverseDependenci
 		}
 	}
 
+	// Legacy seed writes commit SQL only. Public create now refuses to
+	// publish prior source-row dirt, so establish the graph fixture's HEAD.
+	if err := te.store.Commit(ctx, "seed generated-ID reverse graph"); err != nil {
+		t.Fatal(err)
+	}
+
 	child, err := operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
@@ -298,5 +304,52 @@ func TestEmbeddedIssueOperationsUpdateParentStagesBlockedStateAndRollsBackFailur
 	te.queryScalar(t, ctx, "SELECT title, is_blocked FROM issues AS OF 'HEAD' WHERE id = ?", []any{rolledBack.ID}, &rollbackHeadTitle, &headBlocked)
 	if rollbackWorkingTitle != "rollback child" || rollbackHeadTitle != "rollback child" || !workingBlocked || !headBlocked {
 		t.Fatalf("failed parent replacement state = working (%q, %t), HEAD (%q, %t)", rollbackWorkingTitle, workingBlocked, rollbackHeadTitle, headBlocked)
+	}
+}
+
+func TestEmbeddedIssueOperationsReverseWispDependencyInvalidatesSourceVersion(t *testing.T) {
+	skipUnlessEmbeddedDolt(t)
+	te := newTestEnv(t, "ops_reverse_wisp_version")
+	ctx := t.Context()
+	operations, err := embeddeddolt.NewIssueOperations(te.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &types.Issue{ID: "ops-wisp-source", Title: "wisp source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	if err := te.store.CreateIssue(ctx, source, "seed"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := te.store.GetIssue(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = operations.Create(ctx, publicops.CreateRequest{
+		Actor: "writer", ForceIDPrefix: true,
+		Issue:        &types.Issue{ID: "ops-reverse-created", Title: "created", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Dependencies: []publicops.CreateDependency{{TargetID: source.ID, Type: types.DepRelatesTo, Reverse: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := te.store.GetIssue(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.RowVersion == before.RowVersion {
+		t.Fatalf("reverse wisp graph edit preserved stale source version %d", before.RowVersion)
+	}
+	_, err = operations.Update(ctx, publicops.UpdateRequest{
+		Actor: "stale writer", IssueID: source.ID, ExpectedVersion: &before.RowVersion,
+		Patch: publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "must not apply"}},
+	})
+	if !errors.Is(err, publicops.ErrVersionMismatch) {
+		t.Fatalf("stale aggregate guard = %v, want ErrVersionMismatch", err)
+	}
+	final, err := te.store.GetIssue(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Title != after.Title || final.RowVersion != after.RowVersion {
+		t.Fatalf("refused stale write changed source: before=%#v after=%#v", after, final)
 	}
 }

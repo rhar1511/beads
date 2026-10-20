@@ -34,8 +34,8 @@ func TestProtectedRecordDeleteRefusesBeforeAnyMutation(t *testing.T) {
 	}
 	for _, req := range []publicops.DeleteRequest{
 		{IDs: []string{root.ID}, Force: true},
-		{IDs: []string{root.ID}, DryRun: true},
-		{IDs: []string{child.ID}, Cascade: true}, // protected descendant is in the resolved closure
+		{IDs: []string{root.ID}, Force: true, DryRun: true}, // reach protection after the ordinary dependents guard
+		{IDs: []string{child.ID}, Cascade: true},            // protected descendant is in the resolved closure
 		{IDs: []string{child.ID, root.ID}, Force: true},
 	} {
 		if _, err := deleter.Delete(ctx, req); !errors.Is(err, publicops.ErrProtectedRecord) {
@@ -92,7 +92,7 @@ func TestProtectedRecordDeleteRefusesProtectedSurvivingDependent(t *testing.T) {
 		}
 	}
 	var edgeCount int
-	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dependencies WHERE issue_id = ? AND depends_on_id = ?", dependent.ID, target.ID).Scan(&edgeCount); err != nil {
+	if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dependencies WHERE issue_id = ? AND depends_on_issue_id = ?", dependent.ID, target.ID).Scan(&edgeCount); err != nil {
 		t.Fatalf("count dependency: %v", err)
 	}
 	if edgeCount != 1 {
