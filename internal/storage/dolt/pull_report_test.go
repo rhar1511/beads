@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // row builds a CallRow the way the driver hands one back: every column as a

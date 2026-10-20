@@ -136,7 +136,7 @@ The dolthub maintainers have made clear the upstream default will not flip: *"We
 
 Two supported modes, documented in [INSTALLING.md](../docs/getting-started/installation.md):
 
-1. **`CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest`** produces a **server-mode-only** binary. Works on any Go-capable box with no C compiler. Users must run an external `dolt sql-server` and use `bd init --server`.
+1. **`CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest`** produces a **server-mode-only** binary. Works on any Go-capable box with no C compiler. Users must run an external `dolt sql-server` and use `bd init --server`.
 
 2. **`CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install ...`** produces an embedded-capable binary. Requires a C compiler but NOT libicu.
 

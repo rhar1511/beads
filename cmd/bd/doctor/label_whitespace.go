@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/cmd/bd/doctor/fix"
-	"github.com/steveyegge/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/cmd/bd/doctor/fix"
+	"github.com/rhar1511/beads/internal/storage/dolt"
 )
 
 // maxLabelExamples caps how many damaged labels the detail line names, so a

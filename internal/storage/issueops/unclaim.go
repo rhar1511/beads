@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // UnclaimIssueInTx atomically releases a claimed issue: it clears the assignee,

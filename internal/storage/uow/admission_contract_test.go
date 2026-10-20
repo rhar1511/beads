@@ -3,9 +3,9 @@ package uow
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/testutil/admissionauthority"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/testutil/admissionauthority"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func TestAdmissionContract(t *testing.T) {

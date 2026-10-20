@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/templates/agents"
+	"github.com/rhar1511/beads/internal/templates/agents"
 )
 
 const (

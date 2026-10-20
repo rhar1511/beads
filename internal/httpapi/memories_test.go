@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // The pins for the memory operations. What is asserted here is the WIRE EDGE —

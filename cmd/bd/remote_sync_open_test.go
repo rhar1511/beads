@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rhar1511/beads/internal/storage/schema"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/storage/schema"
 )
 
 // TestIsRemoteSyncCommand pins which command gets the #6575 narrow lenient

@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage/commitrows"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/commitrows"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // CreateCommitScope is one data transaction's actual durable row writes.

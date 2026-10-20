@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	publicops "github.com/steveyegge/beads/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func expectNoProtectedRecords(mock sqlmock.Sqlmock, ids ...string) {

@@ -3,7 +3,7 @@ package github
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestPushFieldsEqual is the regression test for gastownhall/beads#4214:

@@ -9,10 +9,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 const transitionTestBody = `{"receipt_id":"r-1","scope":"lease","kind":"renew","actor":"  alice  ","expected_version":"9223372036854775807","key":"gc.lease","expected":null,"value":"next"}`

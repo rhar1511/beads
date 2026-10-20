@@ -3,7 +3,7 @@ package issueops
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestClaimAdvancedTheRow pins ga-v2k49 (steveyegge's #5479 re-review, the

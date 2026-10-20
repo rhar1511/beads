@@ -6,10 +6,10 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/steveyegge/beads/internal/memoryapi"
-	"github.com/steveyegge/beads/internal/storage"
-	storagememoryops "github.com/steveyegge/beads/internal/storage/memoryops"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/memoryapi"
+	"github.com/rhar1511/beads/internal/storage"
+	storagememoryops "github.com/rhar1511/beads/internal/storage/memoryops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // Memories returns the guarded persistent-memory surface for this store.

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 func TestPublicDirectWritesRejectOpenCircuitBeforeTransaction(t *testing.T) {

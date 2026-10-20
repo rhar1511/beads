@@ -36,6 +36,7 @@ fi
 
 # Generate .syso files
 go-winres make \
+    --arch amd64,386,arm64 \
     --in "$WINRES_DIR/winres.json" \
     --out "$OUT_PREFIX" \
     --product-version "$PE_VERSION" \

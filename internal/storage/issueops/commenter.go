@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/storage"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // ValidateAddCommentRequest applies the request rules every Commenter

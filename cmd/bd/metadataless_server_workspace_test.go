@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 // A workspace can declare server mode without ever writing metadata.json:

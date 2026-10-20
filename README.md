@@ -1,12 +1,23 @@
 # bd - Beads
 
+## This fork
+
+This repository declares the Go module `github.com/rhar1511/beads`. To install a released version of this fork with embedded Dolt support:
+
+```bash
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
+```
+
+The Homebrew, npm, PyPI and `gastownhall/beads` installer commands below describe upstream channels. They do not install this fork. The upstream installers and their Go fallbacks retain their original ownership; this fork does not publish to those channels.
+
+
 **Distributed graph issue tracker for AI agents, powered by [Dolt](https://github.com/dolthub/dolt).**
 
 **Platforms:** macOS, Linux, Windows, FreeBSD
 
 [![License](https://img.shields.io/github/license/gastownhall/beads)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/steveyegge/beads)](https://goreportcard.com/report/github.com/steveyegge/beads)
-[![Release](https://img.shields.io/github/v/release/gastownhall/beads)](https://github.com/gastownhall/beads/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rhar1511/beads)](https://goreportcard.com/report/github.com/rhar1511/beads)
+[![Upstream Release](https://img.shields.io/github/v/release/gastownhall/beads)](https://github.com/gastownhall/beads/releases)
 [![npm version](https://img.shields.io/npm/v/@beads/bd)](https://www.npmjs.com/package/@beads/bd)
 [![PyPI](https://img.shields.io/pypi/v/beads-mcp)](https://pypi.org/project/beads-mcp/)
 
@@ -159,7 +170,7 @@ schema version mismatch: database is at v45, binary knows up to v42 (3 migration
     CGO_ENABLED=0 go build -tags gms_pure_go ./cmd/bd
 
   Or install the latest release:
-    CGO_ENABLED=0 go install -tags gms_pure_go github.com/steveyegge/beads/cmd/bd@latest
+    CGO_ENABLED=0 go install -tags gms_pure_go github.com/rhar1511/beads/cmd/bd@latest
 
   To proceed despite the risk (some read commands may still work):
     BD_IGNORE_SCHEMA_SKEW=1 bd <command>

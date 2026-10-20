@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // listOrder names one of the total orders the issue listing serves. It is the

@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
 )
 
 func runInfoProxiedServer(ctx context.Context, schemaFlag bool) error {

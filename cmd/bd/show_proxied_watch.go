@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
 )
 
 // proxiedIssueWatchSource feeds `bd show --watch` from the proxied-server

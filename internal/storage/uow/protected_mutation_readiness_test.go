@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 func TestProtectedMutationReadinessProbesSelectedProviderDatabase(t *testing.T) {

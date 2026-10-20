@@ -6,7 +6,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/rhar1511/beads/backend/conformance"
 )
 
 func TestEmbeddedDependencyEditorRoutesWispSourcedEdgeToTheWispPlane(t *testing.T) {

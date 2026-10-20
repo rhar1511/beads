@@ -3,6 +3,11 @@ title: Upgrading
 description: Upgrade the bd binary, refresh git hooks, run schema migrations, and handle remote-backed and cross-era databases
 ---
 
+## Fork and upstream channels
+
+The Go commands and source-build recipes on this page target this fork's module, `github.com/rhar1511/beads`. Homebrew, npm, PyPI, Mise and the `gastownhall/beads` installer scripts remain upstream channels; those commands do not install this fork. Use the owned Go module when installing or upgrading this fork. Existing upstream installer download/checksum and fallback paths are unchanged.
+
+
 How to upgrade bd and keep your projects in sync.
 
 ## Checking for Updates
@@ -49,8 +54,8 @@ Use the command that matches your install method.
 | Quick install script | macOS, Linux, FreeBSD | `curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh \| bash` |
 | PowerShell installer | Windows | `irm https://raw.githubusercontent.com/gastownhall/beads/main/install.ps1 \| iex` |
 | Homebrew | macOS, Linux | `brew upgrade beads` |
-| go install (server-mode only) | macOS, Linux, FreeBSD, Windows | `CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest` |
-| go install (embedded-capable) | macOS, Linux, Windows | `CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest` |
+| go install (server-mode only) | macOS, Linux, FreeBSD, Windows | `CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest` |
+| go install (embedded-capable) | macOS, Linux, Windows | `CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest` |
 | npm | macOS, Linux, Windows | `npm update -g @beads/bd` |
 | bun | macOS, Linux, Windows | `bun install -g --trust @beads/bd` |
 | From source (Unix shell) | macOS, Linux, FreeBSD | `git pull && make build` |
@@ -89,10 +94,10 @@ brew install beads
 
 ```bash
 # Server-mode only
-CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest
 
 # Embedded-capable
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 ### From Source

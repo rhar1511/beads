@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/beads"
 )
 
 // ErrNoBeadsDatabase reports that no beads workspace could be resolved at all,

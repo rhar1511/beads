@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // formatFeedbackID returns "id — title" or just "id" based on output.title-length config.

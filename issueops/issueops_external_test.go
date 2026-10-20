@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads"
+	"github.com/rhar1511/beads/issueops"
 )
 
 func TestPublicDeclarationsHaveUsefulZeroValues(t *testing.T) {

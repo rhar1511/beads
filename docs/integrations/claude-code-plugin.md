@@ -283,17 +283,17 @@ Claude Code will pull the latest version from GitHub. After updating, **restart 
 
 ### 2. bd CLI Updates
 
-The plugin requires the `bd` CLI to be installed. Update it separately:
+The plugin requires the `bd` CLI to be installed. Update it separately: Choose the distribution channel explicitly: the installer updates upstream Beads, while the Go commands below update this fork. These commands are separate choices, not failure fallbacks.
 
 ```bash
-# Quick update
+# Upstream CLI update (upstream installer)
 curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
 
-# Or with Go (server-mode only)
-CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest
+# Owned fork CLI update (server-mode only)
+CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest
 
-# Or with Go (embedded-capable)
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+# Owned fork CLI update (embedded-capable)
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 ### 3. Version Compatibility

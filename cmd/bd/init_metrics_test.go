@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/metrics"
 )
 
 type metricsEvent struct {

@@ -6,7 +6,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 func (s *EmbeddedDoltStore) GetNextChildID(ctx context.Context, parentID string) (string, error) {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log"
 
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
-	publicops "github.com/steveyegge/beads/issueops"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // Create resets its captured scope on every SQL attempt. An indeterminate

@@ -1,8 +1,8 @@
 package backend
 
 import (
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // ErrUnsupported reports an operation unavailable on a storage backend. A

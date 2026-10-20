@@ -89,7 +89,7 @@ jobs:
           from pathlib import Path
 
           events = [json.loads(line) for line in Path(sys.argv[1]).read_text().splitlines()]
-          package = "github.com/steveyegge/beads/internal/storage/dolt"
+          package = "github.com/rhar1511/beads/internal/storage/dolt"
           terminal = {event.get("Test", ""): event["Action"] for event in events
                       if event.get("Package") == package and event["Action"] in {"pass", "fail", "skip"}}
           required = {"", "TestDeleterContract"} | {
@@ -118,7 +118,7 @@ jobs:
           package_list=$(go list -tags=integration,gms_pure_go ./...)
           other_packages=()
           while IFS= read -r package; do
-            if [[ "$package" != "github.com/steveyegge/beads/cmd/bd" ]]; then
+            if [[ "$package" != "github.com/rhar1511/beads/cmd/bd" ]]; then
               other_packages+=("$package")
             fi
           done <<< "$package_list"

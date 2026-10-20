@@ -1,9 +1,9 @@
 package proxy
 
 import (
-	"github.com/steveyegge/beads/internal/procid"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/pidfile"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/server"
+	"github.com/rhar1511/beads/internal/procid"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/pidfile"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/server"
 )
 
 // Status is a point-in-time description of the process tree under a proxied

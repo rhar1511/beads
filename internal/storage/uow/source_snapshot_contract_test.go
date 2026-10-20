@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/storagecontract"
+	"github.com/rhar1511/beads/internal/storage/storagecontract"
 )
 
 func TestSourceSnapshotContract(t *testing.T) {

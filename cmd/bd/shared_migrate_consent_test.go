@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
+	"github.com/rhar1511/beads/internal/storage/schema"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/steveyegge/beads/internal/storage/schema"
 )
 
 // captureNoticeStderr runs fn with os.Stderr redirected and returns what it

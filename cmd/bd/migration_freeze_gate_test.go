@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/migration"
+	"github.com/rhar1511/beads/internal/migration"
 )
 
 // vendorNeutralBans are substrings the refusal must never print. The gate used

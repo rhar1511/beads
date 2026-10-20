@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 var gateCreatedIDRe = regexp.MustCompile(`Created gate (\S+) \(type:`)

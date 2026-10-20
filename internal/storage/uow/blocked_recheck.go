@@ -6,7 +6,7 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 // recheckBlockedAfterCommit recomputes, on the pinned session and a fresh

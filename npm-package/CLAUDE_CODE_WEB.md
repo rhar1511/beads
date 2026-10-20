@@ -1,5 +1,8 @@
 # Using bd in Claude Code for Web
 
+This guide describes the upstream npm channel. Its Go-install fallback intentionally uses the upstream module as well; npm failure does not select this fork. For this fork's owned Go module, use the separate instructions in [the fork installation guide](../docs/getting-started/installation.md#fork-and-upstream-channels).
+
+
 This guide shows how to automatically install and use bd (beads issue tracker) in Claude Code for Web sessions using SessionStart hooks.
 
 ## What is Claude Code for Web?

@@ -3,8 +3,8 @@ package github
 import (
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // githubFieldMapper implements tracker.FieldMapper for GitHub.

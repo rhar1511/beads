@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
+	"github.com/rhar1511/beads/internal/tracker"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/tracker"
 )
 
 // TestParentFlagRegistered verifies --parent flag exists on all tracker sync commands.

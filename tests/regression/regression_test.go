@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 // baselineBin is the path to the pinned baseline bd binary.

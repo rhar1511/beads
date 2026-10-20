@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/utils"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/utils"
 )
 
 func (s *testSuite) TestBeadsDirFSRepository() {

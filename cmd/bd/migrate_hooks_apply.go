@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/steveyegge/beads/cmd/bd/doctor"
+	"github.com/rhar1511/beads/cmd/bd/doctor"
 )
 
 type hookMigrationMode struct {

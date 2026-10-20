@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func bdProxiedClose(t *testing.T, bd, dir string, args ...string) string {

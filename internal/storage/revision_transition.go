@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	publicops "github.com/steveyegge/beads/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // RevisionTransitionPatchReceiptMarker occupies the legacy metadata_key column

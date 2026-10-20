@@ -16,7 +16,7 @@
 //
 //	package mybackend
 //
-//	import "github.com/steveyegge/beads/backend"
+//	import "github.com/rhar1511/beads/backend"
 //
 //	type Store struct{ ... }   // implements backend.DoltStorage
 //
@@ -65,8 +65,8 @@ package backend
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/backends"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/backends"
 )
 
 // DoltStorage is the full engine interface an external backend implements:

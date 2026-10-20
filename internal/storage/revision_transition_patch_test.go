@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	publicops "github.com/steveyegge/beads/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func TestPlanRevisionTransitionPatchCanonicalizesAndCopiesPatch(t *testing.T) {

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/steveyegge/beads"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // newIssueOperations asks a store for its guarded issue-lifecycle surface.

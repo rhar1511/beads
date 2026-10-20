@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/beads"
 )
 
 // gitExec is a function hook for executing git commands.

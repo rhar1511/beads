@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // TestClaimerIsItsOwnRoleWithOneMethod pins the shape claim was given rather

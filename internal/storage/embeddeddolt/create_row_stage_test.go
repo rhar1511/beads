@@ -8,11 +8,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/commitrows"
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
-	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/commitrows"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
+	"github.com/rhar1511/beads/internal/types"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func TestEmbeddedCreatePreservesPreexistingRowAndStageWork(t *testing.T) {

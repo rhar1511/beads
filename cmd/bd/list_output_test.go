@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func listOutputFixture() ([]*types.Issue, map[string][]*types.Dependency) {

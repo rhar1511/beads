@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/schema"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/issueops"
 )
 
 const transitionPatchBody = `{"receipt_id":"patch-1","scope":"q54","kind":"route","actor":" alice ","expected_version":"1","prior_receipt_id":"parent-1","prior_receipt_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","patch":{"metadata":[{"key":"gc.route","expected":null,"value":"ready"}],"status":{"expected":"open","value":"in_progress"},"assignee":{"expected":"","value":"worker-1"},"labels":{"expected":["old"],"value":["new"]}},"protected_permit":"signed-patch-permit"}`

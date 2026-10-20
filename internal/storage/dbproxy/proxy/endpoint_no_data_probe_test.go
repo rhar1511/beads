@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/steveyegge/beads/internal/procid"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/identity"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/pidfile"
+	"github.com/rhar1511/beads/internal/procid"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/identity"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/pidfile"
 )
 
 // Adoption must be proven by the authenticated control-port identity reply

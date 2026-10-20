@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/internal/workapi"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/workapi"
 )
 
 // newQueryLimitCommand registers the flags gatherQueryInput reads, with

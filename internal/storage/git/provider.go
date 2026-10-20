@@ -1,8 +1,8 @@
 package git
 
 import (
-	"github.com/steveyegge/beads/internal/storage/domain"
-	domaingit "github.com/steveyegge/beads/internal/storage/domain/git"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	domaingit "github.com/rhar1511/beads/internal/storage/domain/git"
 )
 
 type GitProvider interface {

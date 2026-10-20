@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
 )
 
 // bdRestore runs "bd restore" with extra args. Returns combined output.

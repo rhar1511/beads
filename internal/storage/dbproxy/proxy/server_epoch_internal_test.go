@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/steveyegge/beads/internal/storage/dbproxy/pidfile"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/server"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/util"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/pidfile"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/server"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/util"
 )
 
 // epochAdvancingServer simulates the F4 race deterministically: `bd dolt

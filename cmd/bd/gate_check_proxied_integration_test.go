@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func seedGateAwait(t *testing.T, db *sql.DB, id, awaitType, awaitID string, createdAt time.Time, timeout time.Duration) {

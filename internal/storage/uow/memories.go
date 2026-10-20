@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/memoryapi"
-	storagememoryops "github.com/steveyegge/beads/internal/storage/memoryops"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/memoryapi"
+	storagememoryops "github.com/rhar1511/beads/internal/storage/memoryops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // MemoriesSource is the capability accessor a unit-of-work provider offers for

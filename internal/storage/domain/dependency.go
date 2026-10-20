@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/dberrors"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/dberrors"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // The dependency-edge refusals are declared and documented by the public
-// contract package, github.com/steveyegge/beads/issueops. These are the same
+// contract package, github.com/rhar1511/beads/issueops. These are the same
 // values, so every domain.ErrX reference and every errors.Is site keeps
 // matching the identical error.
 var (

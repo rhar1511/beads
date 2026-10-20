@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rhar1511/beads/internal/migration/legacysqlite"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/migration/legacysqlite"
 )
 
 var legacySQLiteCmd = &cobra.Command{

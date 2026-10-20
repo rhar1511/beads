@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // depRelation names one dependency type from both ends of its edge. A stored

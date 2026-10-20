@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads"
+	"github.com/rhar1511/beads"
 )
 
 // TestParseClaimConflictAgainstRealDolt is the end-to-end producer→parser proof

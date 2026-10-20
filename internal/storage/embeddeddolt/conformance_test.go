@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 func requireEmbeddedDolt(t *testing.T) {

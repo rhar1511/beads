@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/steveyegge/beads/internal/storage"
-	storeops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	storeops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // CycleDetector returns the guarded cycle-report surface for this store.

@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/utils"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/utils"
 )
 
 // CompareIssuesBy orders two issues by one of `bd list --sort`'s fields.

@@ -3,8 +3,8 @@ package telemetry
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // SourceSnapshotReader preserves instrumentation around the atomic source

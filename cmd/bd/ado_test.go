@@ -13,9 +13,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/rhar1511/beads/internal/ado"
+	"github.com/rhar1511/beads/internal/types"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/ado"
-	"github.com/steveyegge/beads/internal/types"
 )
 
 // adoStdioMutex serializes tests that redirect os.Stdout/os.Stderr.

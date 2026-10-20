@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/beads"
 )
 
 // TestIntegrityChecks_NoBeadsDir verifies all integrity check functions handle

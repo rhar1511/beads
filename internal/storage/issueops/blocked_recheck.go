@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // BlockedRecheck names the dependents whose is_blocked a write recomputed

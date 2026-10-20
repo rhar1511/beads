@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/git"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/git"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 // preCommitFrameworkPattern matches pre-commit or prek framework hooks.

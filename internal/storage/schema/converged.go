@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage/dberrors"
+	"github.com/rhar1511/beads/internal/storage/dberrors"
 )
 
 // alreadyConverged reports whether databaseName is already at this binary's

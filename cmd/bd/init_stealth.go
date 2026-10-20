@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/steveyegge/beads/cmd/bd/doctor"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/cmd/bd/doctor"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 // setupStealthMode configures git settings for stealth operation.

@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/steveyegge/beads/issueops"
+import "github.com/rhar1511/beads/issueops"
 
 // SourceSnapshotReader passes the read-only snapshot role through the hook
 // decorator. A read emits no completion hook.

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/timeparsing"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/timeparsing"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 // parseTimeFlag parses time strings using the layered time parsing architecture.

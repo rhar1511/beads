@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/issueops"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/issueops"
 )
 
 // The CLI spelling and refusal vocabulary preserve the contributor's #4682

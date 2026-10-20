@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
 )
 
 func TestOpenReturnsCachedStore(t *testing.T) {

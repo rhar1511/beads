@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/configfile"
 )
 
 // buildBDUnderTest builds the bd binary once per test process and returns the path.

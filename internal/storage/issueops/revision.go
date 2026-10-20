@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // BumpIssueRevisionInTx remints one issue's opaque row_lock while preserving

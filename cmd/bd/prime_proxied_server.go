@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // Proxied-server dual of prime's memory read (bd-mm8wf, from lion's #5361

@@ -1,8 +1,8 @@
 package fs
 
 import (
-	"github.com/steveyegge/beads/internal/storage/domain"
-	domainfs "github.com/steveyegge/beads/internal/storage/domain/fs"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	domainfs "github.com/rhar1511/beads/internal/storage/domain/fs"
 )
 
 type FileSystemProvider interface {

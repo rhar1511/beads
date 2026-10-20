@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rhar1511/beads/internal/configfile"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/configfile"
 )
 
 // TestProxiedRestoreFailureMessage pins the one distinction the operator acts

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func runGraphProxiedServer(ctx context.Context, out io.Writer, args []string) error {

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/dbproxy/identity"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/identity"
 )
 
 const (

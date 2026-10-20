@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rhar1511/beads/issueops"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/issueops"
 )
 
 // The filter semantics of `bd count` live in the Counter role now, built once

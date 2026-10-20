@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/protectedmutation"
-	storeops "github.com/steveyegge/beads/internal/storage/issueops"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/protectedmutation"
+	storeops "github.com/rhar1511/beads/internal/storage/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 type source struct{ bundle protectedmutation.Bundle }

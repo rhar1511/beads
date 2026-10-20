@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/git"
+	"github.com/rhar1511/beads/internal/utils"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/git"
-	"github.com/steveyegge/beads/internal/utils"
 )
 
 func TestResolveWhereBeadsDir_FallsBackToFindBeadsDir(t *testing.T) {

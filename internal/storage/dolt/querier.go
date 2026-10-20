@@ -1,9 +1,9 @@
 package dolt
 
 import (
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/workapi/storequerier"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/workapi/storequerier"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // Querier returns the guarded boolean-query surface for this store.

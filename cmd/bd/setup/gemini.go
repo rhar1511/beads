@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/beads/internal/templates/agents"
+	"github.com/rhar1511/beads/internal/templates/agents"
 )
 
 var (

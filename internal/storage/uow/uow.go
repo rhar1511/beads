@@ -3,8 +3,8 @@ package uow
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/domain/db"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/domain/db"
 )
 
 type UnitOfWork interface {

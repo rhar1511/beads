@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/githooksenv"
+	"github.com/rhar1511/beads/internal/githooksenv"
 )
 
 // The bootstrap clone does not route through prepareDoltCLITransferCommand;

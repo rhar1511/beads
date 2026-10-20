@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/migration"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/migration"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 type exitError struct {

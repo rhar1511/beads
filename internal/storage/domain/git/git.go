@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	internalgit "github.com/steveyegge/beads/internal/git"
-	"github.com/steveyegge/beads/internal/storage/domain"
+	internalgit "github.com/rhar1511/beads/internal/git"
+	"github.com/rhar1511/beads/internal/storage/domain"
 )
 
 func NewGitRepository(workDir string) domain.GitRepository {
