@@ -1,6 +1,6 @@
 # Error Handling Guidelines
 
-Last reviewed: 2026-07-07
+Last reviewed: 2026-10-20
 
 Freshness source: `cmd/bd/*.go`, especially command error exits and JSON error
 helpers in `cmd/bd/errors.go`.
@@ -37,8 +37,7 @@ the message and returns a sentinel `*exitError`; cobra unwinds the stack (runnin
 every `defer`), and `main()` maps the sentinel to exit code 1.
 
 **Characteristics:**
-- Prints `Error:` (plus `Hint:` for the `WithHint` variants) to stderr; the
-  `RespectJSON` variants emit a structured JSON error to stdout under `--json`
+- Prints `Error:` (plus `Hint:` for the `WithHint` variants) to stderr. Under `--json`, `HandleErrorWithHint` emits structured JSON to stderr; the `RespectJSON` variants emit structured JSON to stdout
 - Returns `&exitError{Code: 1}` up through `RunE`; `main()` exits 1 after
   deferred cleanup and the metrics flush have run
 - The command's `cobra.Command` **must** set `SilenceUsage: true` and
@@ -67,7 +66,7 @@ return a `HandleError*` value instead of adding more.
 
 **Example:**
 ```go
-if err := createConfigYaml(beadsDir, false); err != nil {
+if err := createConfigYaml(beadsDir, false, ""); err != nil {
     fmt.Fprintf(os.Stderr, "Warning: failed to create config.yaml: %v\n", err)
     // Non-fatal - continue anyway
 }
@@ -80,10 +79,8 @@ if err := createConfigYaml(beadsDir, false); err != nil {
 - Core functionality still works
 
 **Files using this pattern:**
-- `cmd/bd/init.go` (lines 155-157, 161-163, 167-169, 188-190, 236-238, 272-274, etc.)
-- `cmd/bd/sync.go` (lines 156, 257, 281, 329, 335, 720-722, 740, 743, 752, 762)
-- `cmd/bd/create.go` (lines 333-334, 340-341)
-- `cmd/bd/sync.go` *(handles Dolt sync operations)*
+- `cmd/bd/init.go` — auxiliary config-file creation and clone-local tracking metadata
+- `cmd/bd/create.go` — optional post-create operations
 
 ---
 
@@ -107,10 +104,8 @@ _ = os.Remove(tempPath)
 - Primary error already reported
 
 **Files using this pattern:**
-- `cmd/bd/init.go` (line 209, 326-327)
-- `cmd/bd/sync.go` (lines 696-698)
-- `cmd/bd/sync.go` *(sync cleanup)*
-- Dozens of other locations throughout the codebase
+- `cmd/bd/init.go` — closing a store while returning an already selected error
+- Other cleanup paths where the failure cannot invalidate the operation
 
 ---
 
@@ -166,7 +161,7 @@ if err != nil {
 ### Creating Auxiliary Config Files → Pattern B (Warn)
 
 ```go
-if err := createConfigYaml(localBeadsDir, false); err != nil {
+if err := createConfigYaml(localBeadsDir, false, ""); err != nil {
     fmt.Fprintf(os.Stderr, "Warning: failed to create config.yaml: %v\n", err)
     // Non-fatal - continue anyway
 }
@@ -186,8 +181,9 @@ defer func() {
 ### Optional Metadata Updates → Pattern B (Warn)
 
 ```go
-if err := store.SetMetadata(ctx, "last_import_hash", currentHash); err != nil {
-    fmt.Fprintf(os.Stderr, "Warning: failed to update last_import_hash: %v\n", err)
+// Only in a clone-local route, after the caller has checked the gateway guard.
+if err := store.SetLocalMetadata(ctx, "bd_version", Version); err != nil {
+    fmt.Fprintf(os.Stderr, "Warning: failed to write bd_version local metadata: %v\n", err)
 }
 ```
 
@@ -205,7 +201,7 @@ if err := store.CreateIssue(ctx, issue, actor); err != nil {
 
 ```go
 // BAD: Same type of operation handled differently
-if err := createConfigYaml(dir, false); err != nil {
+if err := createConfigYaml(dir, false, ""); err != nil {
     fmt.Fprintf(os.Stderr, "Warning: %v\n", err) // Warns
 }
 if err := createReadme(dir); err != nil {
@@ -216,7 +212,7 @@ if err := createReadme(dir); err != nil {
 
 ```go
 // GOOD: Consistent pattern for similar operations
-if err := createConfigYaml(dir, false); err != nil {
+if err := createConfigYaml(dir, false, ""); err != nil {
     fmt.Fprintf(os.Stderr, "Warning: failed to create config.yaml: %v\n", err)
 }
 if err := createReadme(dir); err != nil {
@@ -286,14 +282,16 @@ if err := store.SetConfig(ctx, "issue_prefix", prefix); err != nil {
     return HandleError("failed to set issue prefix: %v", err)
 }
 
-if err := syncbranch.Set(ctx, store, branch); err != nil {
-    return HandleError("failed to set sync branch: %v", err)
+if err := persistInitSyncRemote(beadsDir, initRemote, syncURL, syncFromRemote, syncURLFromConfig, syncURLFromGitOrigin); err != nil {
+    return HandleError("failed to persist sync.remote: %v", err)
 }
 ```
 
 **Examples:**
 - `issue_prefix` - Defines how all issue IDs are generated
-- `sync.branch` - Critical for git synchronization workflow
+- `sync.remote` - Records the intended Dolt bootstrap/sync remote
+
+Current initialization verifies or adopts the existing workspace identity through `seedInitWorkspaceIdentity` and `issueops.Bootstrapper`; it must not overwrite another workspace's identity. The configuration examples above illustrate fatal prerequisites, not permission to bypass that identity flow.
 
 **Rationale:** These settings are prerequisites for basic operation. Without them, the system cannot function correctly. A failure here indicates a serious problem (e.g., filesystem issues, database corruption).
 
@@ -302,33 +300,25 @@ if err := syncbranch.Set(ctx, store, branch); err != nil {
 Tracking metadata **enhances functionality** but the system works without it:
 
 ```go
-// Pattern B: Warn and continue
-if err := store.SetMetadata(ctx, "bd_version", Version); err != nil {
-    fmt.Fprintf(os.Stderr, "Warning: failed to store version metadata: %v\n", err)
-    // Non-fatal - continue anyway
-}
-
-if err := store.SetMetadata(ctx, "repo_id", repoID); err != nil {
-    fmt.Fprintf(os.Stderr, "Warning: failed to set repo_id: %v\n", err)
-}
-
-if err := store.SetMetadata(ctx, "last_import_hash", hash); err != nil {
-    fmt.Fprintf(os.Stderr, "Warning: failed to update last_import_hash: %v\n", err)
+// Clone-local tracking is not written to a shared gateway database.
+if shouldWriteInitStateToDB(doltCfg.Gateway) {
+    if err := store.SetLocalMetadata(ctx, "bd_version", Version); err != nil {
+        fmt.Fprintf(os.Stderr, "Warning: failed to write bd_version local metadata: %v\n", err)
+    }
 }
 ```
 
 **Examples:**
 - `bd_version` - Enables version mismatch warnings on upgrades
 - `repo_id` / `clone_id` - Helps with collision detection across clones
-- `last_import_hash` - Optimizes staleness detection (falls back to mtime if unavailable)
 
 **Rationale:** System degrades gracefully if tracking metadata is unavailable. Core functionality (creating issues, importing data) still works. Failures here might indicate temporary issues (e.g., read-only filesystem) that shouldn't block the entire operation.
 
-**See also:** `cmd/bd/init.go` lines 206-272 for detailed inline documentation of this distinction.
+**See also:** `cmd/bd/init.go`: `seedInitWorkspaceIdentity`, `shouldWriteInitStateToDB`, and the tracking-metadata section of the init command. `bd_version`, `repo_id`, and `clone_id` describe a clone; gateway routes must not overwrite shared server identity with those local fingerprints.
 
 ### File Permission Errors
 
-Setting file permissions is typically **Pattern B** because the file was already written:
+Permission failures are **Pattern A** when a private mode, journal durability or another security invariant is required; an existing file is not proof that it is safe. See `internal/atomicfile/atomicfile.go` and the migration metadata/journal writes in `cmd/bd/migrate_dolt_mode.go`. **Pattern B** applies only when the mode change is explicitly noncritical, for example:
 
 ```go
 if err := os.Chmod(jsonlPath, 0600); err != nil {
@@ -338,7 +328,7 @@ if err := os.Chmod(jsonlPath, 0600); err != nil {
 
 ### Resource Cleanup
 
-Always use **Pattern C** for cleanup in error paths:
+Use **Pattern C** for secondary, best-effort cleanup while preserving the primary error. If closing or flushing is itself required for a successful durable write, handle that failure instead of silently discarding it:
 
 ```go
 defer func() {
@@ -393,4 +383,3 @@ func WarnError(format string, args ...interface{})
 - `cmd/bd/errors.go` - The `HandleError*` / `WarnError` / `SilentExit` helpers and the `exitError` sentinel that `main()` maps to an exit code
 - `cmd/bd/defer.go` - Clean example of Pattern A: `return HandleError(...)` from a `RunE` with `SilenceUsage`/`SilenceErrors` set
 - `cmd/bd/init.go` - Examples of all three patterns
-- `cmd/bd/sync.go` - Examples of Pattern B for metadata operations and Pattern C for cleanup operations
