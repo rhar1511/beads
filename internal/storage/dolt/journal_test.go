@@ -2,11 +2,13 @@ package dolt
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
+	publicops "github.com/steveyegge/beads/issueops"
 )
 
 // TestEventsJournal_EmbeddedPlumbing drives mutations through the DoltStore
@@ -84,9 +86,21 @@ func TestEventsJournal_NoPhantomDeletes(t *testing.T) {
 	}
 	clearJournal(t, store)
 
-	// Delete a mix of present and absent ids; force avoids the dependent gate.
-	if _, err := store.DeleteIssues(ctx, []string{"bd-pd-1", "bd-pd-missing-a", "bd-pd-2", "bd-pd-missing-b"}, false, true, false); err != nil {
-		t.Fatalf("delete: %v", err)
+	// A public bulk request with missing IDs refuses atomically, even with
+	// Force. Neither real deletes nor phantom journal events may escape it.
+	if _, err := store.DeleteIssues(ctx, []string{"bd-pd-1", "bd-pd-missing-a", "bd-pd-2", "bd-pd-missing-b"}, false, true, false); !errors.Is(err, publicops.ErrNotFound) {
+		t.Fatalf("mixed present/missing delete: %v, want ErrNotFound", err)
+	}
+	if rows := readJournalRows(t, store); len(rows) != 0 {
+		t.Fatalf("refused delete journal = %+v, want no events", rows)
+	}
+	for _, id := range []string{"bd-pd-1", "bd-pd-2"} {
+		if _, err := store.GetIssue(ctx, id); err != nil {
+			t.Fatalf("GetIssue(%s) after refused delete: %v", id, err)
+		}
+	}
+	if _, err := store.DeleteIssues(ctx, []string{"bd-pd-1", "bd-pd-2"}, false, true, false); err != nil {
+		t.Fatalf("delete present IDs: %v", err)
 	}
 
 	deleted := map[string]bool{}

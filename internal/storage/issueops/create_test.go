@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -20,6 +22,12 @@ func expectIssueRevisionBump(mock sqlmock.Sqlmock, issueID string) {
 	mock.ExpectExec("UPDATE issues SET row_lock = \\?, updated_at = updated_at WHERE id = \\?").
 		WithArgs(sqlmock.AnyArg(), issueID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+}
+
+func expectDependencyIdentity(mock sqlmock.Sqlmock, table, targetColumn, source, target string, count int) {
+	mock.ExpectQuery(regexp.QuoteMeta(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE issue_id = ? AND %s = ?", table, targetColumn))).
+		WithArgs(source, target).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(count))
 }
 
 func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *testing.T) {
@@ -142,6 +150,7 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 	mock.ExpectQuery("SELECT 1 FROM issues WHERE id = \\?").
 		WithArgs("target").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+	expectDependencyIdentity(mock, "dependencies", "depends_on_issue_id", "source", "target", 0)
 	mock.ExpectExec("INSERT INTO dependencies").
 		WithArgs(depid.New("source", "target"), "source", "target", types.DepRelated, "someone.else", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -208,6 +217,7 @@ func TestPersistDependenciesBumpsExistingOwnerOnlyForInsertedEdge(t *testing.T) 
 				Type:        types.DepRelated,
 			}},
 		}
+		expectDependencyIdentity(mock, "dependencies", "depends_on_external", "existing-source", "target", 0)
 		mock.ExpectExec("INSERT INTO dependencies").
 			WithArgs(depid.New("existing-source", "target"), "existing-source", "target", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
 			WillReturnResult(sqlmock.NewResult(0, 1))
@@ -229,36 +239,39 @@ func TestPersistDependenciesBumpsExistingOwnerOnlyForInsertedEdge(t *testing.T) 
 		}
 	})
 
-	t.Run("idempotent edge leaves source revision untouched", func(t *testing.T) {
-		db, mock, tx := beginMockTx(t)
-		defer db.Close()
-		issue := &types.Issue{
-			ID:        "existing-source",
-			IssueType: types.TypeTask,
-			Dependencies: []*types.Dependency{{
-				DependsOnID: "target",
-				Type:        types.DepRelated,
-			}},
-		}
-		mock.ExpectExec("INSERT INTO dependencies").
-			WithArgs(depid.New("existing-source", "target"), "existing-source", "target", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
-			WillReturnResult(sqlmock.NewResult(0, 0))
+	for _, matchedRows := range []int64{0, 1} {
+		t.Run(fmt.Sprintf("idempotent edge matched rows %d", matchedRows), func(t *testing.T) {
+			db, mock, tx := beginMockTx(t)
+			defer db.Close()
+			issue := &types.Issue{
+				ID:        "existing-source",
+				IssueType: types.TypeTask,
+				Dependencies: []*types.Dependency{{
+					DependsOnID: "target",
+					Type:        types.DepRelated,
+				}},
+			}
+			expectDependencyIdentity(mock, "dependencies", "depends_on_external", "existing-source", "target", 1)
+			mock.ExpectExec("INSERT INTO dependencies").
+				WithArgs(depid.New("existing-source", "target"), "existing-source", "target", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
+				WillReturnResult(sqlmock.NewResult(0, matchedRows))
 
-		result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
-		if err != nil {
-			t.Fatalf("PersistDependenciesWithOptionsResult error = %v, want nil", err)
-		}
-		if result.ChangedTables["issues"] || result.ChangedTables["dependencies"] {
-			t.Fatalf("ChangedTables = %#v, want no durable graph changes", result.ChangedTables)
-		}
-		mock.ExpectRollback()
-		if err := tx.Rollback(); err != nil {
-			t.Fatalf("rollback: %v", err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Fatalf("unmet expectations: %v", err)
-		}
-	})
+			result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
+			if err != nil {
+				t.Fatalf("PersistDependenciesWithOptionsResult error = %v, want nil", err)
+			}
+			if result.ChangedTables["issues"] || result.ChangedTables["dependencies"] {
+				t.Fatalf("ChangedTables = %#v, want no durable graph changes", result.ChangedTables)
+			}
+			mock.ExpectRollback()
+			if err := tx.Rollback(); err != nil {
+				t.Fatalf("rollback: %v", err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatalf("unmet expectations: %v", err)
+			}
+		})
+	}
 }
 
 func TestPersistDependenciesDefaultsCreatedByToActor(t *testing.T) {
@@ -282,6 +295,7 @@ func TestPersistDependenciesDefaultsCreatedByToActor(t *testing.T) {
 	mock.ExpectQuery("SELECT 1 FROM issues WHERE id = \\?").
 		WithArgs("target").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+	expectDependencyIdentity(mock, "dependencies", "depends_on_issue_id", "source", "target", 0)
 	mock.ExpectExec("INSERT INTO dependencies").
 		WithArgs(depid.New("source", "target"), "source", "target", types.DepRelated, "current.user", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -318,6 +332,7 @@ func TestPersistDependenciesClassifiesBareCrossPrefixTargetAsExternal(t *testing
 
 	// A bare target with a different issue prefix is external. In particular,
 	// persistence must not probe either local target table before this insert.
+	expectDependencyIdentity(mock, "dependencies", "depends_on_external", "sym-3su", "mkt-456", 0)
 	mock.ExpectExec("INSERT INTO dependencies \\(id, issue_id, depends_on_external").
 		WithArgs(depid.New("sym-3su", "mkt-456"), "sym-3su", "mkt-456", types.DepRelated, "tester", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -500,6 +515,7 @@ func TestPersistDependenciesValidatesPlannedHierarchyBeforeBlocking(t *testing.T
 		mock.ExpectQuery("WITH RECURSIVE reachable").
 			WithArgs(pair[1], pair[0]).
 			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+		expectDependencyIdentity(mock, "dependencies", "depends_on_issue_id", pair[0], pair[1], 0)
 		mock.ExpectExec("INSERT INTO dependencies").
 			WithArgs(depid.New(pair[0], pair[1]), pair[0], pair[1], types.DepParentChild, "tester", sqlmock.AnyArg(), "{}", "").
 			WillReturnResult(sqlmock.NewResult(0, 1))
@@ -550,6 +566,7 @@ func TestPersistDependenciesSkipsHierarchyValidationAcrossPrefixes(t *testing.T)
 	mock.ExpectQuery("WITH RECURSIVE reachable").
 		WithArgs("bb-target", "aa-source").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	expectDependencyIdentity(mock, "dependencies", "depends_on_external", "aa-source", "bb-target", 0)
 	mock.ExpectExec("INSERT INTO dependencies \\(id, issue_id, depends_on_external").
 		WithArgs(depid.New("aa-source", "bb-target"), "aa-source", "bb-target", types.DepBlocks, "tester", sqlmock.AnyArg(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -663,5 +680,80 @@ func TestReconcileChildCountersReturnsWispLookupError(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPersistReverseDependenciesBumpsWispOwnerOnlyForInsertedEdge(t *testing.T) {
+	for _, inserted := range []bool{true, false} {
+		name := "exact duplicate preserves token"
+		if inserted {
+			name = "inserted edge remints token"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			db, mock, tx := beginMockTx(t)
+			defer db.Close()
+			issue := &types.Issue{ID: "test-created", IssueType: types.TypeTask,
+				Dependencies: []*types.Dependency{{IssueID: "test-owner", DependsOnID: "test-created", Type: types.DepRelatesTo}}}
+			mock.ExpectQuery("SELECT 1 FROM wisps WHERE id = \\? LIMIT 1").WithArgs("test-owner").
+				WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+			mock.ExpectQuery("SELECT 1 FROM wisps WHERE id = \\? LIMIT 1").WithArgs("test-created").WillReturnError(sql.ErrNoRows)
+			mock.ExpectQuery("SELECT 1 FROM issues WHERE id = \\?").WithArgs("test-created").
+				WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+			existingCount := 1
+			if inserted {
+				existingCount = 0
+			}
+			expectDependencyIdentity(mock, "wisp_dependencies", "depends_on_issue_id", "test-owner", "test-created", existingCount)
+			mock.ExpectExec("INSERT INTO wisp_dependencies").
+				WithArgs(depid.New("test-owner", "test-created"), "test-owner", "test-created", types.DepRelatesTo, "writer", sqlmock.AnyArg(), "{}", "").
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			if inserted {
+				mock.ExpectQuery("SELECT row_lock FROM wisps WHERE id = \\?").WithArgs("test-owner").
+					WillReturnRows(sqlmock.NewRows([]string{"row_lock"}).AddRow(int64(17)))
+				mock.ExpectExec("UPDATE wisps SET row_lock = \\?, updated_at = updated_at WHERE id = \\?").
+					WithArgs(sqlmock.AnyArg(), "test-owner").WillReturnResult(sqlmock.NewResult(0, 1))
+			}
+			result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{issue}, "writer", storage.BatchCreateOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.ChangedTables["wisp_dependencies"] != inserted || result.ChangedTables["issues"] {
+				t.Fatalf("changed tables = %#v, want wisp edge changed=%v without durable issue stage", result.ChangedTables, inserted)
+			}
+			mock.ExpectRollback()
+			if err := tx.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPersistDuplicateDependencyRetainsStrictInsertError(t *testing.T) {
+	db, mock, tx := beginMockTx(t)
+	defer db.Close()
+	issue := &types.Issue{ID: "existing-source", IssueType: types.TypeTask,
+		Dependencies: []*types.Dependency{{DependsOnID: "target", Type: types.DepRelated, Metadata: "invalid-json"}}}
+	expectDependencyIdentity(mock, "dependencies", "depends_on_external", "existing-source", "target", 1)
+	insertErr := errors.New("strict duplicate payload rejected")
+	mock.ExpectExec("INSERT INTO dependencies").
+		WithArgs(depid.New("existing-source", "target"), "existing-source", "target", types.DepRelated, "tester", sqlmock.AnyArg(), "invalid-json", "").
+		WillReturnError(insertErr)
+	result, err := PersistDependenciesWithOptionsResult(t.Context(), tx, []*types.Issue{issue}, "tester", storage.BatchCreateOptions{})
+	if !errors.Is(err, insertErr) {
+		t.Fatalf("duplicate error = %v, want original strict insert error", err)
+	}
+	if len(result.ChangedTables) != 0 {
+		t.Fatalf("refused duplicate changed tables = %#v", result.ChangedTables)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

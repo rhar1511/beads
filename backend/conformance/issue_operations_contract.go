@@ -1970,6 +1970,15 @@ func RunIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransaction(t *
 		seedIssueOperationsLabeledIssue(t, ctx, fixture, id)
 	}
 
+	// History-backed fixtures can establish a clean source baseline before
+	// the observed creating transaction. The watched flips and controls below
+	// remain unchanged; this does not exercise adoption of prior row dirt.
+	if fixture.Commit != nil {
+		if err := fixture.Commit(ctx, "seed create dependency fixpoint"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
 	probe.requireUnblocked(t, blockedIssue(waiting), "the existing row is clean until the create points it at the new one")
 

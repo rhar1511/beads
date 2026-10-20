@@ -356,8 +356,14 @@ func TestPromoteFromEphemeralRollsBackWhenAuxiliaryCopyFails(t *testing.T) {
 
 			createWisp(t, ctx, store, tc.wispID)
 
-			if _, err := store.db.ExecContext(ctx, "DROP TABLE "+tc.dropTable); err != nil {
-				t.Fatalf("drop %s: %v", tc.dropTable, err)
+			faultSQL := "DROP TABLE " + tc.dropTable
+			if tc.dropTable == "dependencies" {
+				// Keep the endpoint columns readable by protection admission;
+				// break only the later auxiliary-copy statement this test owns.
+				faultSQL = "ALTER TABLE dependencies RENAME COLUMN thread_id TO copy_fault_thread_id"
+			}
+			if _, err := store.db.ExecContext(ctx, faultSQL); err != nil {
+				t.Fatalf("inject %s copy fault: %v", tc.dropTable, err)
 			}
 
 			err := store.PromoteFromEphemeral(ctx, tc.wispID, "tester")

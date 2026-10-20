@@ -35,6 +35,11 @@ func updateCommitMessage(issueID string) string {
 
 func (o *issueOperations) Create(ctx context.Context, request issueops.CreateRequest) (issueops.CreateResult, error) {
 	snapshot := storageissueops.CloneCreateRequest(request)
+	if !storageissueops.VersionCommitDeferred(ctx) {
+		return o.store.runCreateIssueOperationTx(ctx, func(tx *sql.Tx) (issueops.CreateResult, storageissueops.CreateCommitScope, error) {
+			return storageissueops.ExecuteCreateWithCommit(ctx, tx, snapshot)
+		})
+	}
 	var result issueops.CreateResult
 	err := o.store.runIssueOperationTx(ctx, "bd: create issue", func(tx *sql.Tx) (storageissueops.ChangedTables, error) {
 		var err error

@@ -5,9 +5,9 @@ description: Configure bd setup recipes, hooks, and instruction files for Claude
 
 Configure your IDE or coding agent for optimal beads integration.
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-10-20
 
-Freshness source: `cmd/bd/setup*.go` and `internal/recipes/`.
+Freshness source: `cmd/bd/setup*.go`, `cmd/bd/setup/` and `internal/recipes/`.
 
 ## How `bd setup` Works
 
@@ -22,13 +22,13 @@ bd setup claude --remove    # Uninstall
 
 | Recipe | Files written | Details |
 |--------|---------------|---------|
-| `claude` | `.claude/settings.json` (or `~/.claude/settings.json` with `--global`) + `CLAUDE.md` section | [Claude Code](/integrations/claude-code) |
-| `cursor` | `.cursor/rules/beads.mdc` | [Cursor](/integrations/cursor) |
+| `claude` | `.claude/settings.json` (or `~/.claude/settings.json` with `--global`) + managed instructions in `CLAUDE.md` or its authoritative `AGENTS.md` import target | [Claude Code](/integrations/claude-code) |
+| `cursor` | `.cursor/rules/beads.mdc` + `.agents/skills/beads/` + `.cursor/hooks.json`; global installs skill + hooks only | [Cursor](/integrations/cursor) |
 | `gemini` | `~/.gemini/settings.json` (or `.gemini/settings.json` with `--project`) + `GEMINI.md` section | [Gemini CLI](/integrations/gemini) |
 | `copilot` | `.copilot-plugin/plugin.json` + `.github/copilot-instructions.md` | [Copilot CLI](/integrations/copilot-cli) |
 | `codex` | `.agents/skills/beads/` + `AGENTS.md` section + `.codex/` hooks | [Codex](/integrations/codex) |
 | `factory` | `AGENTS.md` section | [Factory.ai Droid](/integrations/factory) |
-| `mux` | `AGENTS.md` section (+ `.mux/` layers with `--project`/`--global`) | [Mux](/integrations/mux) |
+| `mux` | `AGENTS.md` section + `.mux/init`, `.mux/tool_post`, `.mux/tool_env` (+ instruction layers with `--project`/`--global`) | [Mux](/integrations/mux) |
 | `opencode` | `AGENTS.md` section | [OpenCode](/integrations/opencode) |
 | `aider` | `.aider.conf.yml` + `.aider/BEADS.md` + `.aider/README.md` | [Aider](/integrations/aider) |
 | `junie` | `.junie/guidelines.md` + `.junie/mcp/mcp.json` | [Junie](/integrations/junie) |
@@ -45,7 +45,7 @@ Commit the instruction files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, as applicab
 
 ### Template Profiles
 
-Each integration writes one of two **profiles** that control how much content goes into the tool's instruction file (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.github/copilot-instructions.md`):
+Integrations that use the shared managed instruction section select one of two **profiles** that control how much content goes into the tool's instruction file (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, or `.github/copilot-instructions.md`):
 
 | Profile | Used by | Content |
 |---------|---------|---------|
@@ -58,7 +58,7 @@ Hook-enabled agents use the `minimal` profile because `bd prime` injects full co
 
 ### Policy Profiles
 
-Template profiles control how much text gets installed. Policy profiles control what an agent is authorized to do at handoff:
+Template profiles control how much text gets installed. Policy profiles provide handoff instructions; they do not enforce permissions on independently installed hooks. In particular, Mux installs a post-tool hook that attempts `bd dolt push` after file edits (see below). Review hook behavior separately from the generated profile. The policy guidance is:
 
 | Policy | Default scope | Commit/push guidance |
 |--------|---------------|----------------------|
@@ -95,7 +95,7 @@ bd setup claude --global   # Global install: ~/.claude/settings.json
 
 This installs:
 - **SessionStart hook** - Runs `bd prime --hook-json`, which wraps the workflow context in the JSON envelope Claude Code expects. SessionStart fires when a session starts, resumes, or clears, and again after context compaction — no separate compaction hook is needed.
-- **Minimal beads section in `CLAUDE.md`** - A pointer to `bd prime`, managed with hash/version markers for safe updates and `--check` freshness detection.
+- **Minimal managed instructions** - A pointer to `bd prime`, managed with hash/version markers for safe updates and `--check` freshness detection. Normally this section lives in `CLAUDE.md`; when that file is an `@AGENTS.md` import stub and the authoritative file exists, setup maintains the section in `AGENTS.md` instead.
 
 If the [beads Claude Code plugin](/integrations/claude-code-plugin) is installed, hooks are plugin-managed and `bd setup claude` skips writing them, so `bd prime` doesn't fire twice per session.
 
@@ -143,11 +143,11 @@ If you prefer manual configuration, add the hook to your Claude Code settings:
 ## Cursor IDE
 
 ```bash
-bd setup cursor            # Always-applied rules file
+bd setup cursor            # Project rules, shared skill, lifecycle hooks
+bd setup cursor --global   # Global skill and hooks (no global rules file)
 ```
 
-This creates `.cursor/rules/beads.mdc` with beads-aware rules that Cursor
-re-includes every turn.
+Project setup creates `.cursor/rules/beads.mdc`, the shared `.agents/skills/beads/` skill, and `.cursor/hooks.json`. The hooks invoke `bd cursor-hook` for `sessionStart`, `preCompact`, and `postToolUse`. Global setup writes the skill under `~/.agents/skills/beads/` and hooks to `~/.cursor/hooks.json`; Cursor rules remain project-local.
 
 **Verify:**
 ```bash
@@ -204,6 +204,8 @@ bd setup codex      # Codex — beads skill + AGENTS.md guidance + native hooks
 ```
 
 These create or update a managed section in `AGENTS.md` (see Managed Sections above). `bd init` runs the project Codex setup automatically unless `--skip-agents` or `--stealth` is used. In worktree, shared, or `BEADS_DIR` setups, use `bd where` to confirm the resolved workspace — these integrations do not require a local `./.beads`. Restart the tool after setup if it is already running.
+
+Mux also always installs `.mux/init`, `.mux/tool_post`, and `.mux/tool_env`. The post-tool hook attempts `bd dolt push` after `file_edit_replace_string` or `file_edit_insert`; it does not consult the agent policy profile and ignores push failures. Review this sync side effect before installation. `--project` and `--global` add the corresponding Mux instruction layers.
 
 Details: [Factory.ai Droid](/integrations/factory), [Mux](/integrations/mux), [OpenCode](/integrations/opencode), [Codex](/integrations/codex).
 
@@ -280,7 +282,7 @@ This outputs a compact (~1-2k tokens) workflow reference including:
 
 `bd prime` prints memories near the top and starts with a truncation warning. If your host stores the full hook output in a file and only shows a preview, have the agent read the full file before continuing.
 
-In hook contexts, `bd prime --hook-json` wraps the output in the SessionStart JSON envelope (Claude Code, Gemini CLI, Codex). For memory-only hooks:
+For Claude Code and Gemini CLI hooks, `bd prime --hook-json` wraps the output in their SessionStart JSON envelope. Codex installs native `bd codex-hook` adapters for `SessionStart`, `PreCompact`, `PostCompact`, and `UserPromptSubmit`; Cursor uses `bd cursor-hook` adapters. For memory-only hooks:
 
 ```bash
 bd prime --memories-only

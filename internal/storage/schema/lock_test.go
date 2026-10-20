@@ -427,11 +427,24 @@ func expectOnePendingMigration(t *testing.T, mock sqlmock.Sqlmock) {
 	// Per-step commit (#4566) snapshots the working set before the migration
 	// runs so it can force-stage only the tables this step newly dirties.
 	expectDoltStatusRows(mock)
-	// The pending (latest) migration is 0063_create_provenance_events, a
-	// plain CREATE TABLE body with no bare CALL — execMigrationBody routes
-	// such bodies through ExecContext, not DrainCall.
-	mock.ExpectExec("(?s).*").
-		WillReturnResult(sqlmock.NewResult(0, 0))
+	if latest == 73 {
+		// The frozen73 adapter inspects both columns before DDL and verifies
+		// the resulting shape before recording the original migration hash.
+		columns := []string{"COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE", "COLUMN_DEFAULT", "EXTRA"}
+		query := regexp.QuoteMeta(`SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'issue_transition_receipts'
+  AND COLUMN_NAME IN ('request_json', 'receipt_json')`)
+		mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows(columns)).RowsWillBeClosed()
+		mock.ExpectExec(regexp.QuoteMeta("ALTER TABLE issue_transition_receipts ADD COLUMN request_json LONGTEXT NULL, ADD COLUMN receipt_json LONGTEXT NULL")).
+			WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectQuery(query).WillReturnRows(sqlmock.NewRows(columns).
+			AddRow("request_json", "longtext", "YES", nil, "").
+			AddRow("receipt_json", "longtext", "YES", nil, "")).RowsWillBeClosed()
+	} else {
+		// Future ordinary SQL migrations retain their generic body expectation.
+		mock.ExpectExec("(?s).*").WillReturnResult(sqlmock.NewResult(0, 0))
+	}
 	mock.ExpectExec(regexp.QuoteMeta("INSERT IGNORE INTO schema_migrations (version, content_hash) VALUES (?, ?)")).
 		WithArgs(latest, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))

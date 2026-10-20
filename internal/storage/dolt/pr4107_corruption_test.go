@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -27,7 +28,7 @@ func TestPR4107WispIsBlockedMigrationBackfillsBlockedWisps(t *testing.T) {
 	addDependency(t, ctx, store, "pr4107-wisp-mig-ephemeral", "pr4107-wisp-mig-blocker", types.DepBlocks)
 
 	dropWispIsBlockedProjection(t, ctx, store)
-	runMigrationSQLFilesFrom(t, ctx, store, "../schema/migrations/ignored", 6)
+	runMigrationExecutionFilesFrom(t, ctx, store, "../schema/migrations/ignored", 6)
 
 	if !getIsBlocked(t, ctx, store, "wisps", "pr4107-wisp-mig-nohist") {
 		t.Errorf("no-history wisp blocked by an open issue was not backfilled as blocked")
@@ -70,7 +71,7 @@ func TestPR4107IssueIsBlockedMigrationMatchesRuntimeMixedGraphSemantics(t *testi
 	createPerm(t, ctx, store, "pr4107-issue-mig-spawner")
 	addDependency(t, ctx, store, "pr4107-issue-mig-waiter", "pr4107-issue-mig-spawner", types.DepWaitsFor)
 
-	runMigrationSQLFilesFrom(t, ctx, store, "../schema/migrations", 46)
+	runMigrationExecutionFilesFrom(t, ctx, store, "../schema/migrations", 46)
 
 	if !getIsBlocked(t, ctx, store, "issues", "pr4107-issue-mig-blocked-by-wisp") {
 		t.Errorf("issue blocked by an open wisp was not backfilled as blocked")
@@ -98,7 +99,7 @@ func TestPR4107WispMigrationBackfillsMixedParentChildPropagation(t *testing.T) {
 	addDependency(t, ctx, store, "pr4107-wisp-blocked-by-wisp", "pr4107-wisp-blocker", types.DepBlocks)
 
 	dropWispIsBlockedProjection(t, ctx, store)
-	runMigrationSQLFilesFrom(t, ctx, store, "../schema/migrations/ignored", 6)
+	runMigrationExecutionFilesFrom(t, ctx, store, "../schema/migrations/ignored", 6)
 
 	if !getIsBlocked(t, ctx, store, "wisps", "pr4107-wisp-blocked-parent") {
 		t.Errorf("wisp directly blocked by an issue was not backfilled as blocked")
@@ -129,7 +130,7 @@ func TestPR4107WispMigrationBackfillsWaitsForSemantics(t *testing.T) {
 	addDependency(t, ctx, store, "pr4107-wisp-waits-for-no-children", "pr4107-wisp-waits-for-empty-spawner", types.DepWaitsFor)
 
 	dropWispIsBlockedProjection(t, ctx, store)
-	runMigrationSQLFilesFrom(t, ctx, store, "../schema/migrations/ignored", 6)
+	runMigrationExecutionFilesFrom(t, ctx, store, "../schema/migrations/ignored", 6)
 
 	if !getIsBlocked(t, ctx, store, "wisps", "pr4107-wisp-waits-for-active") {
 		t.Errorf("wisp waits-for gate with an active child was not backfilled as blocked")
@@ -772,7 +773,7 @@ func runMigrationSQL(t *testing.T, ctx context.Context, store *DoltStore, path s
 	}
 }
 
-func runMigrationSQLFilesFrom(t *testing.T, ctx context.Context, store *DoltStore, dir string, minVersion int) {
+func runMigrationExecutionFilesFrom(t *testing.T, ctx context.Context, store *DoltStore, dir string, minVersion int) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -796,6 +797,17 @@ func runMigrationSQLFilesFrom(t *testing.T, ctx context.Context, store *DoltStor
 			t.Fatalf("parse migration version from %s: %v", name, err)
 		}
 		if version < minVersion {
+			continue
+		}
+
+		// Keep the frozen graph migrations (including 0059) as an independent
+		// raw-SQL oracle. Frozen 0073 is the single known non-idempotent body;
+		// replay it through the shared production executor, not a copied fix.
+		if filepath.Clean(dir) == "../schema/migrations" && version == 73 {
+			if name != "0073_extend_issue_transition_receipts.up.sql" {
+				t.Fatalf("unexpected main73 file: %s", name)
+			}
+			replayMigration0073ThroughProduction(t, ctx, store)
 			continue
 		}
 		runMigrationSQL(t, ctx, store, filepath.Join(dir, name))
@@ -838,5 +850,30 @@ func dropWispTables(t *testing.T, ctx context.Context, store *DoltStore) {
 		if _, err := store.db.ExecContext(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
 			t.Fatalf("drop %s: %v", table, err)
 		}
+	}
+}
+
+// replayMigration0073ThroughProduction forges only a private test cursor,
+// commits that fixture and uses the normal pinned-connection migration lock.
+// It must actually apply 0073 and restore its original hash; skipping the file
+// or calling a test-only copy of the adapter cannot satisfy this check.
+func replayMigration0073ThroughProduction(t *testing.T, ctx context.Context, store *DoltStore) {
+	t.Helper()
+	if _, err := store.db.ExecContext(ctx, "DELETE FROM schema_migrations WHERE version = 73"); err != nil {
+		t.Fatalf("forge missing73 cursor: %v", err)
+	}
+	if err := schema.DrainCall(ctx, store.db, "CALL DOLT_COMMIT('-Am', 'private replay fixture missing73 cursor')"); err != nil {
+		t.Fatalf("commit missing73 fixture: %v", err)
+	}
+	applied, err := initSchemaOnDB(ctx, store.db)
+	if err != nil || applied != 1 {
+		t.Fatalf("production73 replay = (%d, %v), want one applied migration", applied, err)
+	}
+	var contentHash string
+	if err := store.db.QueryRowContext(ctx, "SELECT content_hash FROM schema_migrations WHERE version = 73").Scan(&contentHash); err != nil {
+		t.Fatalf("read replayed73 cursor: %v", err)
+	}
+	if contentHash != "00e860aa338b36f50a1a7b5fdc8da850471ed8fc91029dd4392d48e68421e210" {
+		t.Fatalf("replayed73 hash = %s, want frozen hash", contentHash)
 	}
 }

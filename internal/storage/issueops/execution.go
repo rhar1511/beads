@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/commitrows"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
 )
@@ -35,6 +36,10 @@ func HistoryEntry(provenance, fallback string) string {
 
 // ExecuteCreate applies a guarded create in tx and reports durable tables changed.
 func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequest) (publicops.CreateResult, ChangedTables, error) {
+	return executeCreate(ctx, tx, request, nil)
+}
+
+func executeCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequest, scope *CreateCommitScope) (publicops.CreateResult, ChangedTables, error) {
 	attempt := CloneCreateRequest(request)
 	if err := ValidatePublicCreateRequest(attempt); err != nil {
 		return publicops.CreateResult{}, nil, err
@@ -89,6 +94,12 @@ func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequ
 	if err := RequireProtectedMutation(ctx, tx, attempt.ProtectedPermit, "issue.create", protectedIDs, digest, attempt.ProtectionClass); err != nil {
 		return publicops.CreateResult{}, nil, err
 	}
+	if scope != nil {
+		scope.admission, err = commitrows.InspectAdmission(ctx, tx)
+		if err != nil {
+			return publicops.CreateResult{}, nil, err
+		}
+	}
 	if attempt.InheritLabelsFromParent && attempt.ParentID != "" {
 		labels, err := GetLabelsInTx(ctx, tx, "", attempt.ParentID)
 		if err != nil {
@@ -110,12 +121,12 @@ func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequ
 	}
 	issue.Dependencies = storage.CreatePublicCreateDependencies(issue.ID, attempt)
 	var skipped []skippedDependency
-	created, err := CreateIssuesInTxWithResult(ctx, tx, []*types.Issue{issue}, attempt.Actor, storage.BatchCreateOptions{
+	created, err := createIssuesInTxWithRowScope(ctx, tx, []*types.Issue{issue}, attempt.Actor, storage.BatchCreateOptions{
 		CreateOnly: true, SkipPrefixValidation: attempt.ForceIDPrefix,
 		OnSkippedDependency: func(issueID, dependsOnID, reason string) {
 			skipped = append(skipped, skippedDependency{issueID: issueID, dependsOnID: dependsOnID, reason: reason})
 		},
-	})
+	}, scope != nil)
 	if err != nil {
 		return publicops.CreateResult{}, nil, ClassifyPublicCreateError(err)
 	}
@@ -136,6 +147,12 @@ func ExecuteCreate(ctx context.Context, tx *sql.Tx, request publicops.CreateRequ
 	hydrated, err := HydrateIssueOperationResult(ctx, tx, issue.ID, true)
 	if err != nil {
 		return publicops.CreateResult{}, nil, err
+	}
+	if scope != nil {
+		scope.IssueRows, err = commitrows.CaptureIssueRows(ctx, tx, created.changedIssueIDs)
+		if err != nil {
+			return publicops.CreateResult{}, nil, err
+		}
 	}
 	OverlayCreateTimestamps(hydrated, issue)
 	return publicops.CreateResult{Issue: hydrated}, tables, nil
@@ -163,7 +180,8 @@ func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequ
 	attempt := CloneUpdateRequest(request)
 	digest, digestErr := publicops.ProtectedMutationDigest(attempt)
 	if digestErr != nil {
-		return publicops.UpdateResult{}, nil, digestErr
+		// Request JSON must be encodable before it can be authorized or written.
+		return publicops.UpdateResult{}, nil, fmt.Errorf("%w: %w", storage.ErrValidation, digestErr)
 	}
 	if attempt.Actor == "" || attempt.IssueID == "" {
 		return publicops.UpdateResult{}, nil, fmt.Errorf("%w: update requires actor and issue ID", storage.ErrValidation)
