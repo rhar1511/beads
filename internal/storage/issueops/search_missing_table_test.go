@@ -8,7 +8,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	mysql "github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func boolPtr(b bool) *bool { return &b }

@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/dberrors"
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/dberrors"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 const migrationContentSkewCheckName = "Migration Content Skew"

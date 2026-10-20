@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/sqlbuild"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // GetStaleIssuesInTx returns issues that haven't been updated within the

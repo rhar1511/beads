@@ -8,9 +8,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/steveyegge/beads/internal/httpapi/apigen"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/httpapi/apigen"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // closeRequestMembers is the document's member list for CloseIssueRequest. The

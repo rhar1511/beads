@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // The database-free half of issueops.Releaser, pinned in milliseconds. Every

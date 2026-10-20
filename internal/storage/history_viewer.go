@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // HistoryViewer provides time-travel queries and diffs.

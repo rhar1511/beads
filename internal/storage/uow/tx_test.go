@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/domain"
 )
 
 // mockUnitOfWork implements UnitOfWork for testing

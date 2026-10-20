@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/lockfile"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/lockfile"
 )
 
 // The backup lock serializes the two writers of a workspace's Dolt backup:

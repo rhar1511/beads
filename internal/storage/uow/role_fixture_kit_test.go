@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // roleFixtureKit is the unit-of-work backend's answer to the hooks every

@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/uimd"
+	"github.com/rhar1511/beads/issueops"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/internal/uimd"
-	"github.com/steveyegge/beads/issueops"
 )
 
 // showNotFoundHint explains that an unresolved issue ID is not proof the ID

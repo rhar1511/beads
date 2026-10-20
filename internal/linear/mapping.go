@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/idgen"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/idgen"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // IDGenerationOptions configures Linear hash ID generation.

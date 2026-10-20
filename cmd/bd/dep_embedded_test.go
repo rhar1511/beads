@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
 )
 
 // bdDep runs "bd dep" with the given args and returns raw stdout.

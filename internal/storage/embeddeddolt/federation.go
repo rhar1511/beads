@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
 )
 
 // credentialKeyFile is the filename for the random encryption key.

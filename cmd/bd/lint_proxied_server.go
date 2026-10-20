@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func runLintProxiedServer(ctx context.Context, args []string, typeFilter, statusFilter string) error {

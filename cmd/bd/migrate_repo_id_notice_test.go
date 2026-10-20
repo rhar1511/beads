@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/beads"
 )
 
 // bd-ek28z: the path-hash propagation notice must fire exactly when an

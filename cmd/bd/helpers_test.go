@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/utils"
+	"github.com/rhar1511/beads/internal/utils"
 )
 
 func TestIsNumericID_EdgeCases(t *testing.T) {

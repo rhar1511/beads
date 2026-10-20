@@ -3,7 +3,7 @@ package issueops
 import (
 	"testing"
 
-	publicops "github.com/steveyegge/beads/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func TestPopForceClosePolicy(t *testing.T) {

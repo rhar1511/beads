@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
-	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/types"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // journalOpActor is one (op, issue_id, actor) triple read straight out of the

@@ -5,8 +5,8 @@ package embeddeddolt_test
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestEventsSinceEmbedded mirrors the dolt-suite EventsSince coverage on the

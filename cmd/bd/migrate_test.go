@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/internal/storage/dolt"
 )
 
 // TestMigrateCommand removed: detectDatabases, getDBVersion, formatDBList, dbInfo

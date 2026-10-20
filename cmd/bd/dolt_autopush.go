@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/debug"
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // pushState tracks auto-push state in a local file (.beads/push-state.json)

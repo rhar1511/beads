@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"strconv"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 const (

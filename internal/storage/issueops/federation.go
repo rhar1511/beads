@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // validPeerNameRegex matches valid peer names (alphanumeric, hyphens, underscores).

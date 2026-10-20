@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // MappingConfig configures how GitLab fields map to beads fields.

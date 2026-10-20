@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
 )
 
 // coreWorkTypes are the built-in types that beads validates without configuration.

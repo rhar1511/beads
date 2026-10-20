@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // WakeExpiredDefersAdvisory preserves the backend wake contract for decorators.

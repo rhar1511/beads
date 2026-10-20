@@ -13,10 +13,10 @@ import (
 	"github.com/dolthub/dolt/go/libraries/utils/filesys"
 	"gopkg.in/yaml.v3"
 
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/doltserver"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/proxy"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/proxy"
 )
 
 const managedListenerHostRemediation = "set listener.host to 127.0.0.1 (or another 127.0.0.0/8 / ::1 " +

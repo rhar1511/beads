@@ -1,13 +1,13 @@
 package backend
 
 import (
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // Domain types reached by the engine interface's method signatures, aliased
 // from the internal domain package. Request/response types from the guarded
 // issue-operations surface (issueops.Lifecycle, issueops.Reader) are already
-// public in github.com/steveyegge/beads/issueops and are not re-exported
+// public in github.com/rhar1511/beads/issueops and are not re-exported
 // here.
 type (
 	BlockedIssue                = types.BlockedIssue

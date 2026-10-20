@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/tracker"
-	itracker "github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/tracker"
+	itracker "github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 const defaultBatchPushWorkers = 8

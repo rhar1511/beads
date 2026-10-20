@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/rhar1511/beads/backend/conformance"
 )
 
 // TestCommenterContract runs the Commenter contract against the embedded

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // These pin the DATABASE-FREE half of issueops.BatchApplier: what a request

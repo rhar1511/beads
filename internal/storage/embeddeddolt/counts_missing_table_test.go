@@ -5,7 +5,7 @@ package embeddeddolt_test
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // seedCountsPlane puts one durable issue and one wisp in the store so both

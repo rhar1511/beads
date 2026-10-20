@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/backend/conformance"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // TestDeleterContract runs the Deleter contract against the unit-of-work

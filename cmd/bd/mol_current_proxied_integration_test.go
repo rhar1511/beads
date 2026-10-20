@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/formula"
+	"github.com/rhar1511/beads/internal/formula"
 )
 
 func TestProxiedServerMolCurrent(t *testing.T) {

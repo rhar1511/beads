@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // TestPlanVersionReconcile pins the whole decision table of

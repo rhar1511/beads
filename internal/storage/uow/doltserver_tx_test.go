@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

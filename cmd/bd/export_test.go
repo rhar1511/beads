@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/kvkeys"
-	"github.com/steveyegge/beads/internal/testutil"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/kvkeys"
+	"github.com/rhar1511/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func TestExportToFile(t *testing.T) {

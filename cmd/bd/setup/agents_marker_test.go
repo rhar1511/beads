@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/templates/agents"
+	"github.com/rhar1511/beads/internal/templates/agents"
 )
 
 func TestContainsBeadsMarkerLegacy(t *testing.T) {

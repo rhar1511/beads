@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 func NewEventsJournalSQLRepository(runner Runner) domain.EventsJournalSQLRepository {

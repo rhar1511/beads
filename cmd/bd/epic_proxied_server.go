@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/uow"
 )
 
 func runEpicStatusProxiedServer(ctx context.Context, eligibleOnly bool) error {

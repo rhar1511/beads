@@ -24,10 +24,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/sqlbuild"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // IterIssues returns issues matching the filter from the `issues` table.

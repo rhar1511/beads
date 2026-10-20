@@ -6,8 +6,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/debug"
-	"github.com/steveyegge/beads/internal/storage/dberrors"
+	"github.com/rhar1511/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/storage/dberrors"
 )
 
 // The ignored-lane migration cursor is dolt_ignore'd on every database this

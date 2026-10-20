@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/configfile"
 )
 
 // ConfigValues fixes invalid configuration values in metadata.json.

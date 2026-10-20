@@ -4,12 +4,12 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/hooks"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/externaldeps"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/internal/telemetry"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/hooks"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/externaldeps"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/telemetry"
 )
 
 // wireStorageDecorators composes the storage chain in the order the rest of

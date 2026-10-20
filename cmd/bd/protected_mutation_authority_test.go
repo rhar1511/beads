@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/protectedmutation"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/protectedmutation"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 type testProtectedMutationReadinessSource struct {

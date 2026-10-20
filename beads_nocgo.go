@@ -6,9 +6,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/backends"
-	"github.com/steveyegge/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/backends"
+	"github.com/rhar1511/beads/internal/storage/dolt"
 )
 
 // OpenBestAvailable opens a beads database using the best available backend

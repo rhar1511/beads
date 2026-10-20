@@ -5,8 +5,8 @@ package main
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestSyncIsScoped covers the gate that decides whether to skip the

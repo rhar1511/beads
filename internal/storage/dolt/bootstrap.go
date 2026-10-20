@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/githooksenv"
-	"github.com/steveyegge/beads/internal/gittraceenv"
-	"github.com/steveyegge/beads/internal/lockfile"
-	"github.com/steveyegge/beads/internal/remotecache"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/githooksenv"
+	"github.com/rhar1511/beads/internal/gittraceenv"
+	"github.com/rhar1511/beads/internal/lockfile"
+	"github.com/rhar1511/beads/internal/remotecache"
 )
 
 // staleLockAge is the maximum age of a lock file before it's considered stale.

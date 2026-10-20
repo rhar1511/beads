@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // fakeDoltStore is a stub DoltStorage used to assert wrapper identity and

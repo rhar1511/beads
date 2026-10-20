@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // teamStatesResp builds the JSON body for a TeamStates GraphQL response.

@@ -12,11 +12,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // These tests cover the OTHER database source: a backend whose facade is a

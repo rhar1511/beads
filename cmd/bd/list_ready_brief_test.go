@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
 )
 
 // newListFlagsCommand clones listCmd's flag definitions onto a fresh command,

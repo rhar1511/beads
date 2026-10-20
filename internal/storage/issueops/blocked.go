@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/sqlbuild"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 type blockingDepRecord struct {

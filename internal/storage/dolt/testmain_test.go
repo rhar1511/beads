@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/doltserver"
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 // testServerPort is the port of the shared test Dolt server (0 = not running).

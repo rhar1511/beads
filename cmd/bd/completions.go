@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/types"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/types"
 )
 
 // issueIDCompletion provides shell completion for issue IDs by querying the storage

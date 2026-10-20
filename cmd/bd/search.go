@@ -5,13 +5,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/utils"
+	"github.com/rhar1511/beads/internal/validation"
+	"github.com/rhar1511/beads/internal/workapi"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/utils"
-	"github.com/steveyegge/beads/internal/validation"
-	"github.com/steveyegge/beads/internal/workapi"
 )
 
 var searchCmd = &cobra.Command{

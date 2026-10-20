@@ -14,9 +14,9 @@ import (
 
 	"github.com/dolthub/dolt/go/libraries/doltcore/servercfg"
 
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/githooksenv"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/githooksenv"
 )
 
 // The sql-server outlives the shell that started it: an inherited GIT_TRACE=1

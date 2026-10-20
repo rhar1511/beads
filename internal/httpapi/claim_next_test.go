@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // These are pure: the claimNext path runs end to end over a real listener

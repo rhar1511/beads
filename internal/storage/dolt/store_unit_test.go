@@ -9,9 +9,9 @@ import (
 	"time"
 
 	mysql "github.com/go-sql-driver/mysql"
-	"github.com/steveyegge/beads/internal/doltserver"
-	"github.com/steveyegge/beads/internal/storage/doltutil"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/storage/doltutil"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // newTestDoltDB creates a temporary database on the test Dolt server.

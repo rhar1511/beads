@@ -13,7 +13,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/styles"
 	xansi "github.com/charmbracelet/x/ansi"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/ui"
 	"golang.org/x/term"
 )
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // The public facade reaches the same coordination-critical writes the store's

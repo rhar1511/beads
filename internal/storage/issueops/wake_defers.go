@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/dberrors"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/dberrors"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // DeferWakeActor is the actor recorded on the status_changed event when the

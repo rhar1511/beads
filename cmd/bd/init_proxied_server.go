@@ -11,16 +11,16 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/fs"
-	"github.com/steveyegge/beads/internal/storage/git"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/internal/workapi"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/fs"
+	"github.com/rhar1511/beads/internal/storage/git"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/workapi"
+	"github.com/rhar1511/beads/issueops"
 )
 
 type initProxiedServerInput struct {

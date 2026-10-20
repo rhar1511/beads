@@ -11,15 +11,15 @@ import (
 	"sort"
 	"time"
 
+	"github.com/rhar1511/beads/internal/atomicfile"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/atomicfile"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/debug"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
 )
 
 // Exit codes for `bd sync`, chosen so a sync timer can branch on the outcome

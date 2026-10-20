@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
-	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/types"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // embeddedIssueParentIDs joins a result issue's parent edges. It lives beside

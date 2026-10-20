@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/storage/dolt"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // integrationTestHelper provides common test setup and assertion methods

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // proxiedSweeper hands back the guarded bulk-clearance surface for the

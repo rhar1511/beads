@@ -1,9 +1,9 @@
 package dolt
 
 import (
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/workapi/storereadycounter"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/workapi/storereadycounter"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // ReadyCounter returns the guarded ready-count surface for this store.

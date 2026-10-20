@@ -5,13 +5,13 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/internal/validation"
-	"github.com/steveyegge/beads/internal/workapi"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/validation"
+	"github.com/rhar1511/beads/internal/workapi"
+	"github.com/rhar1511/beads/issueops"
 )
 
 func proxiedMutateIssue(ctx context.Context, id, commitMsg string, mutate func(ctx context.Context, uw uow.UnitOfWork, issue *types.Issue, isWisp bool) error) (*types.Issue, error) {

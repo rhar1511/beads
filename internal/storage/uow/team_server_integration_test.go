@@ -11,9 +11,9 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/proxy"
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/proxy"
+	"github.com/rhar1511/beads/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

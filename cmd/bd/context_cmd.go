@@ -3,12 +3,12 @@ package main
 import (
 	"fmt"
 
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage/domain"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/doltserver"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage/domain"
 )
 
 // ContextInfo contains the effective backend identity and repository context.

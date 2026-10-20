@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // Pollution detection utilities used by doctor_pollution.go, create.go, and export.go.

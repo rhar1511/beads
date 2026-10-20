@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 type listFilterGoldenCase struct {

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver for direct DB connections
-	"github.com/steveyegge/beads/internal/storage/doltutil"
+	"github.com/rhar1511/beads/internal/storage/doltutil"
 )
 
 // branchPrefix is the prefix for all test branches, used for cleanup.

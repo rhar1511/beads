@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/configfile"
 )
 
 // This is the executable/store seam the source-Cobra declaration test cannot

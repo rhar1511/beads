@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rhar1511/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/routing"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/doltserver"
-	"github.com/steveyegge/beads/internal/routing"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/dolt"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
 )
 
 // openMigrationPlanningStore opens the personal planning workspace's store for

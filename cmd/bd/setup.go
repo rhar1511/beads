@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rhar1511/beads/cmd/bd/setup"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/recipes"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/cmd/bd/setup"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/recipes"
 )
 
 var (

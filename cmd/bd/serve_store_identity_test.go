@@ -14,13 +14,13 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/backends"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/backends"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // TestServeAnswersFromTheStoreTheRootCommandOpened pins the one property this

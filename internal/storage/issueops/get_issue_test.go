@@ -11,8 +11,8 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	mysql "github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/sqlbuild"
 )
 
 // missingTableError builds the driver error a Dolt query returns when its FROM

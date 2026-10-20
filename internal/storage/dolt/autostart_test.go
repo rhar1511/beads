@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/doltserver"
 )
 
 func TestAutoStart_DisabledWithExternalMode(t *testing.T) {

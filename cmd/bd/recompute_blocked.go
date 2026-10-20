@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage"
 )
 
 var recomputeBlockedCmd = &cobra.Command{

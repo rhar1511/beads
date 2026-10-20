@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/httpapi/apigen"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/httpapi/apigen"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // The write side of the dependency graph: the wire adapters over

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/testutil"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestReconcileAutoExportJSONL_IgnoresCompactedWisp pins the actual GH#4988

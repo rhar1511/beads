@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/internal/utils"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/utils"
 )
 
 // depGlyph marks a dependency/relationship edge in the --deps tree view. It is

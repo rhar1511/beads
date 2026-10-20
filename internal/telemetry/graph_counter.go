@@ -3,7 +3,7 @@ package telemetry
 import (
 	"context"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // GraphCounter returns the inner store's edge-count surface wrapped in this

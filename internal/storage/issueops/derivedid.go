@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/rowid"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/rowid"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // This file is the insert-time half of the content-derived aux-row ids

@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // Snapshot is the normalized local state inspected by the shared suite.

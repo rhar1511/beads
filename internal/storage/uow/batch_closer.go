@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // BatchCloserSource is the capability accessor a unit-of-work provider offers

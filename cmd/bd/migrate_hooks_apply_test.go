@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/cmd/bd/doctor"
-	"github.com/steveyegge/beads/internal/git"
+	"github.com/rhar1511/beads/cmd/bd/doctor"
+	"github.com/rhar1511/beads/internal/git"
 )
 
 func TestApplyHookMigrationExecution_LegacyWithOldSidecar(t *testing.T) {

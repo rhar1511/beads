@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // MappingConfig defines fixed conversions between Notion sync payloads and beads core types.

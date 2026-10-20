@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-20
+
+### Owner-fork Go module
+
+- Declare `github.com/rhar1511/beads` and use that identity consistently in
+  Go imports, active package guards, generated OpenAPI bindings and examples.
+  Consumers must update their import paths; identical version numbers across
+  the upstream and fork modules do not establish compatibility.
+- Preserve the accepted fork's conditional writes, protected references,
+  guarded deletion previews and schema cursors 73/28. Relative to accepted
+  fork commit `a3ec8915b8c6d5927e610010140eb4a478976c77`, this packaging adds no
+  migration and changes none of the historical migration SQL bytes.
+- Scope this owner-fork release to its Go module and GitHub source/provenance.
+  Upstream npm, PyPI, Homebrew, installer and marketplace channels are not
+  published or redirected by this release. See
+  [the fork module release guide](engdocs/FORK_MODULE_RELEASE.md).
+
+
 ## [1.3.1] - 2026-09-30
 
 First stable release of the 1.3.1 patch line. It ships the same code as

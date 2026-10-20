@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/configfile"
 )
 
 func TestRunServerHealthChecksSQLiteIsNotAMigrationWarning(t *testing.T) {

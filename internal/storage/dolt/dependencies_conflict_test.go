@@ -3,7 +3,7 @@ package dolt
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/depid"
+	"github.com/rhar1511/beads/internal/storage/depid"
 )
 
 // setupDependencyMergeConflict seeds issues x and y on a shared ancestor, then

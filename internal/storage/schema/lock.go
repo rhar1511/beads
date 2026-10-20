@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/steveyegge/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/debug"
 )
 
 const (

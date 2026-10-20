@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	itracker "github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	itracker "github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 type fakeAPI struct {

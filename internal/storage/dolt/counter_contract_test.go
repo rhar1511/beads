@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/rhar1511/beads/backend/conformance"
 )
 
 // TestCounterContract runs the Counter contract against the server-backed

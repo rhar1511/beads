@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 // DirtyTableTracker records which tables were modified during a transaction.

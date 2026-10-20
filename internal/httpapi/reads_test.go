@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
 )
 
 // recordingIssues captures the filter the reader built, which is the only way

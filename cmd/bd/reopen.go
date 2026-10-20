@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/issueops"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/issueops"
 )
 
 var reopenCmd = &cobra.Command{

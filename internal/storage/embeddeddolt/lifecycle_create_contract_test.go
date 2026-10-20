@@ -5,7 +5,7 @@ package embeddeddolt_test
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/rhar1511/beads/backend/conformance"
 )
 
 // TestLifecycleCreateContract runs the accessor-only Create half of the

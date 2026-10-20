@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/doltserver"
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 // CGO_ENABLED=0 doctor tests compile this TestMain instead of the cgo e2e

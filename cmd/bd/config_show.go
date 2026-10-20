@@ -7,12 +7,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/workapi"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/workapi"
 )
 
 // configEntry represents a single configuration key with its effective value and source.

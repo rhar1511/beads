@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // runHook executes the hook and enforces a timeout on Windows.
@@ -26,7 +26,7 @@ func (r *Runner) runHook(hookPath, event string, issue *types.Issue) (retErr err
 
 	// Hooks are fire-and-forget so they have no parent span; we create a root span
 	// to track execution time and errors for observability.
-	tracer := otel.Tracer("github.com/steveyegge/beads/hooks")
+	tracer := otel.Tracer("github.com/rhar1511/beads/hooks")
 	ctx, span := tracer.Start(ctx, "hook.exec",
 		trace.WithAttributes(
 			attribute.String("hook.event", event),

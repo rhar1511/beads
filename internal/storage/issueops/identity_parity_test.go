@@ -3,7 +3,7 @@ package issueops
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/internal/validation"
+	"github.com/rhar1511/beads/internal/validation"
 )
 
 // TestIdentityCanonicalizationParityWithValidation guards the two

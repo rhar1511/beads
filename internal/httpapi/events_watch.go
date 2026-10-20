@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/steveyegge/beads/internal/eventsjournal"
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/eventsjournal"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // The events journal, PUSHED. GET /v0/beads/events:watch is the poll read's

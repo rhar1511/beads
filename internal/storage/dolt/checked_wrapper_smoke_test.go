@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // The residue of close_issue_checked_test.go's and update_issue_checked_test.go's

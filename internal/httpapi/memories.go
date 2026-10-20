@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/httpapi/apigen"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/httpapi/apigen"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // The memory operations. Each one decodes its parameters, hands the whole

@@ -9,8 +9,8 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	mysql "github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // scopeAndRecordDependent scopes both of tx's SQL transactions for the

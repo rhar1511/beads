@@ -4,9 +4,9 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/steveyegge/beads/internal/storage"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // SourceSnapshotReader returns the atomic durable source read for this store.

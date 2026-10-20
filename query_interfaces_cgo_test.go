@@ -3,8 +3,8 @@
 package beads_test
 
 import (
-	"github.com/steveyegge/beads"
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
 )
 
 // Compile-time proof that the embedded Dolt store also satisfies each narrow

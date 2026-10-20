@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/git"
+	"github.com/rhar1511/beads/internal/git"
 )
 
 // setupGuardTestRepo creates a git repo with one tracked script and chdirs

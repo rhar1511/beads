@@ -1,9 +1,9 @@
 package dolt
 
 import (
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/workapi/storecounter"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/workapi/storecounter"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // Counter returns the guarded issue-count surface for this store.

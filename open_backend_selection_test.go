@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/backends"
+	"github.com/rhar1511/beads"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/backends"
 )
 
 var errRegistryBackendOpen = errors.New("registry backend open sentinel")

@@ -16,11 +16,19 @@ while IFS= read -r hit; do
     rest="${hit#*:}"
     line_no="${rest%%:*}"
 
+    # Historical evidence and the upstream artifact channel keep their origins.
+    # The supported-CGO-mode scan below still checks upstream installers.
+    case "$file" in
+        CHANGELOG.md|docs/GETTING_STARTED_ANALYSIS.md|scripts/install.sh|install.ps1|npm-package/CLAUDE_CODE_WEB.md)
+            continue
+            ;;
+    esac
+
     printf 'error: %s:%s: unsupported go install module path\n' "$file" "$line_no" >&2
-    printf '       use github.com/steveyegge/beads/cmd/bd because go.mod still declares that module path\n' >&2
+    printf '       use github.com/rhar1511/beads/cmd/bd because go.mod declares that module path\n' >&2
     fail=1
 done < <(
-    git grep -n -E 'go install github\.com/gastownhall/beads/cmd/bd@latest' -- . || true
+    git grep -n -E 'go install github\.com/(steveyegge|gastownhall)/beads/cmd/bd@latest' -- . || true
 )
 
 while IFS= read -r hit; do
@@ -43,7 +51,7 @@ while IFS= read -r hit; do
     printf '       use CGO_ENABLED=0 for server mode or GOFLAGS=-tags=gms_pure_go for embedded mode\n' >&2
     fail=1
 done < <(
-    git grep -n -E 'go install github\.com/(steveyegge|gastownhall)/beads/cmd/bd@latest' -- . || true
+    git grep -n -E 'go install github\.com/(rhar1511|steveyegge|gastownhall)/beads/cmd/bd@latest' -- . || true
 )
 
 exit "$fail"

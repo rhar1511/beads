@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/validation"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/validation"
 )
 
 // LintResult holds the validation result for a single issue.

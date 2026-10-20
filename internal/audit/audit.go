@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
 )
 
 const (

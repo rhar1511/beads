@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/procid"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/pidfile"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/proxy"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/server"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/util"
+	"github.com/rhar1511/beads/internal/procid"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/pidfile"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/proxy"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/server"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/util"
 )
 
 const managedLocalIdentityIdleTimeout = 5 * time.Minute

@@ -13,8 +13,8 @@ import (
 
 	mysql "github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/storage"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 // Regression test for the server-mode lost-update bug

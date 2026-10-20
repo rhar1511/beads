@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // TestAutoPruneProxiedServer is the auto-prune guard for bd's SECOND write

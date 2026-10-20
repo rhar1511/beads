@@ -1,6 +1,6 @@
 package domain
 
-import "github.com/steveyegge/beads/internal/types"
+import "github.com/rhar1511/beads/internal/types"
 
 var defaultInfraTypes = []string{"agent", "role", "message"}
 

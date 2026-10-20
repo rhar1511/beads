@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // SweepInTx is the store-backed body behind issueops.Sweeper: the whole of

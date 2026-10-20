@@ -3,9 +3,9 @@ package db
 import (
 	"database/sql"
 
-	"github.com/steveyegge/beads/internal/storage/depid"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/depid"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func (s *testSuite) TestDependencySQLRepository() {

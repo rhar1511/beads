@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/eventsjournal"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/eventsjournal"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // pinnedSchemas are the schemas welded to canonical Go structs with x-go-type.
@@ -53,12 +53,12 @@ var pinnedSchemas = []struct {
 }
 
 const (
-	canonicalTypesImport = "github.com/steveyegge/beads/internal/types"
-	canonicalRolesImport = "github.com/steveyegge/beads/issueops"
+	canonicalTypesImport = "github.com/rhar1511/beads/internal/types"
+	canonicalRolesImport = "github.com/rhar1511/beads/issueops"
 	// The journal record lives in neither: it is the leaf package that owns the
 	// journal's cross-binary concerns, and its Record is what `bd events tail`
 	// marshals.
-	canonicalJournalImport = "github.com/steveyegge/beads/internal/eventsjournal"
+	canonicalJournalImport = "github.com/rhar1511/beads/internal/eventsjournal"
 )
 
 // omittedProperties lists JSON field names a pinned schema deliberately does

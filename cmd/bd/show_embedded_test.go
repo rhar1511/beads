@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // bdShowRaw runs "bd show" with the given args and returns raw stdout.

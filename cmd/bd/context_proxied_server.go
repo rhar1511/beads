@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/steveyegge/beads/internal/storage/contextinfo"
-	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/contextinfo"
+	"github.com/rhar1511/beads/internal/storage/domain"
 )
 
 func runContextProxiedServer(cmd *cobra.Command, ctx context.Context) error {

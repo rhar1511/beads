@@ -14,7 +14,7 @@ import (
 var blockedRecheckDropped metric.Int64Counter
 
 func init() {
-	blockedRecheckDropped, _ = otel.Meter("github.com/steveyegge/beads/storage/dolt").Int64Counter("bd.db.blocked_recheck_dropped",
+	blockedRecheckDropped, _ = otel.Meter("github.com/rhar1511/beads/storage/dolt").Int64Counter("bd.db.blocked_recheck_dropped",
 		metric.WithDescription("Post-commit blocked-state rechecks abandoned; the write landed but dependents may carry a stale is_blocked flag until `bd recompute-blocked`"),
 		metric.WithUnit("{recheck}"),
 	)

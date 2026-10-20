@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/utils"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/utils"
 )
 
 // openReadOnlyStoreForDBPath reopens a read-only store from an existing dbPath

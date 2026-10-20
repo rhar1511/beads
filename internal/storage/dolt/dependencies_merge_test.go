@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/depid"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/depid"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestAddDependencyUsesDeterministicID proves the production insert path derives

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
 )
 
 func runCompactProxiedServer(ctx context.Context) error {

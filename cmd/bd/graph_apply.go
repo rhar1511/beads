@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/validation"
-	"github.com/steveyegge/beads/internal/workapi"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/validation"
+	"github.com/rhar1511/beads/internal/workapi"
 )
 
 // GraphApplyPlan describes a symbolic bead graph to create atomically.

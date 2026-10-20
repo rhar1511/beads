@@ -31,8 +31,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func readIsBlockedFlags(t *testing.T, ctx context.Context, store *DoltStore, table string) map[string]bool {

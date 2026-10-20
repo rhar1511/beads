@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/uow"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/uow"
 )
 
 // fakeMaintenanceProvider is a proxied provider stand-in exposing the

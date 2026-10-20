@@ -1,0 +1,315 @@
+name: Fork module qualification
+
+on:
+  pull_request:
+    branches: [main, 'release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  BD_DISABLE_METRICS: "1"
+  BD_DISABLE_EVENT_FLUSH: "1"
+  QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  release-targets:
+    if: github.repository == 'rhar1511/beads'
+    name: Compile ${{ matrix.target }} (CGO=${{ matrix.cgo }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            cgo: '1'
+            cc: gcc
+            cxx: g++
+          - target: linux-arm64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            cgo: '1'
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
+            packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          - target: android-arm64
+            runner: ubuntu-latest
+            goos: android
+            goarch: arm64
+            cgo: '0'
+            cc: gcc
+            cxx: g++
+          - target: windows-amd64
+            runner: ubuntu-latest
+            goos: windows
+            goarch: amd64
+            cgo: '1'
+            cc: x86_64-w64-mingw32-gcc
+            cxx: x86_64-w64-mingw32-g++
+            packages: gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+          - target: windows-arm64
+            runner: ubuntu-latest
+            goos: windows
+            goarch: arm64
+            cgo: '0'
+            cc: gcc
+            cxx: g++
+          - target: freebsd-amd64
+            runner: ubuntu-latest
+            goos: freebsd
+            goarch: amd64
+            cgo: '0'
+            cc: gcc
+            cxx: g++
+          # Match the existing release.yml native macOS build toolchains.
+          - target: darwin-arm64
+            runner: macos-latest
+            goos: darwin
+            goarch: arm64
+            cgo: '1'
+            cc: clang
+            cxx: clang++
+          - target: darwin-amd64
+            runner: macos-latest
+            goos: darwin
+            goarch: amd64
+            cgo: '1'
+            cc: clang -arch x86_64
+            cxx: clang++ -arch x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.QUALIFICATION_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install target compiler on disposable runner
+        if: matrix.packages != ''
+        env:
+          TARGET_PACKAGES: ${{ matrix.packages }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          read -r -a packages <<< "$TARGET_PACKAGES"
+          sudo apt-get install -y "${packages[@]}"
+      - name: Generate Windows release resource inputs
+        if: matrix.goos == 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolbin="$RUNNER_TEMP/fork-module-tools"
+          mkdir -p "$toolbin" "$RUNNER_TEMP/fork-module-build"
+          GOBIN="$toolbin" go install -tags=gms_pure_go github.com/tc-hib/go-winres@v0.3.3
+          export PATH="$toolbin:$PATH"
+          go version -m "$toolbin/go-winres" > "$RUNNER_TEMP/fork-module-build/resource-tool-build-info.txt"
+          ./scripts/gen-winres.sh
+      - name: Build and bind exact source and target
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          QUALIFICATION_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(go list -m)" = github.com/rhar1511/beads
+          output="$RUNNER_TEMP/fork-module-build"
+          mkdir -p "$output"
+          binary="$output/bd-$QUALIFICATION_TARGET"
+          tags=gms_pure_go
+          if [ "$GOOS" = darwin ]; then tags="$tags netgo"; fi
+          go build -tags "$tags" \
+            -ldflags "-s -w -X main.Build=$QUALIFICATION_SHA -X main.Commit=$QUALIFICATION_SHA" \
+            -o "$binary" ./cmd/bd
+          go version -m "$binary" | tee "$output/build-info.txt"
+          if [ "$GOOS" = windows ]; then
+            test -s "cmd/bd/rsrc_windows_$GOARCH.syso"
+          fi
+          if [ "$CGO_ENABLED" = 1 ]; then ./scripts/verify-cgo.sh "$binary"; fi
+          if [ "$GOOS" = darwin ] && otool -L "$binary" | grep -qi icu; then
+            echo 'Unexpected ICU runtime dependency' >&2
+            exit 1
+          fi
+          python3 - "$binary" "$output" <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          binary, output = map(pathlib.Path, __import__('sys').argv[1:])
+          fields = [line.split() for line in (output / 'build-info.txt').read_text().splitlines()]
+          assert ['path', 'github.com/rhar1511/beads/cmd/bd'] in fields
+          assert any(line[:3] == ['mod', 'github.com/rhar1511/beads', '(devel)'] for line in fields)
+          settings = dict(line[1].split('=', 1) for line in fields if len(line) == 2 and line[0] == 'build')
+          for key in ('GOOS', 'GOARCH', 'CGO_ENABLED'):
+              assert settings[key] == os.environ[key], (key, settings)
+          assert settings['vcs.revision'] == os.environ['QUALIFICATION_SHA']
+          assert settings['vcs.modified'] == 'false'
+          manifest = dict(source_commit=os.environ['QUALIFICATION_SHA'],
+                          source_tree=subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+                          module='github.com/rhar1511/beads', target=os.environ['QUALIFICATION_TARGET'],
+                          go_version=subprocess.check_output(['go', 'version'], text=True).strip(),
+                          build_settings=settings, binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+                          windows_resource_inputs={str(path): hashlib.sha256(path.read_bytes()).hexdigest()
+                              for path in pathlib.Path('cmd/bd').glob('rsrc_windows_*.syso')},
+                          qualification_only=True, native_target_execution=False, release_publication=False)
+          (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+          test -z "$(git status --porcelain)"
+      - name: Retain qualification artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fork-module-build-${{ matrix.target }}
+          path: ${{ runner.temp }}/fork-module-build/
+          retention-days: 7
+          if-no-files-found: error
+
+  normal-baseline:
+    if: github.repository == 'rhar1511/beads'
+    name: Normal Go baseline with real Dolt fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.QUALIFICATION_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Verify exact source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_SHA"
+          test "$(go list -m)" = github.com/rhar1511/beads
+      - name: Install pinned Dolt
+        run: ./scripts/ci/install-dolt.sh
+      - name: Pull pinned SQL fixture image
+        run: ./scripts/ci/pull-dolt-image.sh
+      - name: Run normal baseline with actual fixtures
+        env:
+          BEADS_TEST_ENV_RUN_DOLT: '1'
+          TEST_VERBOSE: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/fork-module-baseline"
+          mkdir -p "$output"
+          make test 2>&1 | tee "$output/baseline.log"
+          python3 - "$output" <<'PY_AUDIT'
+          import json, pathlib, re, sys
+          output = pathlib.Path(sys.argv[1])
+          text = (output / 'baseline.log').read_text()
+          root = 'TestDoltAutocommitRollbackContentionConverges'
+          assert re.search(r'^=== RUN   ' + root + r'$', text, re.M)
+          assert re.search(r'^--- PASS: ' + root + r' \([^\n]+\)$', text, re.M)
+          assert re.search(r'^ok\s+github\.com/rhar1511/beads/internal/storage/dolt\s', text, re.M)
+          assert not re.search(r'^--- FAIL:|^FAIL(?:\s|$)', text, re.M)
+          (output / 'baseline-proof.json').write_text(json.dumps(dict(
+              required_real_dolt_root=root, root_passed=True, normal_make_test_exit=0,
+              per_package_timeout='normal unchanged 25m',
+              all_leaf_skips_enumerated=False), indent=2) + '\n')
+          PY_AUDIT
+      - name: Retain exact baseline evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fork-module-normal-baseline
+          path: ${{ runner.temp }}/fork-module-baseline/
+          retention-days: 7
+          if-no-files-found: error
+
+  release-smoke:
+    if: github.repository == 'rhar1511/beads'
+    name: Upgrade and differential regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ env.QUALIFICATION_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Verify exact candidate and configure disposable identities
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$QUALIFICATION_SHA"
+          test "$(go list -m)" = github.com/rhar1511/beads
+          git config --global user.name 'CI Bot'
+          git config --global user.email 'ci@beads.test'
+      - name: Install pinned Dolt
+        run: ./scripts/ci/install-dolt.sh
+      - name: Pull pinned SQL fixture image
+        run: ./scripts/ci/pull-dolt-image.sh
+      - name: Upgrade smoke from previous upstream release
+        # Select the prior release explicitly; the candidate tag does not exist yet.
+        run: |
+          set -euo pipefail
+          source ./.buildflags
+          make build
+          output="$RUNNER_TEMP/fork-module-smoke"
+          mkdir -p "$output"
+          CANDIDATE_BIN=./bd ./scripts/upgrade-smoke-test.sh v1.3.1 2>&1 | tee "$output/upgrade.log"
+          python3 - "$output" <<'PY_AUDIT'
+          import json, pathlib, re, sys
+          output = pathlib.Path(sys.argv[1])
+          text = re.sub(r'\x1b\[[0-9;]*m', '', (output / 'upgrade.log').read_text())
+          required = ['Pre-upgrade issues visible after upgrade',
+                      'bd update ran without fatal error',
+                      'Updated notes persisted and visible after mutation']
+          assert all(line in text for line in required), 'Required upgrade assertions were not exercised'
+          assert 'Data migration check skipped' not in text and 'Mutation test skipped' not in text
+          assert re.search(r'All [1-9][0-9]* scenarios passed', text), 'Missing terminal upgrade result'
+          (output / 'upgrade-proof.json').write_text(json.dumps(dict(
+              required_assertions=required,
+              retained_skip_lines=[line for line in text.splitlines() if 'skipped' in line.lower()],
+              all_paths_skip_free=False), indent=2) + '\n')
+          PY_AUDIT
+      - name: Differential regression gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/fork-module-smoke"
+          mkdir -p "$output"
+          make test-regression 2>&1 | tee "$output/regression.log"
+          python3 - "$output" <<'PY_AUDIT'
+          import json, pathlib, re, sys
+          output = pathlib.Path(sys.argv[1])
+          text = (output / 'regression.log').read_text()
+          assert re.search(r'^Test Dolt server running on port [1-9][0-9]*$', text, re.M), 'Docker fixture not proven'
+          assert not re.search(r'^WARN: .*skipping Dolt tests', text, re.M)
+          runs = set(re.findall(r'^=== RUN   (Test[^/\s]+)$', text, re.M))
+          terminal = {name: state for state, name in re.findall(
+              r'^--- (PASS|SKIP|FAIL): (Test[^/\s]+) \([^\n]+\)$', text, re.M)}
+          required = {'TestBasicLifecycle', 'TestLabelsRoundTrip', 'TestDependenciesRoundTrip'}
+          assert runs and runs == set(terminal), 'Unaccounted or absent regression roots'
+          assert required <= runs and all(terminal[name] == 'PASS' for name in required)
+          assert 'FAIL' not in terminal.values()
+          assert re.search(r'^ok\s+github\.com/rhar1511/beads/tests/regression\s', text, re.M)
+          (output / 'regression-proof.json').write_text(json.dumps(dict(
+              docker_fixture_started=True, required_executed_roots=sorted(required),
+              root_results=terminal, retained_skip_roots=sorted(name for name, state in terminal.items() if state == 'SKIP'),
+              all_roots_skip_free=False), indent=2) + '\n')
+          PY_AUDIT
+      - name: Retain exact release-smoke evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fork-module-release-smoke
+          path: ${{ runner.temp }}/fork-module-smoke/
+          retention-days: 7
+          if-no-files-found: error

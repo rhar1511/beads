@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 func runPingProxiedServer(ctx context.Context) error {

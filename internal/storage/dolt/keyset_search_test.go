@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/sqlbuild"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // The observable keyset behavior this file used to assert now belongs to the

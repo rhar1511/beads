@@ -3,8 +3,8 @@ package main
 import (
 	"os"
 
+	"github.com/rhar1511/beads/internal/metrics"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
 )
 
 var sendMetricsCmd = &cobra.Command{

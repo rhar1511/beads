@@ -5,7 +5,7 @@ package embeddeddolt_test
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/rhar1511/beads/backend/conformance"
 )
 
 // TestMetadataCASContract runs the MetadataCAS contract against the embedded

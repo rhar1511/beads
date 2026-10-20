@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // TestEventsTailReportsTruncationToTheCLI is the end-to-end guard for the

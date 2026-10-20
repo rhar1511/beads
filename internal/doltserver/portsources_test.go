@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/config"
+	"github.com/rhar1511/beads/internal/config"
 )
 
 // Asserts the precedence chain against DefaultConfig itself by layering each

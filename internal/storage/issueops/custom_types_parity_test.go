@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/config"
+	"github.com/rhar1511/beads/internal/config"
 )
 
 // withYAMLCustomTypes points the process config at a throwaway

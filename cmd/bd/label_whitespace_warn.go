@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/steveyegge/beads/internal/debug"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 // warnLabelsContainingWhitespace warns when a label being written contains a

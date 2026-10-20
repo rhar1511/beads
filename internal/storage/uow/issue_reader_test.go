@@ -5,11 +5,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi/storereader"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi/storereader"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // The Reader role has two implementations — one over a store handle, one over a

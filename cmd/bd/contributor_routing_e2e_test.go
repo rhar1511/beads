@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/routing"
-	"github.com/steveyegge/beads/internal/storage/dolt"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/routing"
+	"github.com/rhar1511/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestContributorRoutingTracer is the Phase 1 tracer bullet test.

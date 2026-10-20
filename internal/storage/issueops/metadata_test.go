@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // expectNonWisp makes IsActiveWispInTx report "not a wisp" (empty result set).

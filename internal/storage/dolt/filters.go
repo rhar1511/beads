@@ -1,8 +1,8 @@
 package dolt
 
 import (
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // filterTables is a package-local alias for issueops.FilterTables.

@@ -3,9 +3,9 @@
 package embeddeddolt
 
 import (
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/workapi/storestats"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/workapi/storestats"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // StatsReporter returns the guarded summary-statistics surface for this store.

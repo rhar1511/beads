@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // setLegacyBackend rewrites metadata.json's "backend" field the way a stale

@@ -25,14 +25,14 @@ import (
 
 	"golang.org/x/net/netutil"
 
-	"github.com/steveyegge/beads/internal/httpapi/apigen"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/schema"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/issueops"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/httpapi/apigen"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/issueops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // APIVersion is the path major this package serves, reported as

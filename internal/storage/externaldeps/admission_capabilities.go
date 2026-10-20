@@ -3,11 +3,11 @@ package externaldeps
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/schema"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // Admission capabilities are additive to the ordinary storage interfaces.

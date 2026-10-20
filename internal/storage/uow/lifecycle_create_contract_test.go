@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestLifecycleCreateContract runs the accessor-only Create half of the

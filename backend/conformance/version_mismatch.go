@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	publicops "github.com/steveyegge/beads/issueops"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // Check the public error alongside each existing stale-write/no-mutation case.

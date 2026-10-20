@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/debug"
 )
 
 // expectConvergedFastPathMiss walks the REAL pre-lock probe on the shape the

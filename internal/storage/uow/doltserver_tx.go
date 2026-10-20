@@ -6,8 +6,8 @@ import (
 	"database/sql/driver"
 	"errors"
 
-	"github.com/steveyegge/beads/internal/storage/domain/db"
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/domain/db"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 type doltServerTx struct {

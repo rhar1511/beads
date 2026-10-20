@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/steveyegge/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/doltserver"
 )
 
 // DoltFormat fixes the "Dolt Format" warning by seeding the .bd-dolt-ok marker

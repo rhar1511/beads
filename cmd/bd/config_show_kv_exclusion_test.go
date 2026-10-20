@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/kvkeys"
+	"github.com/rhar1511/beads/internal/storage/kvkeys"
 )
 
 // TestConfigShowExcludesTheKVPlane pins that `bd config show` does not print

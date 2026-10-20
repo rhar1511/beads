@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // CounterSource is the capability accessor a unit-of-work provider offers for

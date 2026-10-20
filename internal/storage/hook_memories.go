@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // Memories returns the inner store's persistent-memory surface.

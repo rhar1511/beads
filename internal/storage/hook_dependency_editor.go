@@ -3,7 +3,7 @@ package storage
 import (
 	"context"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // DependencyEditor returns the inner store's dependency-edge surface with this

@@ -7,10 +7,10 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage"
-	storeops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/workapi"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	storeops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/workapi"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // Deleter returns the named-row erasure surface for this store.

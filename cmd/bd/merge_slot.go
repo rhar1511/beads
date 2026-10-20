@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/ui"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/ui"
 )
 
 // mergeSlotCmd is the parent command for merge-slot operations

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/formula"
+	"github.com/rhar1511/beads/internal/formula"
 )
 
 func writeFormulaFixture(t *testing.T, p proxiedProject, f *formula.Formula) {

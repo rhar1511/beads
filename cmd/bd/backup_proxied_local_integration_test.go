@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/storage/dbproxy/proxy"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/server"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/proxy"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/server"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
 )
 
 // TestManagedLocalProxiedBackupRoundTrip is the claim slice S3 makes: a

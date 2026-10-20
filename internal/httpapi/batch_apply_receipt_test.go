@@ -8,8 +8,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
-	"github.com/steveyegge/beads/internal/storage/schema"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/issueops"
 )
 
 func TestBatchApplyReceiptReadinessGatesRequestAndCapability(t *testing.T) {

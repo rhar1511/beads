@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	lipgloss "charm.land/lipgloss/v2"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 // lipgloss styles for the thanks page using Ayu theme

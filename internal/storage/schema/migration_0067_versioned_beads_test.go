@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 // Phase 1 of the versioned-beads epic (be-hs42e / gastownhall/beads#6132,

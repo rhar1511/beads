@@ -546,7 +546,7 @@ The remedy is itself a store-opening command, so bd carves a path for it:
 for this gate reason and no other. That carve-out is CLI-only, and an embedder
 cannot replicate it in-process: both `embeddeddolt.OpenForRemoteSync` and the
 `dolt.Config.RemoteSyncOpen` field live under `internal/`, unimportable from
-outside `github.com/steveyegge/beads`, and none of the public open paths
+outside `github.com/rhar1511/beads`, and none of the public open paths
 (`OpenBestAvailable`, `Open`, `OpenFromConfig`, `OpenGated`) takes an option
 that could request the lenient open. The embedder's remedy is therefore
 out-of-process: run `bd dolt pull` (and, per the first observation below,

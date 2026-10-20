@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // BatchApplier returns the guarded apply-many surface for this store.

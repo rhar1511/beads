@@ -8,10 +8,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/steveyegge/beads/internal/storage/dbproxy/proxy"
-	"github.com/steveyegge/beads/internal/testutil"
-	"github.com/steveyegge/beads/internal/workapi"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/proxy"
+	"github.com/rhar1511/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/workapi"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func newTestUOWProvider(t *testing.T) UnitOfWorkProvider {

@@ -7,10 +7,10 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/domain"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 // The three request completions this backend has to honour, over a stub unit of

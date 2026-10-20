@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/steveyegge/beads/schema"
+	"github.com/rhar1511/beads/schema"
 )
 
 func TestLatestVersionIsPositive(t *testing.T) {

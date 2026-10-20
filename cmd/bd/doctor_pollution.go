@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/ui"
 )
 
 // runPollutionCheck runs detailed test pollution detection

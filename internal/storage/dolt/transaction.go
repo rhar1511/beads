@@ -12,12 +12,12 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
-	"github.com/steveyegge/beads/internal/storage/versioncontrolops"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/sqlbuild"
+	"github.com/rhar1511/beads/internal/storage/versioncontrolops"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // doltTransaction implements storage.Transaction for Dolt

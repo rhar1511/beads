@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/configfile"
 )
 
 // ServerMode describes who owns and manages the dolt sql-server lifecycle.

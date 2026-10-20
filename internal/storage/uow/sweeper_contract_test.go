@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // TestSweeperContract runs the Sweeper contract against the unit-of-work

@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/steveyegge/beads/internal/memoryapi"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/storage/kvkeys"
-	"github.com/steveyegge/beads/internal/storage/uow"
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/internal/memoryapi"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/storage/kvkeys"
+	"github.com/rhar1511/beads/internal/storage/uow"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // openMemories hands back the persistent-memory role for whichever route this

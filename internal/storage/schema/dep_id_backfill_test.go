@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/storage/depid"
+	"github.com/rhar1511/beads/internal/storage/depid"
 )
 
 // The re-key scan reads the typed target columns rather than COALESCEing them,

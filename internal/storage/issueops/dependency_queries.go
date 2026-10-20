@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // GetAllDependencyRecordsInTx returns all dependency records from permanent and

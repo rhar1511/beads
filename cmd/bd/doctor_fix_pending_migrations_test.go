@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/cmd/bd/doctor"
+	"github.com/rhar1511/beads/cmd/bd/doctor"
 )
 
 func TestFixPendingMigrations_AppliesHookMigration(t *testing.T) {

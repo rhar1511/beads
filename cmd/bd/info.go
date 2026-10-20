@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
 )
 
 var infoCmd = &cobra.Command{
@@ -220,6 +220,14 @@ type VersionChange struct {
 
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
+	{
+		Version: "1.3.2",
+		Date:    "2026-10-20",
+		Changes: []string{
+			"FORK MODULE: use github.com/rhar1511/beads and rebuild consumers with its import paths. The accepted fork schema remains 73/28; this packaging adds no migration or SQL changes.",
+			"DISTRIBUTION: this owner-fork release publishes its Go module and GitHub source/provenance only. Upstream npm, PyPI, Homebrew, installers and marketplaces remain separate channels.",
+		},
+	},
 	{
 		Version: "1.3.1",
 		Date:    "2026-09-30",

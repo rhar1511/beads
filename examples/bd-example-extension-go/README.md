@@ -61,21 +61,19 @@ GROUP BY i.id, e.id
 
 ### Prerequisites
 
-- Go 1.24 or later
+- Go matching the root `go.mod` requirement
 - bd initialized in a directory (run `bd init --prefix demo`)
 
 ### Install
 
 ```bash
-# Install from the repository
-go install github.com/steveyegge/beads/examples/bd-example-extension-go@latest
-
-# Or install from local source
+# From this repository's checkout root, install the local nested example.
+# Its existing go.mod replacement links the example to the root module.
 cd examples/bd-example-extension-go
-go install .
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install .
 ```
 
-The binary will be installed as `bd-example-extension-go` in your `$GOPATH/bin` (or `$GOBIN` if set).
+The root module release does not publish a version of this separate nested module. The binary will be installed as `bd-example-extension-go` in your `$GOPATH/bin` (or `$GOBIN` if set).
 
 ### Running
 

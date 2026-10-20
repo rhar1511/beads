@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // TestStatsReportsTheSkippedScanFromTheAnswer pins the one derivation this

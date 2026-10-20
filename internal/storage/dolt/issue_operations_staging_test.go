@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/types"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func TestIssueOperationsCreateIgnoresDerivedFieldsAndRejectsMalformedAggregate(t *testing.T) {

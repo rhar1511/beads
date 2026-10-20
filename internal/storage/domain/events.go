@@ -3,7 +3,7 @@ package domain
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 type Event struct {

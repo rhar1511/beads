@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/depid"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/storage/depid"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 func bdProxiedClaimCmd(bd, dir, actor string) *exec.Cmd {

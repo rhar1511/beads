@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/git"
+	"github.com/rhar1511/beads/internal/git"
 )
 
 func setupConfigWorktree(t *testing.T) (mainRepoDir, worktreeDir, mainConfigPath string) {

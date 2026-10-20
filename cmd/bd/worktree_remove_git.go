@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/steveyegge/beads/internal/ui"
-	"github.com/steveyegge/beads/internal/worktreeremove"
+	"github.com/rhar1511/beads/internal/ui"
+	"github.com/rhar1511/beads/internal/worktreeremove"
 )
 
 // gitWorktreeRemovalAdapter confines worktree-removal Git and filesystem

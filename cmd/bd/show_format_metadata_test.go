@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/uimd"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/uimd"
 )
 
 // closedWithReason builds a closed issue whose remaining metadata lines — the

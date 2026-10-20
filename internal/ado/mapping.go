@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/tracker"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/tracker"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // IssueToBeads converts an ADO WorkItem (via TrackerIssue) to a beads Issue.

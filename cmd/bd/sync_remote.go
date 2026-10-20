@@ -7,9 +7,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/doltremote"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/doltremote"
 )
 
 // resolveSyncRemote returns the effective sync remote URL.

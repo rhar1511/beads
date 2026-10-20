@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // The DATABASE-FREE half of issueops.MetadataCAS: what a compare-and-set

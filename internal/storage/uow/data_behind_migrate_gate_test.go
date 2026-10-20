@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // dataBehindCurrent is a schema cursor at or above the convergence floor

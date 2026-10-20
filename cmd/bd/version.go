@@ -9,14 +9,14 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/metrics"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/metrics"
 )
 
 var (
 	// Version is the current version of bd (overridden by ldflags at build time)
-	Version = "1.3.1"
+	Version = "1.3.2"
 	// Build can be set via ldflags at compile time
 	Build = "dev"
 	// Commit and branch the git revision the binary was built from (optional ldflag)

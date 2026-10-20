@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rhar1511/beads"
+	internalbeads "github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/metrics"
+	"github.com/rhar1511/beads/memoryops"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads"
-	internalbeads "github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/metrics"
-	"github.com/steveyegge/beads/memoryops"
 )
 
 var (

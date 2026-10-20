@@ -3,6 +3,11 @@ title: Installation
 description: Install the bd CLI, Claude Code plugin, and MCP server on macOS, Linux, Windows, and FreeBSD via Homebrew, npm, or go install
 ---
 
+## Fork and upstream channels
+
+The Go commands and source-build recipes on this page target this fork's module, `github.com/rhar1511/beads`. Homebrew, npm, PyPI, Mise and the `gastownhall/beads` installer scripts remain upstream channels; those commands do not install this fork. Use the owned Go module when installing or upgrading this fork. Existing upstream installer download/checksum and fallback paths are unchanged.
+
+
 Complete installation guide for all platforms.
 
 ## Components Overview
@@ -113,12 +118,12 @@ Use Homebrew, npm, or the install script if you do not specifically need `go ins
 
 `go install` has two supported modes that give different capabilities:
 
-- **Server-mode only (nocgo, simplest):** `CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest`. Works on any machine with a Go toolchain, no C compiler needed. Produces a server-mode-only binary — you must run an external `dolt sql-server` and use `bd init --server`. See [Dolt](/architecture/dolt) for server-mode setup.
-- **Embedded-capable (cgo):** `CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest`. Requires a C compiler (gcc/clang on Unix, MinGW on Windows). Produces a binary with the default embedded-Dolt backend — `bd init` Just Works.
+- **Server-mode only (nocgo, simplest):** `CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest`. Works on any machine with a Go toolchain, no C compiler needed. Produces a server-mode-only binary — you must run an external `dolt sql-server` and use `bd init --server`. See [Dolt](/architecture/dolt) for server-mode setup.
+- **Embedded-capable (cgo):** `CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest`. Requires a C compiler (gcc/clang on Unix, MinGW on Windows). Produces a binary with the default embedded-Dolt backend — `bd init` Just Works.
 
 ICU headers are not required. The embedded-capable command uses `gms_pure_go` so go-mysql-server uses Go's stdlib regexp instead of ICU.
 
-Use the `github.com/steveyegge/beads` path for `go install`. The repository now lives under `gastownhall/beads`, but released Go modules still declare `github.com/steveyegge/beads` for compatibility.
+This fork declares `github.com/rhar1511/beads`; use that exact module path for its released Go versions. Upstream `gastownhall/beads` installation channels remain separate.
 
 If you don't have a preference, `brew install beads` or the install script give you the embedded-capable build with no fuss.
 
@@ -166,17 +171,17 @@ brew install beads
 
 **Via go install** (server-mode only):
 ```bash
-CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 **Via go install** (embedded-capable, needs Xcode CLI tools):
 ```bash
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 **From source**:
 ```bash
-git clone https://github.com/gastownhall/beads
+git clone https://github.com/rhar1511/beads
 cd beads
 make build
 sudo mv bd /usr/local/bin/
@@ -201,12 +206,12 @@ Thanks to [@v4rgas](https://github.com/v4rgas) for maintaining the AUR package!
 
 **Via go install** (server-mode only):
 ```bash
-CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 **Via go install** (embedded-capable, needs gcc):
 ```bash
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 ### FreeBSD
@@ -218,7 +223,7 @@ curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/inst
 
 **Via go install** (server-mode only):
 ```bash
-CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 ### Windows 11
@@ -238,14 +243,14 @@ The script installs a prebuilt Windows release if available and verifies the dow
 
 **Via go install** (server-mode only):
 ```pwsh
-$env:CGO_ENABLED="0"; go install github.com/steveyegge/beads/cmd/bd@latest
+$env:CGO_ENABLED="0"; go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 This produces a server-mode-only binary with no C compiler requirement — the fastest path to a working `bd` on Windows.
 
 **Via go install** (embedded-capable, needs a Windows CGO toolchain):
 ```pwsh
-$env:CGO_ENABLED="1"; $env:GOFLAGS="-tags=gms_pure_go"; go install github.com/steveyegge/beads/cmd/bd@latest
+$env:CGO_ENABLED="1"; $env:GOFLAGS="-tags=gms_pure_go"; go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 Requires a GCC-compatible Windows CGO compiler on your PATH, such as
@@ -257,7 +262,7 @@ Go passes GCC-style CGO flags; use a MinGW/MSYS2 toolchain, set `CC`, or set
 
 **From source**:
 ```pwsh
-git clone https://github.com/gastownhall/beads
+git clone https://github.com/rhar1511/beads
 cd beads
 make build
 Move-Item bd.exe $env:USERPROFILE\AppData\Local\Microsoft\WindowsApps\
@@ -386,7 +391,7 @@ bd is not in your PATH:
 
 ```bash
 # Check if installed
-go list -f {{.Target}} github.com/steveyegge/beads/cmd/bd
+go list -f {{.Target}} github.com/rhar1511/beads/cmd/bd
 
 # Add Go bin to PATH (add to ~/.bashrc or ~/.zshrc)
 export PATH="$PATH:$(go env GOPATH)/bin"
@@ -401,7 +406,7 @@ This is typically caused by CGO/SQLite compatibility issues:
 
 ```bash
 # Install an embedded-capable build
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 If you installed via Homebrew, this shouldn't be necessary as the formula already enables CGO. If you're still seeing crashes with the Homebrew version, please [file an issue](https://github.com/gastownhall/beads/issues).
@@ -490,10 +495,10 @@ Use whichever mode you installed with originally:
 
 ```bash
 # Server-mode only
-CGO_ENABLED=0 go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=0 go install github.com/rhar1511/beads/cmd/bd@latest
 
 # Embedded-capable
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 ```
 
 ### From source

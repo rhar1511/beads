@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/git"
+	"github.com/rhar1511/beads/internal/git"
 )
 
 func TestGetVersionsSince(t *testing.T) {

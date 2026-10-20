@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/doltserver"
 )
 
 // These tests cover the auto-start port-provenance fail-closed behavior

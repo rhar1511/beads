@@ -16,10 +16,10 @@ import (
 	"time"
 
 	mysqldrv "github.com/go-sql-driver/mysql"
-	"github.com/steveyegge/beads/internal/lockfile"
-	"github.com/steveyegge/beads/internal/procid"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/pidfile"
-	"github.com/steveyegge/beads/internal/storage/dbproxy/server"
+	"github.com/rhar1511/beads/internal/lockfile"
+	"github.com/rhar1511/beads/internal/procid"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/pidfile"
+	"github.com/rhar1511/beads/internal/storage/dbproxy/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

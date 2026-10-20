@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // bdImport runs "bd import" with extra args. Returns combined output.

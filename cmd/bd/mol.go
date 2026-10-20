@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
+	"github.com/rhar1511/beads/internal/storage"
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/storage"
 )
 
 // Molecule commands - work templates for agent workflows

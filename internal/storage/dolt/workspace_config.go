@@ -1,9 +1,9 @@
 package dolt
 
 import (
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/workapi/storeworkspaceconfig"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/workapi/storeworkspaceconfig"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // WorkspaceConfig returns the guarded workspace-settings surface for this

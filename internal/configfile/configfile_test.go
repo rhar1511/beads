@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/config"
+	"github.com/rhar1511/beads/internal/config"
 )
 
 func TestDefaultConfig(t *testing.T) {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/issueops"
 )
 
 const patchReadyCapabilities = `{"api_version":"v0","project_id":"p-1","database":"beads-a","capabilities":["issues.protectedMutation","issues.transitionPatch","issues.transitionPatchReceipt.get"]}`

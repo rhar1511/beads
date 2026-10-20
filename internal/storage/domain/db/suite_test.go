@@ -9,10 +9,10 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/steveyegge/beads/internal/storage/doltutil"
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/schema"
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/storage/doltutil"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 type testSuite struct {

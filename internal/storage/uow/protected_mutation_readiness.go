@@ -3,8 +3,8 @@ package uow
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // ProtectedMutationReadinessSource reports whether this provider's selected

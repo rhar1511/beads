@@ -9,8 +9,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/go-sql-driver/mysql"
-	"github.com/steveyegge/beads/internal/storage"
-	publicops "github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	publicops "github.com/rhar1511/beads/issueops"
 )
 
 func TestRevisionTransitionReceiptInsertErrorClassification(t *testing.T) {

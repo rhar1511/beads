@@ -3,8 +3,8 @@ package dolt
 import (
 	"testing"
 
-	"github.com/steveyegge/beads/backend/conformance"
-	"github.com/steveyegge/beads/internal/storage"
+	"github.com/rhar1511/beads/backend/conformance"
+	"github.com/rhar1511/beads/internal/storage"
 )
 
 // TestConformance runs the backend-agnostic storage conformance suite

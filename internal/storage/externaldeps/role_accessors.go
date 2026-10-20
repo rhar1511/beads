@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/steveyegge/beads/internal/storage"
-	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/workapi"
-	"github.com/steveyegge/beads/internal/workapi/storereader"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/storage"
+	storageissueops "github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/workapi"
+	"github.com/rhar1511/beads/internal/workapi/storereader"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // IssueReader builds the read role on the policy store. In particular, Ready

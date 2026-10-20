@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/doltremote"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/doltremote"
 )
 
 // isGitRepo checks if the current working directory is in a git repository.

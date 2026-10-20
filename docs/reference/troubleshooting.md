@@ -13,7 +13,7 @@ Common issues and solutions. For step-by-step runbooks, see the
 ```bash
 # Check if installed
 which bd
-go list -f {{.Target}} github.com/steveyegge/beads/cmd/bd
+go list -f {{.Target}} github.com/rhar1511/beads/cmd/bd
 
 # Add Go bin to PATH (add to ~/.bashrc or ~/.zshrc)
 export PATH="$PATH:$(go env GOPATH)/bin"
@@ -55,16 +55,16 @@ ahead of a newer package-manager install. Choose one installation method
 CGO/SQLite compatibility issue:
 
 ```bash
-CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/steveyegge/beads/cmd/bd@latest
+CGO_ENABLED=1 GOFLAGS=-tags=gms_pure_go go install github.com/rhar1511/beads/cmd/bd@latest
 
-# Or if building from source
-git clone https://github.com/gastownhall/beads
+# Or build this fork from its source
+git clone https://github.com/rhar1511/beads
 cd beads
 CGO_ENABLED=1 go build -tags gms_pure_go -o bd ./cmd/bd
 sudo mv bd /usr/local/bin/
 ```
 
-Homebrew builds already enable CGO, so this shouldn't be necessary there. If
+Upstream Homebrew builds already enable CGO, so this shouldn't be necessary there. If
 you still see crashes with the Homebrew version, please
 [file an issue](https://github.com/gastownhall/beads/issues).
 

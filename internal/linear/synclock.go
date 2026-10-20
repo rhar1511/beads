@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/steveyegge/beads/internal/lockfile"
+	"github.com/rhar1511/beads/internal/lockfile"
 )
 
 const syncLockFilename = ".linear-sync.lock"

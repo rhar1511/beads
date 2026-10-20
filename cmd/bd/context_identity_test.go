@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/backends"
-	"github.com/steveyegge/beads/internal/storage/contextinfo"
-	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/backends"
+	"github.com/rhar1511/beads/internal/storage/contextinfo"
+	"github.com/rhar1511/beads/internal/storage/domain"
 )
 
 // TestContextRoutesNameOneWorkspaceTheSameWay.

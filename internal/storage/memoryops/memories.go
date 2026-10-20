@@ -38,8 +38,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
-	"github.com/steveyegge/beads/internal/storage/kvkeys"
+	"github.com/rhar1511/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/kvkeys"
 )
 
 // StorageKey encodes a user key as the config-table key it is stored under.

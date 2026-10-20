@@ -22,7 +22,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/steveyegge/beads/memoryops"
+	"github.com/rhar1511/beads/memoryops"
 )
 
 // nonSlugChars matches every run of characters a derived key collapses to a

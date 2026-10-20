@@ -30,7 +30,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/steveyegge/beads/internal/debug"
+	"github.com/rhar1511/beads/internal/debug"
 )
 
 // DefaultMaxLogBytes is the default size ceiling for dolt-server.log before

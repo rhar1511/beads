@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/steveyegge/beads/internal/configfile"
-	"github.com/steveyegge/beads/internal/storage/dolt"
+	"github.com/rhar1511/beads/internal/configfile"
+	"github.com/rhar1511/beads/internal/storage/dolt"
 )
 
 // SharedStore holds a single DoltStore open for the duration of a doctor run,

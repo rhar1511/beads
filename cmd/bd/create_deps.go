@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/steveyegge/beads/internal/config"
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/internal/utils"
-	"github.com/steveyegge/beads/issueops"
+	"github.com/rhar1511/beads/internal/config"
+	"github.com/rhar1511/beads/internal/storage"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/types"
+	"github.com/rhar1511/beads/internal/utils"
+	"github.com/rhar1511/beads/issueops"
 )
 
 // createDependencyRequests translates parsed --deps specs into the create

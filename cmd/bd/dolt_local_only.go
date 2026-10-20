@@ -1,6 +1,6 @@
 package main
 
-import "github.com/steveyegge/beads/internal/config"
+import "github.com/rhar1511/beads/internal/config"
 
 // isDoltLocalOnly reports whether this project has remote sync disabled via
 // the dolt.local-only config key. When true, bd dolt push, pull, and

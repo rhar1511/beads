@@ -9,8 +9,8 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
-	"github.com/steveyegge/beads/internal/storage/doltutil"
-	"github.com/steveyegge/beads/internal/testutil"
+	"github.com/rhar1511/beads/internal/storage/doltutil"
+	"github.com/rhar1511/beads/internal/testutil"
 )
 
 func TestEnsureMatchingCLIRemoteSurfacesValidationErrors(t *testing.T) {

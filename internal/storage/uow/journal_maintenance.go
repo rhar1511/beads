@@ -3,7 +3,7 @@ package uow
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/rhar1511/beads/internal/storage/issueops"
 )
 
 var _ issueops.EventsMaintenanceRunner = (*doltSQLProvider)(nil)

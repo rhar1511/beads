@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/steveyegge/beads/internal/templates"
+	"github.com/rhar1511/beads/internal/templates"
 )
 
 var (

@@ -18,8 +18,8 @@ package storage
 import (
 	"context"
 
-	"github.com/steveyegge/beads/internal/hooks"
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/hooks"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // HookFiringStore wraps a DoltStorage and fires hooks after mutations.

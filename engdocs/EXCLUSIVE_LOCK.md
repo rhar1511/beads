@@ -61,7 +61,7 @@ import (
     "encoding/json"
     "os"
     "path/filepath"
-    "github.com/steveyegge/beads/internal/types"
+    "github.com/rhar1511/beads/internal/types"
 )
 
 func acquireLock(beadsDir, holder, version string) error {

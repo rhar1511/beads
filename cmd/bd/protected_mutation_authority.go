@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/steveyegge/beads/internal/httpapi"
-	"github.com/steveyegge/beads/internal/protectedmutation"
-	"github.com/steveyegge/beads/internal/storage/domain"
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/httpapi"
+	"github.com/rhar1511/beads/internal/protectedmutation"
+	"github.com/rhar1511/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // This variable is a supervisor-owned startup input. Its absolute path may

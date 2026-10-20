@@ -14,7 +14,7 @@ import (
 
 	mysql "github.com/go-sql-driver/mysql"
 
-	"github.com/steveyegge/beads/internal/doltserver"
+	"github.com/rhar1511/beads/internal/doltserver"
 )
 
 // Circuit breaker states.

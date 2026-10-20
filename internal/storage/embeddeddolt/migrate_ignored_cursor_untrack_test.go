@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/dberrors"
-	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	"github.com/rhar1511/beads/internal/storage/dberrors"
+	"github.com/rhar1511/beads/internal/storage/embeddeddolt"
 )
 
 // These tests cover gastownhall/beads#4356 against the real engine: a database

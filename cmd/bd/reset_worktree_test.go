@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/beads"
-	"github.com/steveyegge/beads/internal/git"
+	"github.com/rhar1511/beads/internal/beads"
+	"github.com/rhar1511/beads/internal/git"
 )
 
 func TestReset_WorktreeFindsBeadsDir(t *testing.T) {

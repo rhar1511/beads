@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/steveyegge/beads/internal/types"
+	"github.com/rhar1511/beads/internal/types"
 )
 
 // importFixtureJSONL builds an export-shaped JSONL stream: an optional

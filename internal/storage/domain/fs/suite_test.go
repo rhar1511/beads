@@ -8,8 +8,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/steveyegge/beads/internal/git"
-	"github.com/steveyegge/beads/internal/storage/domain"
+	"github.com/rhar1511/beads/internal/git"
+	"github.com/rhar1511/beads/internal/storage/domain"
 )
 
 type testSuite struct {

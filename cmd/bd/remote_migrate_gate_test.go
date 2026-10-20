@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/steveyegge/beads/internal/storage/schema"
+	"github.com/rhar1511/beads/internal/storage/schema"
 )
 
 // TestHandleRemoteMigrateGateJSON_Shape verifies the JSON written to stderr has
