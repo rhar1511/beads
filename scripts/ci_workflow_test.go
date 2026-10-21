@@ -2,6 +2,9 @@ package scripts_test
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1362,4 +1365,155 @@ func captureOne(t *testing.T, pattern, body, source string) string {
 		t.Fatalf("%s does not match %s", source, pattern)
 	}
 	return matches[1]
+}
+
+// Main's broad integration shards intentionally withhold the Dolt opt-in. The
+// strict revision CLI fixture must have a mandatory destination that supplies
+// that opt-in only to its own roots, on PRs as well as accepted main.
+func TestNativeRevisionCLIContractsHaveMandatoryRoutes(t *testing.T) {
+	root := sourceRepoRoot(t)
+	readFile := func(t *testing.T, root, relative string) string {
+		t.Helper()
+		body, err := os.ReadFile(filepath.Join(root, relative))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	manifest := readFile(t, root, "scripts/ci/native-cli-contracts.txt")
+	// Derive the owner set from real fixture calls, so a renamed/new contract
+	// cannot inherit the ordinary no-Dolt route unnoticed.
+	want := map[string]bool{}
+	paths, err := filepath.Glob(filepath.Join(root, "cmd", "bd", "*_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range file.Decls {
+			fn, ok := declaration.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			usesFixture := false
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if ok {
+					if name, ok := call.Fun.(*ast.Ident); ok && name.Name == "newRevisionCLIFixture" {
+						usesFixture = true
+					}
+				}
+				return true
+			})
+			if usesFixture {
+				if fn.Recv != nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+					t.Fatalf("fixture call moved behind helper %s; classify its real owning roots before routing", fn.Name.Name)
+				}
+				want[fn.Name.Name] = true
+			}
+		}
+	}
+	got := map[string]bool{}
+	for _, name := range strings.Fields(manifest) {
+		if got[name] {
+			t.Fatalf("duplicate native contract root %q", name)
+		}
+		got[name] = true
+	}
+	if len(want) == 0 || !reflect.DeepEqual(got, want) {
+		t.Fatalf("native contract catalog=%v, want actual fixture owners %v", got, want)
+	}
+	// Whole-package measurements partition these names with -skip before
+	// requiring their separate native run. Refuse any cross-package collision
+	// rather than silently dropping a different package's similarly named test.
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && (strings.HasPrefix(entry.Name(), ".") || strings.HasPrefix(entry.Name(), "_") || entry.Name() == "node_modules" || entry.Name() == "vendor" || entry.Name() == "testdata") {
+				return filepath.SkipDir
+			}
+			if path != root {
+				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+					return filepath.SkipDir
+				} else if !os.IsNotExist(err) {
+					return err
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, "_test.go") || filepath.Dir(path) == filepath.Join(root, "cmd", "bd") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && got[fn.Name.Name] {
+				t.Errorf("native measurement exclusion would mask non-cmd/bd test %s in %s", fn.Name.Name, path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	measurements := readCIWorkflow(t, "ci-measurements.yml")
+	for _, jobID := range []string{"macos-candidates", "linux-integration", "linux-integration-sharded", "linux-integration-hybrid-cmd-bd", "linux-integration-hybrid-16-cmd-bd", "linux-integration-hybrid-prebuilt-cmd-bd", "linux-integration-coverage"} {
+		job := measurements.job(t, jobID)
+		stepName := "Measure commands"
+		if strings.Contains(jobID, "sharded") || strings.Contains(jobID, "-cmd-bd") {
+			stepName = "Measure shard"
+		}
+		step := job.step(t, stepName)
+		for _, need := range []string{"scripts/ci/native-cli-contracts.txt", "bash scripts/ci/run-native-cli-contracts.sh"} {
+			if !strings.Contains(step.Run, need) {
+				t.Errorf("measurement %s lacks mandatory native route %q", jobID, need)
+			}
+		}
+		if strings.Contains(jobID, "-cmd-bd") {
+			for _, need := range []string{"comm -12", "comm -23", "$ordinary_manifest", "$native_manifest", "env BEADS_TEST_SKIP=dolt gotestsum"} {
+				if !strings.Contains(step.Run, need) {
+					t.Errorf("measurement %s lacks exact shard partition %q", jobID, need)
+				}
+			}
+		} else if !strings.Contains(step.Run, "-skip ") || !strings.Contains(step.Run, "$native_skip_regex") {
+			t.Errorf("measurement %s does not partition ordinary/native roots", jobID)
+		}
+		if step.Env["BEADS_TEST_ENV_RUN_DOLT"] != "" || step.If != "" || step.ContinueOnError == true {
+			t.Errorf("measurement %s weakens or globally enables native route", jobID)
+		}
+		if jobID != "linux-integration-hybrid-prebuilt-cmd-bd" && (!strings.Contains(step.Run, "go build -tags") || !strings.Contains(step.Run, "export BEADS_TEST_BD_BINARY=")) {
+			t.Errorf("measurement %s lacks explicit exact-source CLI producer", jobID)
+		}
+	}
+	main := readCIWorkflow(t, "main.yml").job(t, "main-linux-integration-cmd-bd").step(t, "Test cmd/bd shard")
+	for _, required := range []string{"comm -12", "comm -23", "env BEADS_TEST_SKIP=dolt gotestsum", "bash scripts/ci/run-native-cli-contracts.sh"} {
+		if !strings.Contains(main.Run, required) {
+			t.Errorf("Main shard lacks mandatory partition/route %q", required)
+		}
+	}
+	if main.Env["BEADS_TEST_ENV_RUN_DOLT"] != "" {
+		t.Error("real Dolt opt-in escaped into the whole ordinary shard")
+	}
+	fork := readCIWorkflow(t, "fork-module-qualification.yml").job(t, "normal-baseline").step(t, "Require native revision preview and SourceSnapshot CLI contracts")
+	for _, required := range []string{"go build -tags", "BEADS_TEST_BD_BINARY=", "bash scripts/ci/run-native-cli-contracts.sh", "scripts/ci/native-cli-contracts.txt"} {
+		if !strings.Contains(fork.Run, required) {
+			t.Errorf("PR qualification lacks exact-source native route %q", required)
+		}
+	}
+	if fork.If != "" || fork.ContinueOnError == true {
+		t.Error("mandatory native PR step may not be conditional or best effort")
+	}
+	runner := readFile(t, root, "scripts/ci/run-native-cli-contracts.sh")
+	for _, required := range []string{"set -euo pipefail", "env BEADS_TEST_ENV_RUN_DOLT=1 BEADS_TEST_PROXIED_LOCAL=1 BEADS_TEST_SKIP=", "go test -json -race -tags integration,gms_pure_go -count=1", "audit-native-cli-contracts.py audit"} {
+		if !strings.Contains(runner, required) {
+			t.Errorf("native runner lacks hard execution/audit boundary %q", required)
+		}
+	}
 }

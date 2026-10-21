@@ -261,6 +261,17 @@ jobs:
               real_dolt_selected_skips=0, per_package_timeout='normal unchanged 25m',
               normal_skip_policy=normal['skip_policy'], all_leaf_skips_enumerated=False), indent=2) + '\n')
           PY_AUDIT
+      - name: Require native revision preview and SourceSnapshot CLI contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          source ./.buildflags
+          output="$RUNNER_TEMP/fork-module-baseline/native-cli-contracts"
+          mkdir -p "$output"
+          go build -tags "$BEADS_BUILD_TAGS" -o "$output/bd" ./cmd/bd
+          export BEADS_TEST_BD_BINARY="$output/bd"
+          bash scripts/ci/run-native-cli-contracts.sh \
+            scripts/ci/native-cli-contracts.txt "$output"
       - name: Retain exact baseline evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

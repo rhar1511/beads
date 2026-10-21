@@ -873,12 +873,29 @@ jobs:
             exit 0
           fi
 
-          run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
-          ci_time "main linux integration cmd/bd shard ${SHARD}/${TOTAL_SHARDS} go test" -- \
-            env BEADS_TEST_SKIP=dolt gotestsum \
-              --junitfile "artifacts/main-linux-integration-cmd-bd-${SHARD}-of-${TOTAL_SHARDS}.xml" \
-              --format testdox \
-              -- -v -race -tags=integration,gms_pure_go -timeout=30m -run "$run_regex" ./cmd/bd
+          native_catalog=scripts/ci/native-cli-contracts.txt
+          test -s "$native_catalog"
+          native_manifest="artifacts/native-cli-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          regular_manifest="artifacts/regular-cli-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          # comm partitions the original manifest; neither destination drops a test.
+          LC_ALL=C sort -u "$test_manifest" > artifacts/shard-sorted.txt
+          LC_ALL=C sort -u "$native_catalog" > artifacts/native-sorted.txt
+          LC_ALL=C comm -12 artifacts/shard-sorted.txt artifacts/native-sorted.txt > "$native_manifest"
+          LC_ALL=C comm -23 artifacts/shard-sorted.txt artifacts/native-sorted.txt > "$regular_manifest"
+          mapfile -t regular_tests < "$regular_manifest"
+          if (( ${#regular_tests[@]} )); then
+            run_regex="^($(IFS='|'; echo "${regular_tests[*]}"))$"
+            ci_time "main linux integration cmd/bd shard ${SHARD}/${TOTAL_SHARDS} go test" -- \
+              env BEADS_TEST_SKIP=dolt gotestsum \
+                --junitfile "artifacts/main-linux-integration-cmd-bd-${SHARD}-of-${TOTAL_SHARDS}.xml" \
+                --format testdox \
+                -- -v -race -tags=integration,gms_pure_go -timeout=30m -run "$run_regex" ./cmd/bd
+          fi
+          if [[ -s "$native_manifest" ]]; then
+            ci_time "mandatory native CLI contracts shard ${SHARD}/${TOTAL_SHARDS}" -- \
+              bash scripts/ci/run-native-cli-contracts.sh "$native_manifest" \
+                "artifacts/native-cli-${SHARD}-of-${TOTAL_SHARDS}"
+          fi
 
       - name: Upload integration artifacts
         if: always()
