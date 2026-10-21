@@ -163,11 +163,27 @@ jobs:
         run: |
           set -euo pipefail
           source scripts/ci/lib/timing.sh
+          native_skip_regex="^($(paste -sd '|' scripts/ci/native-cli-contracts.txt))$"
 
           status=0
           ci_time "macos no-short go test" -- go test -tags=gms_pure_go -v -race -timeout=30m -skip '^TestEmbedded' ./... || status=$?
-          ci_time "macos integration go test" -- go test -tags=integration,gms_pure_go -v -race -timeout=30m -skip '^TestEmbedded' ./... || status=$?
+          ci_time "macos integration go test" -- go test -tags=integration,gms_pure_go -v -race -timeout=30m -skip "^TestEmbedded|$native_skip_regex" ./... || status=$?
+          source ./.buildflags
+          native_binary_dir="$RUNNER_TEMP/native-cli-${SHARD:-whole}"
+          mkdir -p "$native_binary_dir"
+          ci_time "build exact native CLI" -- go build -tags "$BEADS_BUILD_TAGS" -o "$native_binary_dir/bd" ./cmd/bd
+          export BEADS_TEST_BD_BINARY="$native_binary_dir/bd"
+          ci_time "strict native CLI contracts" -- bash scripts/ci/run-native-cli-contracts.sh scripts/ci/native-cli-contracts.txt artifacts/native-cli || status=$?
           exit "$status"
+
+      - name: Upload native CLI evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ci-measure-macos-native-cli
+          path: artifacts/native-cli/
+          retention-days: 7
+          if-no-files-found: ignore
 
   linux-integration:
     name: Measure Linux integration tests
@@ -197,9 +213,17 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           source scripts/ci/lib/timing.sh
+          native_skip_regex="^($(paste -sd '|' scripts/ci/native-cli-contracts.txt))$"
 
           ci_time "install gotestsum" -- go install gotest.tools/gotestsum@v1.13.0
-          ci_time "linux integration go test" -- env BEADS_TEST_SKIP=dolt gotestsum --junitfile artifacts/linux-integration-junit.xml --format testdox -- -v -race -tags=integration,gms_pure_go -timeout=30m ./...
+          ci_time "linux integration go test" -- env BEADS_TEST_SKIP=dolt gotestsum --junitfile artifacts/linux-integration-junit.xml --format testdox -- -v -race -tags=integration,gms_pure_go -timeout=30m -skip "$native_skip_regex" ./...
+
+          source ./.buildflags
+          native_binary_dir="$RUNNER_TEMP/native-cli-${SHARD:-whole}"
+          mkdir -p "$native_binary_dir"
+          ci_time "build exact native CLI" -- go build -tags "$BEADS_BUILD_TAGS" -o "$native_binary_dir/bd" ./cmd/bd
+          export BEADS_TEST_BD_BINARY="$native_binary_dir/bd"
+          ci_time "strict native CLI contracts" -- bash scripts/ci/run-native-cli-contracts.sh scripts/ci/native-cli-contracts.txt artifacts/native-cli
 
       - name: Upload measurement artifacts
         if: always()
@@ -245,6 +269,7 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           source scripts/ci/lib/timing.sh
+          native_skip_regex="^($(paste -sd '|' scripts/ci/native-cli-contracts.txt))$"
 
           ci_time "install gotestsum" -- go install gotest.tools/gotestsum@v1.13.0
 
@@ -264,7 +289,16 @@ jobs:
             env BEADS_TEST_SKIP=dolt gotestsum \
               --junitfile "artifacts/linux-integration-shard-${SHARD}-of-${TOTAL_SHARDS}.xml" \
               --format testdox \
-              -- -v -race -tags=integration,gms_pure_go -timeout=30m "${packages[@]}"
+              -- -v -race -tags=integration,gms_pure_go -timeout=30m -skip "$native_skip_regex" "${packages[@]}"
+
+          if [[ " ${packages[*]} " == *" github.com/rhar1511/beads/cmd/bd "* ]]; then
+            source ./.buildflags
+            native_binary_dir="$RUNNER_TEMP/native-cli-${SHARD:-whole}"
+            mkdir -p "$native_binary_dir"
+            ci_time "build exact native CLI" -- go build -tags "$BEADS_BUILD_TAGS" -o "$native_binary_dir/bd" ./cmd/bd
+            export BEADS_TEST_BD_BINARY="$native_binary_dir/bd"
+            ci_time "strict native CLI contracts" -- bash scripts/ci/run-native-cli-contracts.sh scripts/ci/native-cli-contracts.txt artifacts/native-cli
+          fi
 
       - name: Upload measurement artifacts
         if: always()
@@ -388,19 +422,28 @@ jobs:
           }
           ci_time "list cmd/bd test shard ${SHARD}/${TOTAL_SHARDS}" -- write_test_manifest
           cat "$test_manifest"
-          mapfile -t tests < "$test_manifest"
+          native_manifest="artifacts/native-cli-tests-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          ordinary_manifest="artifacts/ordinary-cli-tests-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          comm -12 <(sort "$test_manifest") <(sort scripts/ci/native-cli-contracts.txt) > "$native_manifest"
+          comm -23 <(sort "$test_manifest") <(sort scripts/ci/native-cli-contracts.txt) > "$ordinary_manifest"
+          mapfile -t tests < "$ordinary_manifest"
 
-          if [[ "${#tests[@]}" -eq 0 ]]; then
-            echo "No tests assigned to shard ${SHARD}/${TOTAL_SHARDS}; skipping go test"
-            exit 0
-          fi
-
-          run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
+          if [[ "${#tests[@]}" -gt 0 ]]; then
+            run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
           ci_time "linux integration cmd/bd shard ${SHARD}/${TOTAL_SHARDS} go test" -- \
             env BEADS_TEST_SKIP=dolt gotestsum \
               --junitfile "artifacts/linux-integration-cmd-bd-${SHARD}-of-${TOTAL_SHARDS}.xml" \
               --format testdox \
               -- -v -race -tags=integration,gms_pure_go -timeout=30m -run "$run_regex" ./cmd/bd
+          fi
+          if [[ -s "$native_manifest" ]]; then
+            source ./.buildflags
+            native_binary_dir="$RUNNER_TEMP/native-cli-${SHARD:-whole}"
+            mkdir -p "$native_binary_dir"
+            ci_time "build exact native CLI" -- go build -tags "$BEADS_BUILD_TAGS" -o "$native_binary_dir/bd" ./cmd/bd
+            export BEADS_TEST_BD_BINARY="$native_binary_dir/bd"
+            ci_time "strict native CLI shard ${SHARD}/${TOTAL_SHARDS}" -- bash scripts/ci/run-native-cli-contracts.sh "$native_manifest" "artifacts/native-cli-${SHARD}-of-${TOTAL_SHARDS}"
+          fi
 
       - name: Upload measurement artifacts
         if: always()
@@ -456,19 +499,28 @@ jobs:
           }
           ci_time "list cmd/bd test shard ${SHARD}/${TOTAL_SHARDS}" -- write_test_manifest
           cat "$test_manifest"
-          mapfile -t tests < "$test_manifest"
+          native_manifest="artifacts/native-cli-tests-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          ordinary_manifest="artifacts/ordinary-cli-tests-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          comm -12 <(sort "$test_manifest") <(sort scripts/ci/native-cli-contracts.txt) > "$native_manifest"
+          comm -23 <(sort "$test_manifest") <(sort scripts/ci/native-cli-contracts.txt) > "$ordinary_manifest"
+          mapfile -t tests < "$ordinary_manifest"
 
-          if [[ "${#tests[@]}" -eq 0 ]]; then
-            echo "No tests assigned to shard ${SHARD}/${TOTAL_SHARDS}; skipping go test"
-            exit 0
-          fi
-
-          run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
+          if [[ "${#tests[@]}" -gt 0 ]]; then
+            run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
           ci_time "linux integration cmd/bd shard ${SHARD}/${TOTAL_SHARDS} go test" -- \
             env BEADS_TEST_SKIP=dolt gotestsum \
               --junitfile "artifacts/linux-integration-cmd-bd-${SHARD}-of-${TOTAL_SHARDS}.xml" \
               --format testdox \
               -- -v -race -tags=integration,gms_pure_go -timeout=30m -run "$run_regex" ./cmd/bd
+          fi
+          if [[ -s "$native_manifest" ]]; then
+            source ./.buildflags
+            native_binary_dir="$RUNNER_TEMP/native-cli-${SHARD:-whole}"
+            mkdir -p "$native_binary_dir"
+            ci_time "build exact native CLI" -- go build -tags "$BEADS_BUILD_TAGS" -o "$native_binary_dir/bd" ./cmd/bd
+            export BEADS_TEST_BD_BINARY="$native_binary_dir/bd"
+            ci_time "strict native CLI shard ${SHARD}/${TOTAL_SHARDS}" -- bash scripts/ci/run-native-cli-contracts.sh "$native_manifest" "artifacts/native-cli-${SHARD}-of-${TOTAL_SHARDS}"
+          fi
 
       - name: Upload measurement artifacts
         if: always()
@@ -563,19 +615,23 @@ jobs:
           }
           ci_time "list cmd/bd test shard ${SHARD}/${TOTAL_SHARDS}" -- write_test_manifest
           cat "$test_manifest"
-          mapfile -t tests < "$test_manifest"
+          native_manifest="artifacts/native-cli-tests-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          ordinary_manifest="artifacts/ordinary-cli-tests-${SHARD}-of-${TOTAL_SHARDS}.txt"
+          comm -12 <(sort "$test_manifest") <(sort scripts/ci/native-cli-contracts.txt) > "$native_manifest"
+          comm -23 <(sort "$test_manifest") <(sort scripts/ci/native-cli-contracts.txt) > "$ordinary_manifest"
+          mapfile -t tests < "$ordinary_manifest"
 
-          if [[ "${#tests[@]}" -eq 0 ]]; then
-            echo "No tests assigned to shard ${SHARD}/${TOTAL_SHARDS}; skipping go test"
-            exit 0
-          fi
-
-          run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
+          if [[ "${#tests[@]}" -gt 0 ]]; then
+            run_regex="^($(IFS='|'; echo "${tests[*]}"))$"
           ci_time "linux integration prebuilt cmd/bd shard ${SHARD}/${TOTAL_SHARDS} go test" -- \
             env BEADS_TEST_SKIP=dolt gotestsum \
               --junitfile "artifacts/linux-integration-prebuilt-cmd-bd-${SHARD}-of-${TOTAL_SHARDS}.xml" \
               --format testdox \
               -- -v -race -tags=integration,gms_pure_go -timeout=30m -run "$run_regex" ./cmd/bd
+          fi
+          if [[ -s "$native_manifest" ]]; then
+            ci_time "strict native CLI shard ${SHARD}/${TOTAL_SHARDS}" -- bash scripts/ci/run-native-cli-contracts.sh "$native_manifest" "artifacts/native-cli-${SHARD}-of-${TOTAL_SHARDS}"
+          fi
 
       - name: Upload measurement artifacts
         if: always()
@@ -614,15 +670,24 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           source scripts/ci/lib/timing.sh
+          native_skip_regex="^($(paste -sd '|' scripts/ci/native-cli-contracts.txt))$"
 
           ci_time "install gotestsum" -- go install gotest.tools/gotestsum@v1.13.0
           status=0
-          ci_time "linux integration coverage go test" -- env BEADS_TEST_SKIP=dolt gotestsum --junitfile artifacts/linux-integration-coverage-junit.xml --format testdox -- -v -race -tags=integration,gms_pure_go -coverprofile=artifacts/coverage.out -timeout=30m ./... || status=$?
+          ci_time "linux integration coverage go test" -- env BEADS_TEST_SKIP=dolt gotestsum --junitfile artifacts/linux-integration-coverage-junit.xml --format testdox -- -v -race -tags=integration,gms_pure_go -coverprofile=artifacts/coverage.out -timeout=30m -skip "$native_skip_regex" ./... || status=$?
           if [[ -f artifacts/coverage.out ]]; then
             ci_time "coverage summary" -- go tool cover -func=artifacts/coverage.out || status=$?
           else
             echo "coverage.out was not generated; skipping coverage summary"
           fi
+
+          source ./.buildflags
+          native_binary_dir="$RUNNER_TEMP/native-cli-${SHARD:-whole}"
+          mkdir -p "$native_binary_dir"
+          ci_time "build exact native CLI" -- go build -tags "$BEADS_BUILD_TAGS" -o "$native_binary_dir/bd" ./cmd/bd
+          export BEADS_TEST_BD_BINARY="$native_binary_dir/bd"
+          echo "Coverage describes ordinary package tests; strict native CLI contracts have separate zero-skip evidence."
+          ci_time "strict native CLI contracts" -- bash scripts/ci/run-native-cli-contracts.sh scripts/ci/native-cli-contracts.txt artifacts/native-cli || status=$?
           exit "$status"
 
       - name: Upload measurement artifacts
