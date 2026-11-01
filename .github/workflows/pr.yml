@@ -5,7 +5,7 @@ on:
     # release/** is here because release-prep and release-fix PRs are based on
     # the release branch, not on main. Without it they run almost no CI and the
     # first full signal is the tag build, where a failure burns the tag.
-    branches: [ main, 'release/**' ]
+    branches: [ main, 'release/**', 'hotfix/**' ]
   merge_group:
 
 concurrency:
@@ -1102,14 +1102,20 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
+      # golangci/golangci-lint-action is not on this repository's allowed-actions
+      # list, so a workflow that names it fails at startup. Install the pinned
+      # release binary (the same script main uses) and report only issues new
+      # relative to the PR base, as only-new-issues did.
+      - name: Install golangci-lint
+        run: ./scripts/ci/install-golangci-lint.sh
+
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         env:
           GOWORK: "off"
-        with:
-          version: v2.10.1
-          only-new-issues: true
-          args: --config=.golangci.yml --modules-download-mode=readonly --timeout=5m --build-tags=gms_pure_go
+          NEW_FROM_REV: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: >-
+          golangci-lint run --config=.golangci.yml --modules-download-mode=readonly
+          --timeout=5m --build-tags=gms_pure_go --new-from-rev="$NEW_FROM_REV"
 
   windows-make-shell:
     name: Windows Make shell (${{ matrix.host }})

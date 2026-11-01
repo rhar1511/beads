@@ -77,3 +77,26 @@ published-release documentation.
 Binary rollout, production configuration and ordinary worker admission are
 separate downstream operations. Preserve original source custody and manual
 holds until their exact qualification and rollout gates pass.
+
+## Integrating upstream stable v1.3.2
+
+The upstream stable tag resolves to
+`9b65b9e198acbcc98e7fd3a87a5d55baa065a572`. Incorporating that source is
+separate from the earlier owner-fork packaging that already used the version
+number `1.3.2`. Preserve the existing owner tag and its source/proxy content;
+never move it to this integration or infer that the old fork artifact contains
+the later upstream fixes. A new source commit needs its own qualification and
+publication record.
+
+This integration retains `github.com/rhar1511/beads`, conditional and signed
+mutation contracts, protected references, and the fork's historical migration
+bytes and schema cursors 73/28. It incorporates upstream's purge retention and
+confirmation fixes, backup watermark ordering, post-commit blocked rechecks,
+least-privilege branch selection, duplicate-ID batching, and dependency
+security updates. No production store migration or binary rollout is implied.
+
+The Go floor is 1.26.10. The previous `nixos-25.11` input still selected
+Go 1.26.4, and `default.nix` adapts `go.mod` to that compiler. Refresh the
+input to `nixos-26.05` and bind the actual selected compiler and dependency
+hash during qualification; a native Go test pass alone cannot qualify Nix.
+The upstream-targeted flake-update workflow is not a fork publication path.

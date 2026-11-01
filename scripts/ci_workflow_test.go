@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,6 +35,46 @@ func TestCIWorkflowArtifactOwnership(t *testing.T) {
 
 			assertJobRunsExactly(t, workflow.job(t, "pr-policy-wrapper"), "make ci-pr-policy")
 			assertJobRunsExactly(t, workflow.job(t, "pr-lint-wrapper"), "make ci-pr-lint")
+		})
+	}
+}
+
+// TestPullRequestWorkflowsTriggerOnHotfixBranches is the #7148 regression.
+// pr.yml's own comment states why release/** is in the pull_request
+// trigger: "release-prep and release-fix PRs are based on the release
+// branch, not on main. Without it they run almost no CI and the first
+// full signal is the tag build, where a failure burns the tag." A hotfix
+// backport PR (hotfix/1.3.1 and its siblings) is in exactly that position
+// — based on a branch other than main — so it needs the same trigger,
+// alongside release/**, not instead of it.
+func TestPullRequestWorkflowsTriggerOnHotfixBranches(t *testing.T) {
+	type triggers struct {
+		On struct {
+			PullRequest struct {
+				Branches []string `yaml:"branches"`
+			} `yaml:"pull_request"`
+		} `yaml:"on"`
+	}
+	root := sourceRepoRoot(t)
+	for _, name := range []string{
+		"pr.yml", "pr-risk.yml", "conformance.yml", "cross-version-smoke.yml", "regression.yml",
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(root, ".github", "workflows", name))
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			var doc triggers
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				t.Fatal(err)
+			}
+			branches := doc.On.PullRequest.Branches
+			if !slices.Contains(branches, "release/**") {
+				t.Fatalf("%s pull_request.branches = %v, want release/** present (this test asserts the baseline it extends)", name, branches)
+			}
+			if !slices.Contains(branches, "hotfix/**") {
+				t.Errorf("%s pull_request.branches = %v, want hotfix/** alongside release/** — a hotfix backport PR is based on a branch other than main, same as a release-prep PR", name, branches)
+			}
 		})
 	}
 }
